@@ -1,4 +1,6 @@
-use crate::service::{AskRequest, AskResponse, Service, ServiceError};
+use crate::service::{
+    AskRequest, AskResponse, Service, ServiceError, TriageRequest, TriageResponse,
+};
 use axum::{
     Json, Router,
     extract::State,
@@ -12,6 +14,7 @@ use std::sync::Arc;
 pub fn router(service: Arc<Service>) -> Router {
     Router::new()
         .route("/v1/ask", post(ask))
+        .route("/v1/triage", post(triage))
         .route("/healthz", get(|| async { "ok" }))
         .with_state(service)
 }
@@ -21,6 +24,13 @@ async fn ask(
     Json(req): Json<AskRequest>,
 ) -> Result<Json<AskResponse>, ServiceError> {
     service.ask(req).await.map(Json)
+}
+
+async fn triage(
+    State(service): State<Arc<Service>>,
+    Json(req): Json<TriageRequest>,
+) -> Result<Json<TriageResponse>, ServiceError> {
+    service.triage(req).await.map(Json)
 }
 
 impl IntoResponse for ServiceError {

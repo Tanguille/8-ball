@@ -307,3 +307,33 @@ async fn live_embed() {
     );
     assert!(storage > soup);
 }
+
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_triage_with_prefilter() {
+    use eightball::service::{Service, TriageRequest};
+    require(9931).await;
+    require(9932).await;
+    let config = dev_config();
+    let endpoints = config
+        .endpoints
+        .iter()
+        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .collect();
+    let service = Service::new(config, endpoints);
+    let req: TriageRequest=serde_json::from_value(json!({"items":[
+        "The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.",
+        "A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."
+    ],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5})).unwrap();
+    let result = service.triage(req).await.unwrap();
+    eprintln!("prefilter triage: {result:?}");
+    assert_eq!(
+        result
+            .kept
+            .iter()
+            .map(|item| item.index)
+            .collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert!(result.warning.is_none());
+}

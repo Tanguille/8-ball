@@ -1445,6 +1445,8 @@ Tests:
 - `cosine([1,0],[1,0]) == 1` and `cosine([1,0],[0,1]) == 0`.
 
 #### Step 6: Triage (tests first)
+
+**Execution status:** Complete; seven mock/CLI tests and real prefilter test pass; full evidence in report.
 `Service::triage(req: TriageRequest) -> Result<TriageResponse, ServiceError>` does these steps in order:
 1. If `items.len() > 64`, return `BadRequest("at most 64 items")`.
 2. Exactly one of `spec` and `question` must be set. Otherwise return `BadRequest`. `spec` returns `BadRequest("specs arrive in chunk 3")` until Chunk 3.

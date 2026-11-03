@@ -51,6 +51,24 @@ enum Command {
         #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
         url: String,
     },
+    /// Judge a JSON array from stdin.
+    Triage {
+        instructions: String,
+        #[arg(long = "type", default_value = "noul", value_parser = ["noul", "choice", "score"])]
+        kind: String,
+        #[arg(long = "option")]
+        options: Vec<String>,
+        #[arg(long = "level")]
+        levels: Vec<String>,
+        #[arg(long)]
+        keep: Option<String>,
+        #[arg(long)]
+        top_k: Option<usize>,
+        #[arg(long)]
+        endpoint: Option<String>,
+        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
+        url: String,
+    },
     /// Validate a config file.
     Config {
         #[command(subcommand)]
@@ -83,25 +101,7 @@ async fn main() {
 async fn run() -> anyhow::Result<i32> {
     match Cli::parse().command {
         Command::Serve { config, listen } => {
-            let config = Config::load(&config.unwrap_or_else(default_config_path))?;
-            let endpoints = config
-                .endpoints
-                .iter()
-                .map(|(name, cfg)| {
-                    let key = cfg
-                        .api_key_env
-                        .as_ref()
-                        .and_then(|name| std::env::var(name).ok());
-                    Ok((name.clone(), Endpoint::new(name, cfg, key)?))
-                })
-                .collect::<Result<IndexMap<_, _>, eightball::backend::BackendError>>()?;
-            let service = Arc::new(Service::new(config, endpoints));
-            let listener = tokio::net::TcpListener::bind(&listen).await?;
-            let addr = listener.local_addr()?;
-            tracing::info!("listening on {addr}");
-            axum::serve(listener, router(service))
-                .with_graceful_shutdown(shutdown())
-                .await?;
+            serve(config, listen).await?;
             Ok(0)
         }
         Command::Ask {
@@ -114,28 +114,8 @@ async fn run() -> anyhow::Result<i32> {
             exit_code,
             url,
         } => {
-            let kind = match kind.as_str() {
-                "noul" => Kind::Noul { criteria: None },
-                "choice" => Kind::Choice {
-                    criteria: options
-                        .into_iter()
-                        .map(|s| {
-                            s.split_once('=').map_or_else(
-                                || (s.clone(), String::new()),
-                                |(a, b)| (a.into(), b.into()),
-                            )
-                        })
-                        .collect(),
-                },
-                "score" => Kind::Score { criteria: levels },
-                _ => unreachable!("clap validates kind"),
-            };
-            let noul = matches!(kind, Kind::Noul { .. });
-            let q = Question {
-                id: "q".into(),
-                instructions,
-                kind,
-            };
+            let q = make_question(&kind, instructions, options, levels);
+            let noul = matches!(q.kind, Kind::Noul { .. });
             let state = if let Some(state) = state {
                 state
             } else {
@@ -143,16 +123,12 @@ async fn run() -> anyhow::Result<i32> {
                 std::io::stdin().read_to_string(&mut s)?;
                 s
             };
-            let response = reqwest::Client::new()
-                .post(format!("{}/v1/ask", url.trim_end_matches('/')))
-                .json(&json!({"state":state,"questions":[q],"endpoint":endpoint}))
-                .send()
-                .await?;
-            let status = response.status();
-            let body: Value = response.json().await?;
-            if !status.is_success() {
-                anyhow::bail!("{}", body["error"].as_str().unwrap_or("request failed"));
-            }
+            let body = post_json(
+                &url,
+                "/v1/ask",
+                &json!({"state":state,"questions":[q],"endpoint":endpoint}),
+            )
+            .await?;
             println!("{body}");
             let verdict = body["results"][0]["verdict"].as_str().unwrap_or("unsure");
             Ok(if !exit_code {
@@ -162,6 +138,29 @@ async fn run() -> anyhow::Result<i32> {
             } else {
                 i32::from(noul && verdict == "no")
             })
+        }
+        Command::Triage {
+            instructions,
+            kind,
+            options,
+            levels,
+            keep,
+            top_k,
+            endpoint,
+            url,
+        } => {
+            let q = make_question(&kind, instructions, options, levels);
+            let mut input = String::new();
+            std::io::stdin().read_to_string(&mut input)?;
+            let items: Vec<Value> = serde_json::from_str(&input)?;
+            let body = post_json(
+                &url,
+                "/v1/triage",
+                &json!({"items":items,"question":q,"keep":keep,"top_k":top_k,"endpoint":endpoint}),
+            )
+            .await?;
+            println!("{body}");
+            Ok(0)
         }
         Command::Config {
             action: ConfigAction::Check { path },
@@ -177,4 +176,68 @@ async fn shutdown() {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("SIGTERM handler");
     tokio::select! { _=tokio::signal::ctrl_c()=>{},_=terminate.recv()=>{} }
+}
+
+async fn serve(config: Option<PathBuf>, listen: String) -> anyhow::Result<()> {
+    let config = Config::load(&config.unwrap_or_else(default_config_path))?;
+    let endpoints = config
+        .endpoints
+        .iter()
+        .map(|(name, cfg)| {
+            let key = cfg
+                .api_key_env
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok());
+            Ok((name.clone(), Endpoint::new(name, cfg, key)?))
+        })
+        .collect::<Result<IndexMap<_, _>, eightball::backend::BackendError>>()?;
+    let service = Arc::new(Service::new(config, endpoints));
+    let listener = tokio::net::TcpListener::bind(&listen).await?;
+    let addr = listener.local_addr()?;
+    tracing::info!("listening on {addr}");
+    axum::serve(listener, router(service))
+        .with_graceful_shutdown(shutdown())
+        .await?;
+    Ok(())
+}
+
+fn make_question(
+    kind: &str,
+    instructions: String,
+    options: Vec<String>,
+    levels: Vec<String>,
+) -> Question {
+    let kind = match kind {
+        "noul" => Kind::Noul { criteria: None },
+        "choice" => Kind::Choice {
+            criteria: options
+                .into_iter()
+                .map(|s| {
+                    s.split_once('=')
+                        .map_or_else(|| (s.clone(), String::new()), |(a, b)| (a.into(), b.into()))
+                })
+                .collect(),
+        },
+        "score" => Kind::Score { criteria: levels },
+        _ => unreachable!("clap validates kind"),
+    };
+    Question {
+        id: "q".into(),
+        instructions,
+        kind,
+    }
+}
+
+async fn post_json(url: &str, path: &str, body: &Value) -> anyhow::Result<Value> {
+    let response = reqwest::Client::new()
+        .post(format!("{}{path}", url.trim_end_matches('/')))
+        .json(body)
+        .send()
+        .await?;
+    let status = response.status();
+    let body: Value = response.json().await?;
+    if !status.is_success() {
+        anyhow::bail!("{}", body["error"].as_str().unwrap_or("request failed"));
+    }
+    Ok(body)
 }
