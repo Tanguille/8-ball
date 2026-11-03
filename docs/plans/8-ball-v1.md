@@ -2247,6 +2247,8 @@ Remove every hooks, commands and `headersHelper` entry.
 Then test with a local keyless `8ball serve`. Check that a header of `Bearer ` with an empty key doesn't break the call, because no key is configured, so the middleware lets everything through.
 
 #### Step 3: `plugin/skills/8-ball/SKILL.md`
+
+**Execution status:** Complete; copied the supplied 35-line skill template. Strict manifest validation passes; directory metadata warnings are addressed in steps 4–5. The Python example returns yes against the real greeting spec and error against an unreachable server.
 ````markdown
 ---
 name: 8-ball
