@@ -2185,3 +2185,299 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; fin
 ```
 
 `cargo fmt --all` passed. The full live suite passes: 11 passed, 0 skipped; mock suite: 44 passed, 11 intentionally ignored. Greetings: 0.9984586771 and 0.9988069426; non-greetings: 0.0698169158 and 0.4719876966. Both strict ranking and every argmax assertion pass. Chunk 2 step 3 is now complete; continuing with step 4.
+
+### Chunk 2 step 4: rerank backend
+
+```text
+$ cargo nextest run --test rerank (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.38s
+────────────
+ Nextest run ID a208e23f-db19-4af6-841c-0c1e59d2fd42 with nextest profile: default
+    Starting 2 tests across 1 binary
+        FAIL [   0.019s] (1/2) eightball::rerank choice_is_rejected
+  stdout ───
+
+    running 1 test
+    test choice_is_rejected ... FAILED
+
+    failures:
+
+    failures:
+        choice_is_rejected
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.02s
+
+  stderr ───
+
+    thread 'choice_is_rejected' (368) panicked at tests/rerank.rs:25:5:
+    assertion failed: ep.ask("hi",
+                        &[q]).await.unwrap_err().to_string().contains("rerank answers noul questions only")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  Cancelling due to test failure: 1 test still running
+        FAIL [   0.020s] (2/2) eightball::rerank score_is_mapped_from_logit
+  stdout ───
+
+    running 1 test
+    test score_is_mapped_from_logit ... FAILED
+
+    failures:
+
+    failures:
+        score_is_mapped_from_logit
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.02s
+
+  stderr ───
+
+    thread 'score_is_mapped_from_logit' (367) panicked at tests/rerank.rs:12:48:
+    called `Result::unwrap()` on an `Err` value: BackendError("backend implementation arrives in subsequent steps")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+────────────
+     Summary [   0.020s] 2 tests run: 0 passed, 2 failed, 0 skipped
+        FAIL [   0.019s] (1/2) eightball::rerank choice_is_rejected
+        FAIL [   0.020s] (2/2) eightball::rerank score_is_mapped_from_logit
+error: test run failed
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only -E test(live_rerank_relevance) (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
+────────────
+ Nextest run ID 90e7d144-5014-4576-981f-5257454016cb with nextest profile: default
+    Starting 1 test across 1 binary (11 tests skipped)
+       START [         ] (1/1) eightball::live live_rerank_relevance
+
+running 1 test
+
+thread 'live_rerank_relevance' (228) panicked at tests/live.rs:272:64:
+called `Result::unwrap()` on an `Err` value: BackendError("backend implementation arrives in subsequent steps")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test live_rerank_relevance ... FAILED
+
+failures:
+
+failures:
+    live_rerank_relevance
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.04s
+
+        FAIL [   0.046s] (1/1) eightball::live live_rerank_relevance
+  Cancelling due to test failure
+────────────
+     Summary [   0.046s] 1 test run: 0 passed, 1 failed, 11 skipped
+        FAIL [   0.046s] (1/1) eightball::live live_rerank_relevance
+error: test run failed
+```
+
+```text
+$ cargo nextest run --test rerank (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.72s
+────────────
+ Nextest run ID c29f34df-cc05-4686-8638-4a5079bbdb8d with nextest profile: default
+    Starting 2 tests across 1 binary
+        PASS [   0.022s] (1/2) eightball::rerank choice_is_rejected
+        PASS [   0.023s] (2/2) eightball::rerank score_is_mapped_from_logit
+────────────
+     Summary [   0.023s] 2 tests run: 2 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.72s
+────────────
+ Nextest run ID f47f621d-d2a7-4b97-bdae-a53ec8bffa0b with nextest profile: default
+    Starting 46 tests across 12 binaries (12 tests skipped)
+        PASS [   0.004s] ( 1/46) eightball::config logprob_needs_model
+        PASS [   0.004s] ( 2/46) eightball::config spec_parses
+        PASS [   0.007s] ( 3/46) eightball::config zero_concurrency
+        PASS [   0.007s] ( 4/46) eightball::config minimal_ok
+        PASS [   0.009s] ( 5/46) eightball::config unknown_key_rejected
+        PASS [   0.005s] ( 6/46) eightball::question noul_without_criteria_parses
+        PASS [   0.009s] ( 7/46) eightball::config bad_spec_name
+        PASS [   0.009s] ( 8/46) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.005s] ( 9/46) eightball::question score_labels
+        PASS [   0.010s] (10/46) eightball::config default_must_exist
+        PASS [   0.010s] (11/46) eightball::config retention_default
+        PASS [   0.004s] (12/46) eightball::question validate_rejects
+        PASS [   0.010s] (13/46) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.022s] (14/46) eightball::logprob case_and_space_variants_add_mass
+        PASS [   0.022s] (15/46) eightball::detect detection_gets_send_bearer
+        PASS [   0.030s] (16/46) eightball::logprob extra_body_is_merged
+        PASS [   0.032s] (17/46) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.033s] (18/46) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.034s] (19/46) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.034s] (20/46) eightball::detect failed_detection_is_not_cached
+        PASS [   0.034s] (21/46) eightball::detect explicit_kind_skips_models
+        PASS [   0.036s] (22/46) eightball::logprob lowercase_choice_does_not_match_and_low_mass_errors
+        PASS [   0.036s] (23/46) eightball::logprob letters_map_in_option_order
+        PASS [   0.004s] (24/46) eightball::verdict choice_default_bands
+        PASS [   0.003s] (25/46) eightball::verdict score_confidence_readme
+        PASS [   0.037s] (26/46) eightball::logprob state_closing_delimiter_is_escaped
+        PASS [   0.004s] (27/46) eightball::verdict choice_confidence_readme
+        PASS [   0.003s] (28/46) eightball::verdict uniform_is_zero
+        PASS [   0.005s] (29/46) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.033s] (30/46) eightball::rerank choice_is_rejected
+        PASS [   0.006s] (31/46) eightball::verdict noul_default_bands
+        PASS [   0.041s] (32/46) eightball::logprob twenty_seven_options_rejected
+        PASS [   0.034s] (33/46) eightball::rerank score_is_mapped_from_logit
+        PASS [   0.037s] (34/46) eightball::systemone bearer_only_when_set
+        PASS [   0.017s] (35/46) eightball::systemone three_questions_one_request
+        PASS [   0.024s] (36/46) eightball::systemone long_state_is_fitted
+        PASS [   0.029s] (37/46) eightball::systemone http_400_is_error_with_body
+        PASS [   0.032s] (38/46) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.057s] (39/46) eightball::cli_ask choice_prints_billing
+        PASS [   0.058s] (40/46) eightball::cli_ask dead_server_exits_four
+        PASS [   0.049s] (41/46) eightball::rest_ask backend_failure_is_502
+        PASS [   0.051s] (42/46) eightball::rest_ask healthz_is_ok
+        PASS [   0.055s] (43/46) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.055s] (44/46) eightball::rest_ask empty_questions_is_400
+        PASS [   0.122s] (45/46) eightball::cli_ask noul_exit_codes
+        PASS [   0.641s] (46/46) eightball::systemone concurrency_one_serializes
+────────────
+     Summary [   0.652s] 46 tests run: 46 passed, 12 skipped
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only --no-capture
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+────────────
+ Nextest run ID 71e4fdd7-358f-4bf4-99ef-f8b2e6ba55eb with nextest profile: default
+    Starting 12 tests across 1 binary
+       START [         ] ( 1/12) eightball::live live_cli_ask
+
+running 1 test
+cli: {"results":[{"id":0,"question":"q","verdict":"yes","confidence":0.9928223977168203,"probabilities":{"yes":0.9964111988584102,"no":0.0035888011415897703},"calibrated":false,"cached":false}]}
+
+test live_cli_ask ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.22s
+
+        PASS [   0.220s] ( 1/12) eightball::live live_cli_ask
+       START [         ] ( 2/12) eightball::live live_detect_chat
+
+running 1 test
+chat info: Info { kind: Logprob, fingerprint: "/cache/Qwen3.5-0.8B-Q8_0.gguf@b12033-785322d17", concurrency: 2 }
+test live_detect_chat ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.02s
+
+        PASS [   0.024s] ( 2/12) eightball::live live_detect_chat
+       START [         ] ( 3/12) eightball::live live_detect_d3
+
+running 1 test
+d3 info: Info { kind: Systemone, fingerprint: "/cache/vllm-d3-nano-Q8_0.gguf@b12033-785322d17", concurrency: 2 }
+test live_detect_d3 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.03s
+
+        PASS [   0.031s] ( 3/12) eightball::live live_detect_d3
+       START [         ] ( 4/12) eightball::live live_logprob_choice
+
+running 1 test
+chat "I was charged twice for my order": [[0.8113105891213139, 0.18752212096673748, 0.0011672899119485791]]
+chat "My parcel never arrived": [[0.4286000992121823, 0.570540779923952, 0.0008591208638656969]]
+chat "The app crashes when I log in": [[0.5397690479562204, 0.2687425298101056, 0.19148842223367407]]
+chat choice correct: 2/3
+test live_logprob_choice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.25s
+
+        PASS [   0.258s] ( 4/12) eightball::live live_logprob_choice
+       START [         ] ( 5/12) eightball::live live_logprob_mass
+
+running 1 test
+mass validation: Ok(([[0.9984586770827663, 0.001541322917233736]], "hi there, how are you?"))
+test live_logprob_mass ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.11s
+
+        PASS [   0.114s] ( 5/12) eightball::live live_logprob_mass
+       START [         ] ( 6/12) eightball::live live_logprob_noul
+
+running 1 test
+chat "hi there, how are you?": [[0.9984586770827663, 0.001541322917233736]]
+chat "Good morning everyone!": [[0.9988069426168723, 0.0011930573831277456]]
+chat "The disk on node control-2 is 98% full.": [[0.06981691575902657, 0.9301830842409735]]
+chat "Invoice #4411 is attached.": [[0.4719876966083157, 0.5280123033916844]]
+test live_logprob_noul ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.21s
+
+        PASS [   0.210s] ( 6/12) eightball::live live_logprob_noul
+       START [         ] ( 7/12) eightball::live live_rerank_relevance
+
+running 1 test
+rerank "the disk is 98% full": [[0.9038698014220569, 0.09613019857794314]]
+rerank "a recipe for soup": [[1.8229576409416892e-5, 0.9999817704235906]]
+test live_rerank_relevance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.07s
+
+        PASS [   0.076s] ( 7/12) eightball::live live_rerank_relevance
+       START [         ] ( 8/12) eightball::live live_systemone_choice
+
+running 1 test
+"I was charged twice for my order": [[0.9947940023511472, 0.002052840041547463, 0.0031531576073055736]]
+"My parcel never arrived": [[0.03348390306046388, 0.9576809061787368, 0.008835190760799286]]
+"The app crashes when I log in": [[0.00010016085974423134, 8.911070125869211e-5, 0.999810728438997]]
+test live_systemone_choice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.27s
+
+        PASS [   0.273s] ( 8/12) eightball::live live_systemone_choice
+       START [         ] ( 9/12) eightball::live live_systemone_long_state_fits
+
+running 1 test
+long state: [[0.8418858296564597, 0.15811417034354025]]; fitted characters 2003
+test live_systemone_long_state_fits ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.43s
+
+        PASS [   0.431s] ( 9/12) eightball::live live_systemone_long_state_fits
+       START [         ] (10/12) eightball::live live_systemone_noul_clear_cases
+
+running 1 test
+"hi there, how are you?": [[0.9977792984110628, 0.0022207015889371684]]
+"Good morning everyone!": [[0.9973104968558432, 0.002689503144156835]]
+"The disk on node control-2 is 98% full.": [[0.0006734414207704911, 0.9993265585792295]]
+"Invoice #4411 is attached.": [[0.0005724723698325666, 0.9994275276301674]]
+test live_systemone_noul_clear_cases ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.30s
+
+        PASS [   0.306s] (10/12) eightball::live live_systemone_noul_clear_cases
+       START [         ] (11/12) eightball::live live_systemone_score
+
+running 1 test
+urgent: [[0.0035533644092976225, 0.0024632714944271077, 0.09199483747399864, 0.9019885266222766]], score 2.892418526309254; typo: [[0.8658067956293518, 0.016835738079480713, 0.0534055786459527, 0.06395188764521488]], score 0.3155025583070308
+test live_systemone_score ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.18s
+
+        PASS [   0.183s] (11/12) eightball::live live_systemone_score
+       START [         ] (12/12) eightball::live live_systemone_three_questions_one_call
+
+running 1 test
+multi: [[0.001626082216226916, 0.998373917783773], [0.9930987578168688, 0.00038615523376224806, 0.006515086949368796], [0.05358819608051216, 0.013706931575184388, 0.47920685379576855, 0.4534980185485349]]
+test live_systemone_three_questions_one_call ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.25s
+
+        PASS [   0.255s] (12/12) eightball::live live_systemone_three_questions_one_call
+────────────
+     Summary [   2.383s] 12 tests run: 12 passed, 0 skipped
+```
+
+`cargo fmt --all` passed. Rerank uses the sigmoid required by the measured raw logits, rejects non-noul questions, and preserves the configured model in its wire request. No deviations.

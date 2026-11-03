@@ -261,3 +261,21 @@ async fn live_logprob_mass() {
     eprintln!("mass validation: {result:?}");
     assert!(result.is_ok());
 }
+
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_rerank_relevance() {
+    require(9933).await;
+    let ep = Endpoint::new("rerank", &dev_config().endpoints["rerank"], None).unwrap();
+    let q: Question =
+        serde_json::from_value(json!({"id":"q","type":"noul","instructions":"disk full"})).unwrap();
+    for (state, relevant) in [("the disk is 98% full", true), ("a recipe for soup", false)] {
+        let (p, _) = ep.ask(state, std::slice::from_ref(&q)).await.unwrap();
+        eprintln!("rerank {state:?}: {p:?}");
+        assert!(if relevant {
+            p[0][0] > 0.5
+        } else {
+            p[0][0] < 0.5
+        });
+    }
+}

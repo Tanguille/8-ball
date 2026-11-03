@@ -1410,6 +1410,8 @@ Tests in `tests/logprob.rs` (wiremock with canned `top_logprobs`):
 - in the request, the question text comes after `</state>`.
 
 #### Step 4: Rerank backend (tests first)
+
+**Execution status:** Complete; mock and live checks pass; evidence in report.
 `backend/rerank.rs`:
 - noul questions only; any other kind is the error `"rerank answers noul questions only"`.
 - One `POST {url}/v1/rerank` per question, with `{"query": instructions, "documents": [state]}`, plus `"model"` if set.

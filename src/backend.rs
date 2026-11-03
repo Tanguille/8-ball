@@ -5,6 +5,7 @@ use crate::{
 use std::time::Duration;
 
 pub mod logprob;
+pub mod rerank;
 pub mod systemone;
 
 /// One probability per label of the question, in `Kind::labels()` order, summing to 1.
@@ -199,11 +200,7 @@ impl Endpoint {
             let probs = match info.kind {
                 BackendKind::Systemone => systemone::ask(self, &state, qs).await?,
                 BackendKind::Logprob => logprob::ask(self, &state, qs).await?,
-                BackendKind::Rerank => {
-                    return Err(BackendError(
-                        "backend implementation arrives in subsequent steps".into(),
-                    ));
-                }
+                BackendKind::Rerank => rerank::ask(self, &state, qs).await?,
             };
             Ok((probs, state))
         })
