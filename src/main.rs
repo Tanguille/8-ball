@@ -1,7 +1,7 @@
 use clap::Parser;
 use eightball::{
-    backend::Endpoint,
-    config::{Config, default_config_path},
+    backend::{Endpoint, authed},
+    config::{Config, default_config_path, xdg_path},
     http::router,
     mcp::Mcp,
     question::{Kind, Question},
@@ -45,10 +45,36 @@ struct AskArgs {
     /// exit 0 yes / 1 no / 3 unsure (noul); 0 decided / 3 unsure (choice, score)
     #[arg(long)]
     exit_code: bool,
+    #[command(flatten)]
+    remote: Remote,
+}
+
+/// Where the CLI client finds the `8ball serve` REST API.
+#[derive(clap::Args)]
+struct Remote {
     #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
     url: String,
     #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
     api_key: Option<String>,
+}
+
+impl Remote {
+    async fn post(&self, path: &str, body: &Value) -> anyhow::Result<Value> {
+        self.send(reqwest::Client::new().post(self.at(path)).json(body))
+            .await
+    }
+
+    async fn get(&self, path: &str) -> anyhow::Result<Value> {
+        self.send(reqwest::Client::new().get(self.at(path))).await
+    }
+
+    fn at(&self, path: &str) -> String {
+        format!("{}{path}", self.url.trim_end_matches('/'))
+    }
+
+    async fn send(&self, request: reqwest::RequestBuilder) -> anyhow::Result<Value> {
+        response_json(authed(request, self.api_key.as_deref()).send().await?).await
+    }
 }
 
 #[derive(clap::Subcommand)]
@@ -88,26 +114,20 @@ enum Command {
         top_k: Option<usize>,
         #[arg(long)]
         endpoint: Option<String>,
-        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
-        url: String,
-        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
-        api_key: Option<String>,
+        #[command(flatten)]
+        remote: Remote,
     },
     /// Inspect endpoint detection and health.
     Doctor {
-        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
-        url: String,
-        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
-        api_key: Option<String>,
+        #[command(flatten)]
+        remote: Remote,
     },
     /// Label a saved spec decision.
     Label {
         id: i64,
         value: String,
-        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
-        url: String,
-        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
-        api_key: Option<String>,
+        #[command(flatten)]
+        remote: Remote,
     },
     /// Fit decision bands from labelled states.
     Calibrate {
@@ -116,10 +136,8 @@ enum Command {
         precision: Option<f64>,
         #[arg(long)]
         dry_run: bool,
-        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
-        url: String,
-        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
-        api_key: Option<String>,
+        #[command(flatten)]
+        remote: Remote,
     },
     /// Validate a config file.
     Config {
@@ -177,39 +195,24 @@ async fn run() -> anyhow::Result<i32> {
             keep,
             top_k,
             endpoint,
-            url,
-            api_key,
+            remote,
         } => {
             let q = make_question(&kind, instructions, options, levels);
             let mut input = String::new();
             std::io::stdin().read_to_string(&mut input)?;
             let items: Vec<Value> = serde_json::from_str(&input)?;
-            let body = post_json(
-                &url,
-                "/v1/triage",
-                &json!({"items":items,"question":q,"keep":keep,"top_k":top_k,"endpoint":endpoint}),
-                api_key.as_deref(),
-            )
+            let body = remote.post("/v1/triage", &json!({"items":items,"question":q,"keep":keep,"top_k":top_k,"endpoint":endpoint}))
             .await?;
             println!("{body}");
             Ok(0)
         }
-        Command::Doctor { url, api_key } => doctor(&url, api_key.as_deref()).await,
-        Command::Label {
-            id,
-            value,
-            url,
-            api_key,
-        } => {
+        Command::Doctor { remote } => doctor(&remote).await,
+        Command::Label { id, value, remote } => {
             println!(
                 "{}",
-                post_json(
-                    &url,
-                    "/v1/label",
-                    &json!({"id":id,"value":value}),
-                    api_key.as_deref()
-                )
-                .await?
+                remote
+                    .post("/v1/label", &json!({"id":id,"value":value}))
+                    .await?
             );
             Ok(0)
         }
@@ -217,18 +220,16 @@ async fn run() -> anyhow::Result<i32> {
             spec,
             precision,
             dry_run,
-            url,
-            api_key,
+            remote,
         } => {
             println!(
                 "{}",
-                post_json(
-                    &url,
-                    "/v1/calibrate",
-                    &json!({"spec":spec,"precision":precision,"dry_run":dry_run}),
-                    api_key.as_deref()
-                )
-                .await?
+                remote
+                    .post(
+                        "/v1/calibrate",
+                        &json!({"spec":spec,"precision":precision,"dry_run":dry_run})
+                    )
+                    .await?
             );
             Ok(0)
         }
@@ -300,21 +301,6 @@ fn make_question(
     }
 }
 
-async fn post_json(
-    url: &str,
-    path: &str,
-    body: &Value,
-    api_key: Option<&str>,
-) -> anyhow::Result<Value> {
-    let mut request = reqwest::Client::new()
-        .post(format!("{}{path}", url.trim_end_matches('/')))
-        .json(body);
-    if let Some(key) = api_key {
-        request = request.bearer_auth(key);
-    }
-    response_json(request.send().await?).await
-}
-
 async fn response_json(response: reqwest::Response) -> anyhow::Result<Value> {
     let status = response.status();
     let body: Value = response.json().await?;
@@ -327,25 +313,6 @@ async fn response_json(response: reqwest::Response) -> anyhow::Result<Value> {
     Ok(body)
 }
 
-fn default_db_path() -> PathBuf {
-    std::env::var_os("XDG_STATE_HOME")
-        .filter(|v| !v.is_empty())
-        .map_or_else(
-            || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"),
-            PathBuf::from,
-        )
-        .join("8ball/8ball.db")
-}
-
-async fn doctor_report(url: &str, api_key: Option<&str>) -> anyhow::Result<Value> {
-    let mut request =
-        reqwest::Client::new().get(format!("{}/v1/doctor", url.trim_end_matches('/')));
-    if let Some(key) = api_key {
-        request = request.bearer_auth(key);
-    }
-    response_json(request.send().await?).await
-}
-
 async fn ask(
     AskArgs {
         kind,
@@ -356,8 +323,7 @@ async fn ask(
         state,
         endpoint,
         exit_code,
-        url,
-        api_key,
+        remote,
     }: AskArgs,
 ) -> anyhow::Result<i32> {
     let (questions, noul) = if spec.is_some() {
@@ -377,13 +343,12 @@ async fn ask(
         std::io::stdin().read_to_string(&mut s)?;
         s
     };
-    let body = post_json(
-        &url,
-        "/v1/ask",
-        &json!({"state":state,"questions":questions,"spec":spec,"endpoint":endpoint}),
-        api_key.as_deref(),
-    )
-    .await?;
+    let body = remote
+        .post(
+            "/v1/ask",
+            &json!({"state":state,"questions":questions,"spec":spec,"endpoint":endpoint}),
+        )
+        .await?;
     println!("{body}");
     let verdict = body["results"][0]["verdict"].as_str().unwrap_or("unsure");
     Ok(if !exit_code {
@@ -396,7 +361,7 @@ async fn ask(
         } else if let Some(noul) = noul {
             noul
         } else {
-            let report = doctor_report(&url, api_key.as_deref()).await?;
+            let report = remote.get("/v1/doctor").await?;
             report["specs"]
                 .as_array()
                 .and_then(|specs| {
@@ -426,14 +391,16 @@ async fn build_service(
             Ok((name.clone(), Endpoint::new(name, cfg, key)?))
         })
         .collect::<Result<IndexMap<_, _>, eightball::backend::BackendError>>()?;
-    let store = Store::open(&db.unwrap_or_else(default_db_path))?;
+    let store = Store::open(
+        &db.unwrap_or_else(|| xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")),
+    )?;
     let n = store.prune(config.retention_days).await?;
     tracing::info!("pruned {n} old decisions");
     Ok(Arc::new(Service::new(config, endpoints, store)))
 }
 
-async fn doctor(url: &str, api_key: Option<&str>) -> anyhow::Result<i32> {
-    let report = doctor_report(url, api_key).await?;
+async fn doctor(remote: &Remote) -> anyhow::Result<i32> {
+    let report = remote.get("/v1/doctor").await?;
     println!("{report}");
     let default = report["endpoints"]
         .as_array()

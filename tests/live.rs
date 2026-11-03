@@ -35,7 +35,7 @@ async fn live_systemone_noul_clear_cases() {
         ("The disk on node control-2 is 98% full.", false),
         ("Invoice #4411 is attached.", false),
     ] {
-        let (p, _) = ep.ask(state, &qs[..1]).await.unwrap();
+        let p = ep.ask(state, &qs[..1]).await.unwrap();
         eprintln!("{state:?}: {p:?}");
         assert!(
             if yes { p[0][0] > 0.8 } else { p[0][0] < 0.2 },
@@ -54,7 +54,7 @@ async fn live_systemone_choice() {
         ("My parcel never arrived", 1),
         ("The app crashes when I log in", 2),
     ] {
-        let (p, _) = ep.ask(state, &qs[1..2]).await.unwrap();
+        let p = ep.ask(state, &qs[1..2]).await.unwrap();
         eprintln!("{state:?}: {p:?}");
         assert!(p[0].iter().all(|v| *v <= p[0][index]), "{state:?}: {p:?}");
     }
@@ -65,14 +65,14 @@ async fn live_systemone_score() {
     require(9931).await;
     let ep = d3();
     let qs = questions();
-    let (high, _) = ep
+    let high = ep
         .ask(
             "Production database is down, all customers affected",
             &qs[2..],
         )
         .await
         .unwrap();
-    let (low, _) = ep
+    let low = ep
         .ask("Typo in the footer of an internal wiki page", &qs[2..])
         .await
         .unwrap();
@@ -88,7 +88,7 @@ async fn live_systemone_score() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_three_questions_one_call() {
     require(9931).await;
-    let (p, _) = d3()
+    let p = d3()
         .ask(
             "I was charged twice and I'm furious, fix it today",
             &questions(),
@@ -110,7 +110,8 @@ async fn live_systemone_long_state_fits() {
     state.truncate(20_000);
     let ep = d3();
     ep.info().await.unwrap();
-    let (p, sent) = ep.ask(&ep.fitted(&state), &questions()[..1]).await.unwrap();
+    let sent = ep.fitted(&state);
+    let p = ep.ask(&sent, &questions()[..1]).await.unwrap();
     eprintln!(
         "long state: {p:?}; fitted characters {}",
         sent.chars().count()
@@ -216,7 +217,7 @@ async fn live_logprob_noul() {
         ("The disk on node control-2 is 98% full.", false),
         ("Invoice #4411 is attached.", false),
     ] {
-        let (p, _) = ep.ask(state, &qs[..1]).await.unwrap();
+        let p = ep.ask(state, &qs[..1]).await.unwrap();
         eprintln!("chat {state:?}: {p:?}");
         assert!(
             if yes { p[0][0] > 0.5 } else { p[0][0] < 0.5 },
@@ -249,7 +250,7 @@ async fn live_logprob_choice() {
         ("My parcel never arrived", 1),
         ("The app crashes when I log in", 2),
     ] {
-        let (p, _) = ep.ask(state, &qs[1..2]).await.unwrap();
+        let p = ep.ask(state, &qs[1..2]).await.unwrap();
         eprintln!("chat {state:?}: {p:?}");
         if p[0].iter().all(|v| *v <= p[0][index]) {
             correct += 1;
@@ -276,7 +277,7 @@ async fn live_rerank_relevance() {
     let q: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"disk full"})).unwrap();
     for (state, relevant) in [("the disk is 98% full", true), ("a recipe for soup", false)] {
-        let (p, _) = ep.ask(state, std::slice::from_ref(&q)).await.unwrap();
+        let p = ep.ask(state, std::slice::from_ref(&q)).await.unwrap();
         eprintln!("rerank {state:?}: {p:?}");
         assert!(if relevant {
             p[0][0] > 0.5

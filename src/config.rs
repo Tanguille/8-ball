@@ -132,11 +132,17 @@ fn normalize_url(url: &str) -> String {
 
 #[must_use]
 pub fn default_config_path() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
+    xdg_path("XDG_CONFIG_HOME", ".config", "8ball/config.toml")
+}
+
+/// `$var/rel`, else `$HOME/fallback/rel` when the XDG variable is unset or empty.
+#[must_use]
+pub fn xdg_path(var: &str, fallback: &str, rel: &str) -> PathBuf {
+    std::env::var_os(var)
         .filter(|v| !v.is_empty())
         .map_or_else(
-            || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
+            || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(fallback),
             PathBuf::from,
         )
-        .join("8ball/config.toml")
+        .join(rel)
 }

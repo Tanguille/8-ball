@@ -37,7 +37,7 @@ async fn endpoint(tokens: &[(&str, f64)], extra: &str) -> (Endpoint, MockServer)
 #[tokio::test]
 async fn case_and_space_variants_add_mass() {
     let (ep, _mock) = endpoint(&[("Yes", 0.6), (" yes", 0.3), ("no", 0.1)], "").await;
-    let (p, _) = ep.ask("hi", &[question("noul")]).await.unwrap();
+    let p = ep.ask("hi", &[question("noul")]).await.unwrap();
     assert!((p[0][0] - 0.9).abs() < 1e-9);
     assert!((p[0][1] - 0.1).abs() < 1e-9);
 }
@@ -57,7 +57,7 @@ async fn lowercase_choice_does_not_match_and_low_mass_errors() {
 #[tokio::test]
 async fn letters_map_in_option_order() {
     let (ep, _mock) = endpoint(&[("A", 0.7), ("B", 0.2), ("C", 0.1)], "").await;
-    let (p, _) = ep.ask("hi", &[question("choice")]).await.unwrap();
+    let p = ep.ask("hi", &[question("choice")]).await.unwrap();
     for (a, e) in p[0].iter().zip([0.7, 0.2, 0.1]) {
         assert!((a - e).abs() < 1e-9);
     }

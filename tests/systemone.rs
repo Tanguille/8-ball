@@ -42,7 +42,7 @@ async fn three_questions_one_request() {
         "q3":{"type":"score","score":1.2,"probabilities":{"0":0.1,"1":0.6,"2":0.3},"confidence":0.5}
     }}))).await;
     let ep = Endpoint::new("d3", &cfg(&server.uri()), None).unwrap();
-    let (got, _) = ep.ask("hello", &qs).await.unwrap();
+    let got = ep.ask("hello", &qs).await.unwrap();
     for (actual, expected) in
         got.iter()
             .zip([vec![0.97, 0.03], vec![0.9, 0.1], vec![0.1, 0.6, 0.3]])
@@ -82,11 +82,9 @@ async fn long_state_is_fitted() {
     let mut config = cfg(&server.uri());
     config.max_state_chars = Some(10);
     let ep = Endpoint::new("d3", &config, None).unwrap();
-    let (_, sent) = ep
-        .ask(&ep.fitted("abcdefghijklmnopqrstuvwxyz0123"), &[question()])
-        .await
-        .unwrap();
+    let sent = ep.fitted("abcdefghijklmnopqrstuvwxyz0123");
     assert_eq!(sent, "abcde\n…\nz0123");
+    ep.ask(&sent, &[question()]).await.unwrap();
     let requests = server.received_requests().await.unwrap();
     let request = requests.iter().find(|r| r.method == "POST").unwrap();
     let body: Value = serde_json::from_slice(&request.body).unwrap();

@@ -24,7 +24,7 @@ async fn score_is_mapped_from_logit() {
     let ep = Endpoint::new("rerank", &cfg, None).unwrap();
     let q: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"disk full"})).unwrap();
-    let (p, _) = ep.ask("disk at 98%", &[q]).await.unwrap();
+    let p = ep.ask("disk at 98%", &[q]).await.unwrap();
     assert!((p[0][0] - 0.689_974_481_127_612_5).abs() < 1e-9);
     assert!((p[0][1] - 0.310_025_518_872_387_5).abs() < 1e-9);
     let requests = mock.received_requests().await.unwrap();

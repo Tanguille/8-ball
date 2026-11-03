@@ -64,26 +64,30 @@ impl Endpoint {
     }
 
     pub async fn info(&self) -> Result<&Info, BackendError> {
-        let (info, _) = self
-            .info
+        Ok(&self.detected().await?.0)
+    }
+
+    async fn detected(&self) -> Result<&(Info, tokio::sync::Semaphore), BackendError> {
+        self.info
             .get_or_try_init(|| async {
                 let info = self.detect().await?;
                 let permits = tokio::sync::Semaphore::new(info.concurrency);
-                Ok::<_, BackendError>((info, permits))
+                Ok((info, permits))
             })
-            .await?;
-        Ok(info)
+            .await
     }
 
     async fn get_info_json(&self, path: &str) -> Result<serde_json::Value, BackendError> {
-        let mut request = self
+        let request = self
             .client
             .get(format!("{}{path}", self.url))
             .timeout(Duration::from_secs(5));
-        if let Some(key) = &self.api_key {
-            request = request.bearer_auth(key);
-        }
-        Ok(request.send().await?.error_for_status()?.json().await?)
+        Ok(authed(request, self.api_key.as_deref())
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?)
     }
 
     async fn post_json(
@@ -91,20 +95,15 @@ impl Endpoint {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, BackendError> {
-        self.info().await?;
         let permit = self
-            .info
-            .get()
-            .expect("info initialized")
+            .detected()
+            .await?
             .1
             .acquire()
             .await
             .map_err(|e| BackendError(e.to_string()))?;
-        let mut request = self.client.post(format!("{}{path}", self.url)).json(body);
-        if let Some(key) = &self.api_key {
-            request = request.bearer_auth(key);
-        }
-        let response = request.send().await?;
+        let request = self.client.post(format!("{}{path}", self.url)).json(body);
+        let response = authed(request, self.api_key.as_deref()).send().await?;
         let status = response.status();
         let text = response.text().await?;
         drop(permit);
@@ -199,23 +198,26 @@ impl Endpoint {
         fit(state, max)
     }
 
-    /// Ask all questions about an already-fitted state. Returns (probs, state actually sent).
-    pub async fn ask(
-        &self,
-        state: &str,
-        qs: &[Question],
-    ) -> Result<(Vec<Probs>, String), BackendError> {
+    /// Ask all questions about an already-fitted state.
+    pub async fn ask(&self, state: &str, qs: &[Question]) -> Result<Vec<Probs>, BackendError> {
         tokio::time::timeout(DECISION_TIMEOUT, async {
             let info = self.info().await?;
-            let probs = match info.kind {
-                BackendKind::Systemone => systemone::ask(self, state, qs).await?,
-                BackendKind::Logprob => logprob::ask(self, state, qs).await?,
-                BackendKind::Rerank => rerank::ask(self, state, qs).await?,
-            };
-            Ok((probs, state.to_owned()))
+            match info.kind {
+                BackendKind::Systemone => systemone::ask(self, state, qs).await,
+                BackendKind::Logprob => logprob::ask(self, state, qs).await,
+                BackendKind::Rerank => rerank::ask(self, state, qs).await,
+            }
         })
         .await
         .map_err(|_| BackendError("timed out after 20s".into()))?
+    }
+}
+
+/// Adds the bearer header only when a key is configured.
+pub fn authed(request: reqwest::RequestBuilder, key: Option<&str>) -> reqwest::RequestBuilder {
+    match key {
+        Some(key) => request.bearer_auth(key),
+        None => request,
     }
 }
 

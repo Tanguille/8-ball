@@ -354,7 +354,7 @@ impl Service {
                 let result=endpoint.ask("The sky is clear and blue today.",std::slice::from_ref(&question)).await;
                 let ms=start.elapsed().as_millis();
                 report.probe=Some(match result {
-                    Ok((probs,_))=>serde_json::json!({"verdict":verdict::verdict(&question.kind,&question.kind.labels(),&probs[0],Bands::default_for(&question.kind)),"p_yes":probs[0][0],"ms":ms}),
+                    Ok(probs)=>serde_json::json!({"verdict":verdict::verdict(&question.kind,&question.kind.labels(),&probs[0],Bands::default_for(&question.kind)),"p_yes":probs[0][0],"ms":ms}),
                     Err(e)=>serde_json::json!({"error":self.backend_error(name,e).to_string(),"ms":ms}),
                 });
             }
@@ -593,7 +593,6 @@ impl Service {
                 .ask(&state, &uncached)
                 .await
                 .map_err(backend_error)?
-                .0
         }
         .into_iter();
         let mut judgments = Vec::with_capacity(questions.len());

@@ -1,4 +1,7 @@
-use crate::{backend::BackendError, config::EmbedderConfig};
+use crate::{
+    backend::{BackendError, authed},
+    config::EmbedderConfig,
+};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -25,15 +28,17 @@ impl Embedder {
         let mut vectors = Vec::with_capacity(texts.len());
         let mut dimensions = None;
         for batch in texts.chunks(8) {
-            let mut request = self
+            let request = self
                 .client
                 .post(format!("{}/v1/embeddings", self.url))
                 .timeout(Duration::from_secs(10))
                 .json(&json!({"model":self.model,"input":batch}));
-            if let Some(key) = &self.api_key {
-                request = request.bearer_auth(key);
-            }
-            let response: Value = request.send().await?.error_for_status()?.json().await?;
+            let response: Value = authed(request, self.api_key.as_deref())
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
             let data = response["data"]
                 .as_array()
                 .ok_or_else(|| BackendError("embedder returned no data".into()))?;
