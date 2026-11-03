@@ -4,6 +4,7 @@ use crate::{
 };
 use std::time::Duration;
 
+pub mod embed;
 pub mod logprob;
 pub mod rerank;
 pub mod systemone;

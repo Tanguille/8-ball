@@ -2481,3 +2481,259 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; fin
 ```
 
 `cargo fmt --all` passed. Rerank uses the sigmoid required by the measured raw logits, rejects non-noul questions, and preserves the configured model in its wire request. No deviations.
+
+### Chunk 2 step 5: embedder
+
+```text
+$ cargo nextest run --test embed (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0432]: unresolved import `eightball::backend::embed`
+ --> tests/embed.rs:1:26
+  |
+1 | use eightball::{backend::embed::{Embedder,cosine},config::EmbedderConfig};
+  |                          ^^^^^ could not find `embed` in `backend`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `eightball` (test "embed") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=embed'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only -E test(live_embed) (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0432]: unresolved import `eightball::backend::embed`
+   --> tests/live.rs:286:29
+    |
+286 |     use eightball::backend::embed::{Embedder,cosine};
+    |                             ^^^^^ could not find `embed` in `backend`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `eightball` (test "live") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=live'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test embed (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.72s
+────────────
+ Nextest run ID 0309cc1c-2fe8-4da5-b459-cf740ff3a618 with nextest profile: default
+    Starting 5 tests across 1 binary
+        PASS [   0.005s] (1/5) eightball::embed cosine_similarity
+        PASS [   0.017s] (2/5) eightball::embed shuffled_indices_restore_order
+        PASS [   0.018s] (3/5) eightball::embed mixed_dimensions_rejected
+        PASS [   0.019s] (4/5) eightball::embed ten_texts_use_two_ordered_batches
+        PASS [   0.029s] (5/5) eightball::embed missing_or_duplicate_indices_are_errors
+────────────
+     Summary [   0.029s] 5 tests run: 5 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.26s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.39s
+────────────
+ Nextest run ID 17a2ec0a-ec02-4482-bb05-d4ff5bc93924 with nextest profile: default
+    Starting 51 tests across 13 binaries (13 tests skipped)
+        PASS [   0.006s] ( 1/51) eightball::config zero_concurrency
+        PASS [   0.007s] ( 2/51) eightball::config unknown_key_rejected
+        PASS [   0.008s] ( 3/51) eightball::config minimal_ok
+        PASS [   0.009s] ( 4/51) eightball::config spec_parses
+        PASS [   0.010s] ( 5/51) eightball::config logprob_needs_model
+        PASS [   0.011s] ( 6/51) eightball::config bad_spec_name
+        PASS [   0.011s] ( 7/51) eightball::config retention_default
+        PASS [   0.011s] ( 8/51) eightball::config default_must_exist
+        PASS [   0.014s] ( 9/51) eightball::embed cosine_similarity
+        PASS [   0.005s] (10/51) eightball::question validate_rejects
+        PASS [   0.005s] (11/51) eightball::question noul_without_criteria_parses
+        PASS [   0.009s] (12/51) eightball::question score_labels
+        PASS [   0.011s] (13/51) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.026s] (14/51) eightball::detect explicit_kind_skips_models
+        PASS [   0.030s] (15/51) eightball::logprob case_and_space_variants_add_mass
+        PASS [   0.030s] (16/51) eightball::logprob extra_body_is_merged
+        PASS [   0.030s] (17/51) eightball::embed shuffled_indices_restore_order
+        PASS [   0.033s] (18/51) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.034s] (19/51) eightball::embed ten_texts_use_two_ordered_batches
+        PASS [   0.036s] (20/51) eightball::embed mixed_dimensions_rejected
+        PASS [   0.037s] (21/51) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.009s] (22/51) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.042s] (23/51) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.035s] (24/51) eightball::logprob twenty_seven_options_rejected
+        PASS [   0.040s] (25/51) eightball::logprob letters_map_in_option_order
+        PASS [   0.031s] (26/51) eightball::rerank choice_is_rejected
+        PASS [   0.006s] (27/51) eightball::verdict choice_confidence_readme
+        PASS [   0.031s] (28/51) eightball::rerank score_is_mapped_from_logit
+        PASS [   0.048s] (29/51) eightball::embed missing_or_duplicate_indices_are_errors
+        PASS [   0.050s] (30/51) eightball::detect failed_detection_is_not_cached
+        PASS [   0.006s] (31/51) eightball::verdict noul_default_bands
+        PASS [   0.045s] (32/51) eightball::logprob lowercase_choice_does_not_match_and_low_mass_errors
+        PASS [   0.043s] (33/51) eightball::logprob state_closing_delimiter_is_escaped
+        PASS [   0.055s] (34/51) eightball::detect detection_gets_send_bearer
+        PASS [   0.013s] (35/51) eightball::verdict choice_default_bands
+        PASS [   0.010s] (36/51) eightball::verdict score_confidence_readme
+        PASS [   0.010s] (37/51) eightball::verdict uniform_is_zero
+        PASS [   0.012s] (38/51) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.029s] (39/51) eightball::systemone three_questions_one_request
+        PASS [   0.033s] (40/51) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.029s] (41/51) eightball::systemone long_state_is_fitted
+        PASS [   0.052s] (42/51) eightball::rest_ask backend_failure_is_502
+        PASS [   0.040s] (43/51) eightball::systemone http_400_is_error_with_body
+        PASS [   0.075s] (44/51) eightball::cli_ask choice_prints_billing
+        PASS [   0.054s] (45/51) eightball::rest_ask empty_questions_is_400
+        PASS [   0.055s] (46/51) eightball::rest_ask healthz_is_ok
+        PASS [   0.078s] (47/51) eightball::cli_ask dead_server_exits_four
+        PASS [   0.050s] (48/51) eightball::systemone bearer_only_when_set
+        PASS [   0.056s] (49/51) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.161s] (50/51) eightball::cli_ask noul_exit_codes
+        PASS [   0.659s] (51/51) eightball::systemone concurrency_one_serializes
+────────────
+     Summary [   0.690s] 51 tests run: 51 passed, 13 skipped
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only --no-capture
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+────────────
+ Nextest run ID b9fd7f2a-eab6-4043-99fc-b0eba145e8e6 with nextest profile: default
+    Starting 13 tests across 1 binary
+       START [         ] ( 1/13) eightball::live live_cli_ask
+
+running 1 test
+cli: {"results":[{"id":0,"question":"q","verdict":"yes","confidence":0.9928223977168203,"probabilities":{"yes":0.9964111988584102,"no":0.0035888011415897703},"calibrated":false,"cached":false}]}
+
+test live_cli_ask ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.18s
+
+        PASS [   0.187s] ( 1/13) eightball::live live_cli_ask
+       START [         ] ( 2/13) eightball::live live_detect_chat
+
+running 1 test
+chat info: Info { kind: Logprob, fingerprint: "/cache/Qwen3.5-0.8B-Q8_0.gguf@b12033-785322d17", concurrency: 2 }
+test live_detect_chat ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.03s
+
+        PASS [   0.034s] ( 2/13) eightball::live live_detect_chat
+       START [         ] ( 3/13) eightball::live live_detect_d3
+
+running 1 test
+d3 info: Info { kind: Systemone, fingerprint: "/cache/vllm-d3-nano-Q8_0.gguf@b12033-785322d17", concurrency: 2 }
+test live_detect_d3 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.02s
+
+        PASS [   0.027s] ( 3/13) eightball::live live_detect_d3
+       START [         ] ( 4/13) eightball::live live_embed
+
+running 1 test
+embedding dimensions: 768; disk/storage cosine: 0.794015, disk/soup: 0.5782903
+test live_embed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.70s
+
+        PASS [   0.707s] ( 4/13) eightball::live live_embed
+       START [         ] ( 5/13) eightball::live live_logprob_choice
+
+running 1 test
+chat "I was charged twice for my order": [[0.8113105891213139, 0.18752212096673748, 0.0011672899119485791]]
+chat "My parcel never arrived": [[0.4286000992121823, 0.570540779923952, 0.0008591208638656969]]
+chat "The app crashes when I log in": [[0.5397690479562204, 0.2687425298101056, 0.19148842223367407]]
+chat choice correct: 2/3
+test live_logprob_choice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.33s
+
+        PASS [   0.331s] ( 5/13) eightball::live live_logprob_choice
+       START [         ] ( 6/13) eightball::live live_logprob_mass
+
+running 1 test
+mass validation: Ok(([[0.9984586770827663, 0.001541322917233736]], "hi there, how are you?"))
+test live_logprob_mass ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.13s
+
+        PASS [   0.133s] ( 6/13) eightball::live live_logprob_mass
+       START [         ] ( 7/13) eightball::live live_logprob_noul
+
+running 1 test
+chat "hi there, how are you?": [[0.9984586770827663, 0.001541322917233736]]
+chat "Good morning everyone!": [[0.9988069426168723, 0.0011930573831277456]]
+chat "The disk on node control-2 is 98% full.": [[0.06981691575902657, 0.9301830842409735]]
+chat "Invoice #4411 is attached.": [[0.4719876966083157, 0.5280123033916844]]
+test live_logprob_noul ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.23s
+
+        PASS [   0.229s] ( 7/13) eightball::live live_logprob_noul
+       START [         ] ( 8/13) eightball::live live_rerank_relevance
+
+running 1 test
+rerank "the disk is 98% full": [[0.9038698014220569, 0.09613019857794314]]
+rerank "a recipe for soup": [[1.8229576409416892e-5, 0.9999817704235906]]
+test live_rerank_relevance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.08s
+
+        PASS [   0.084s] ( 8/13) eightball::live live_rerank_relevance
+       START [         ] ( 9/13) eightball::live live_systemone_choice
+
+running 1 test
+"I was charged twice for my order": [[0.9947940023511472, 0.002052840041547463, 0.0031531576073055736]]
+"My parcel never arrived": [[0.03348390306046388, 0.9576809061787368, 0.008835190760799286]]
+"The app crashes when I log in": [[0.00010016085974423134, 8.911070125869211e-5, 0.999810728438997]]
+test live_systemone_choice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.28s
+
+        PASS [   0.285s] ( 9/13) eightball::live live_systemone_choice
+       START [         ] (10/13) eightball::live live_systemone_long_state_fits
+
+running 1 test
+long state: [[0.8418858296564597, 0.15811417034354025]]; fitted characters 2003
+test live_systemone_long_state_fits ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.44s
+
+        PASS [   0.441s] (10/13) eightball::live live_systemone_long_state_fits
+       START [         ] (11/13) eightball::live live_systemone_noul_clear_cases
+
+running 1 test
+"hi there, how are you?": [[0.9977792984110628, 0.0022207015889371684]]
+"Good morning everyone!": [[0.9973104968558432, 0.002689503144156835]]
+"The disk on node control-2 is 98% full.": [[0.0006734414207704911, 0.9993265585792295]]
+"Invoice #4411 is attached.": [[0.0005724723698325666, 0.9994275276301674]]
+test live_systemone_noul_clear_cases ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.31s
+
+        PASS [   0.319s] (11/13) eightball::live live_systemone_noul_clear_cases
+       START [         ] (12/13) eightball::live live_systemone_score
+
+running 1 test
+urgent: [[0.0035533644092976225, 0.0024632714944271077, 0.09199483747399864, 0.9019885266222766]], score 2.892418526309254; typo: [[0.8658067956293518, 0.016835738079480713, 0.0534055786459527, 0.06395188764521488]], score 0.3155025583070308
+test live_systemone_score ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.18s
+
+        PASS [   0.188s] (12/13) eightball::live live_systemone_score
+       START [         ] (13/13) eightball::live live_systemone_three_questions_one_call
+
+running 1 test
+multi: [[0.001626082216226916, 0.998373917783773], [0.9930987578168688, 0.00038615523376224806, 0.006515086949368796], [0.05358819608051216, 0.013706931575184388, 0.47920685379576855, 0.4534980185485349]]
+test live_systemone_three_questions_one_call ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.24s
+
+        PASS [   0.245s] (13/13) eightball::live live_systemone_three_questions_one_call
+────────────
+     Summary [   3.211s] 13 tests run: 13 passed, 0 skipped
+```
+
+`cargo fmt --all` passed. Full suite: 51 mock tests and 13 live tests passed. Embeddings batch sequentially in groups of eight, restore index order, reject mixed dimensions and missing/duplicate indices. The additional missing/duplicate-index test protects against silently returning incomplete prefilter data. No scope deviations.

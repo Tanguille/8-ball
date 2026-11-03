@@ -279,3 +279,31 @@ async fn live_rerank_relevance() {
         });
     }
 }
+
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_embed() {
+    use eightball::backend::embed::{Embedder, cosine};
+    require(9932).await;
+    let config = dev_config();
+    let embedder = Embedder::new(config.embedder.as_ref().unwrap(), None);
+    let vectors = embedder
+        .embed(&[
+            "disk is full".into(),
+            "storage at 98%".into(),
+            "a recipe for soup".into(),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(vectors.len(), 3);
+    for vector in &vectors {
+        assert_eq!(vector.len(), 768);
+    }
+    let storage = cosine(&vectors[0], &vectors[1]);
+    let soup = cosine(&vectors[0], &vectors[2]);
+    eprintln!(
+        "embedding dimensions: {}; disk/storage cosine: {storage}, disk/soup: {soup}",
+        vectors[0].len()
+    );
+    assert!(storage > soup);
+}

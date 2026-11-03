@@ -1423,6 +1423,8 @@ Tests:
 - a choice question is an error.
 
 #### Step 5: Embedder (tests first)
+
+**Execution status:** Complete; all mock/live checks passed; evidence in report.
 `backend/embed.rs`:
 ```rust
 pub struct Embedder { url: String, model: String, api_key: Option<String>, client: reqwest::Client }
