@@ -387,3 +387,78 @@ $ cargo nextest run
 ```
 
 `cargo fmt --all` passed. All eight specified config tests pass; full suite: 12 passed. Tempfile builder uses the `8ball-` prefix to respect the allowed `/tmp/8ball-*` paths. No environment variables are changed in the test process.
+
+### Step 4: verdict math
+
+```text
+$ cargo nextest run --test verdict (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0432]: unresolved imports `eightball::verdict::Bands`, `eightball::verdict::confidence_choice`, `eightball::verdict::confidence_score`, `eightball::verdict::expected_score`, `eightball::verdict::verdict`
+ --> tests/verdict.rs:2:26
+  |
+2 | use eightball::verdict::{Bands, confidence_choice, confidence_score, expected_score, verdict};
+  |                          ^^^^^  ^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^ no `verdict` in `verdict`
+  |                          |      |                  |                 |
+  |                          |      |                  |                 no `expected_score` in `verdict`
+  |                          |      |                  no `confidence_score` in `verdict`
+  |                          |      no `confidence_choice` in `verdict`
+  |                          no `Bands` in `verdict`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `eightball` (test "verdict") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=verdict'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test verdict (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.62s
+────────────
+ Nextest run ID 6b5a02e1-73e9-4a72-83f1-63a55af1d3f7 with nextest profile: default
+    Starting 6 tests across 1 binary
+        PASS [   0.003s] (1/6) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.003s] (2/6) eightball::verdict choice_default_bands
+        PASS [   0.003s] (3/6) eightball::verdict choice_confidence_readme
+        PASS [   0.003s] (4/6) eightball::verdict noul_default_bands
+        PASS [   0.003s] (5/6) eightball::verdict uniform_is_zero
+        PASS [   0.003s] (6/6) eightball::verdict score_confidence_readme
+────────────
+     Summary [   0.004s] 6 tests run: 6 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
+────────────
+ Nextest run ID f2a4f103-8098-493a-804c-d28bccf63f5e with nextest profile: default
+    Starting 18 tests across 5 binaries
+        PASS [   0.003s] ( 1/18) eightball::verdict noul_default_bands
+        PASS [   0.003s] ( 2/18) eightball::config bad_spec_name
+        PASS [   0.003s] ( 3/18) eightball::question validate_rejects
+        PASS [   0.003s] ( 4/18) eightball::config retention_default
+        PASS [   0.003s] ( 5/18) eightball::config default_must_exist
+        PASS [   0.003s] ( 6/18) eightball::verdict choice_confidence_readme
+        PASS [   0.004s] ( 7/18) eightball::question score_labels
+        PASS [   0.011s] ( 8/18) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.011s] ( 9/18) eightball::verdict uniform_is_zero
+        PASS [   0.011s] (10/18) eightball::question noul_without_criteria_parses
+        PASS [   0.011s] (11/18) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.012s] (12/18) eightball::config unknown_key_rejected
+        PASS [   0.012s] (13/18) eightball::config logprob_needs_model
+        PASS [   0.012s] (14/18) eightball::config zero_concurrency
+        PASS [   0.012s] (15/18) eightball::config spec_parses
+        PASS [   0.012s] (16/18) eightball::config minimal_ok
+        PASS [   0.012s] (17/18) eightball::verdict choice_default_bands
+        PASS [   0.012s] (18/18) eightball::verdict score_confidence_readme
+────────────
+     Summary [   0.012s] 18 tests run: 18 passed, 0 skipped
+```
+
+`cargo fmt --all` passed. Six specified verdict tests pass; full suite: 18 passed. No deviations.
