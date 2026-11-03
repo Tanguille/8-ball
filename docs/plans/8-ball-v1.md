@@ -975,6 +975,8 @@ If the user says no to the download, skip the live steps in every chunk and repo
 4. Run the checks, then commit with `feat(question): typed questions and validation`.
 
 #### Step 3: `config.rs` (tests first)
+
+**Execution status:** Complete; red/green and full-check evidence in `8-ball-v1-report.md`.
 1. Create `tests/config.rs`. Each test writes a TOML string to a `tempfile::NamedTempFile` and calls `Config::load`:
    - `minimal_ok`: `default = "d3"` plus `[endpoints.d3] url = "http://h:1/v1/"`. Loads, and the url becomes `http://h:1`.
    - `unknown_key_rejected`: add `colour = "red"` under `[endpoints.d3]`. The error mentions `colour`.

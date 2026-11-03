@@ -319,3 +319,71 @@ $ cargo nextest run
 `cargo fmt --all` passed. Clippy requested `Eq` alongside `PartialEq`; added the derives without changing behavior. All four specified question tests pass, including the six validation rejection cases.
 
 The Aikido plugin-requested external scan was rejected by automatic approval review: it would transmit repository source files outside the authorized local-only scope. No scan was performed; no external scan approval is needed to continue the plan's local checks.
+
+### Step 3: config
+
+```text
+$ cargo nextest run --test config (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0432]: unresolved imports `eightball::config::Config`, `eightball::config::ConfigError`
+ --> tests/config.rs:2:25
+  |
+2 | use eightball::config::{Config, ConfigError};
+  |                         ^^^^^^  ^^^^^^^^^^^ no `ConfigError` in `config`
+  |                         |
+  |                         no `Config` in `config`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `eightball` (test "config") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=config'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test config (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.68s
+────────────
+ Nextest run ID cb33f86b-6834-443f-b557-7d50aac944a3 with nextest profile: default
+    Starting 8 tests across 1 binary
+        PASS [   0.004s] (1/8) eightball::config unknown_key_rejected
+        PASS [   0.004s] (2/8) eightball::config minimal_ok
+        PASS [   0.004s] (3/8) eightball::config spec_parses
+        PASS [   0.004s] (4/8) eightball::config retention_default
+        PASS [   0.004s] (5/8) eightball::config default_must_exist
+        PASS [   0.004s] (6/8) eightball::config logprob_needs_model
+        PASS [   0.004s] (7/8) eightball::config zero_concurrency
+        PASS [   0.004s] (8/8) eightball::config bad_spec_name
+────────────
+     Summary [   0.004s] 8 tests run: 8 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.47s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+────────────
+ Nextest run ID 28597f78-dc65-449f-8f56-3af128c59f71 with nextest profile: default
+    Starting 12 tests across 4 binaries
+        PASS [   0.004s] ( 1/12) eightball::question validate_rejects
+        PASS [   0.004s] ( 2/12) eightball::question score_labels
+        PASS [   0.004s] ( 3/12) eightball::config minimal_ok
+        PASS [   0.004s] ( 4/12) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.004s] ( 5/12) eightball::config retention_default
+        PASS [   0.004s] ( 6/12) eightball::config logprob_needs_model
+        PASS [   0.004s] ( 7/12) eightball::config bad_spec_name
+        PASS [   0.012s] ( 8/12) eightball::config unknown_key_rejected
+        PASS [   0.012s] ( 9/12) eightball::question noul_without_criteria_parses
+        PASS [   0.012s] (10/12) eightball::config default_must_exist
+        PASS [   0.012s] (11/12) eightball::config spec_parses
+        PASS [   0.012s] (12/12) eightball::config zero_concurrency
+────────────
+     Summary [   0.012s] 12 tests run: 12 passed, 0 skipped
+```
+
+`cargo fmt --all` passed. All eight specified config tests pass; full suite: 12 passed. Tempfile builder uses the `8ball-` prefix to respect the allowed `/tmp/8ball-*` paths. No environment variables are changed in the test process.
