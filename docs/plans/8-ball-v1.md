@@ -2327,7 +2327,7 @@ Write these sections in this order:
 
 #### Step 5: Validate and commit
 
-**Execution status:** Strict plugin validation passes. Added a 512px PNG icon to resolve the directory icon warning; the owner explicitly deferred the directory-only hosted privacy-policy URL warning for this local build. Complete; all step 5 checks pass and end-of-chunk evidence is in the report. A final image rebuild is running as an additional Outcome audit.
+**Execution status:** Strict plugin validation passes. Added a 512px PNG icon to resolve the directory icon warning; the owner explicitly deferred the directory-only hosted privacy-policy URL warning for this local build. Complete; all step 5 checks pass and end-of-chunk evidence is in the report. The final image rebuild also passed; Outcome evidence is in the report.
 - Run `claude plugin validate plugin --strict` and fix every error and warning.
 - Commit:
   ```bash

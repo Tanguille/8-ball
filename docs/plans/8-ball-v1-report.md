@@ -38,11 +38,16 @@ Step 1: scaffold completed. Dependencies were added using every command listed i
 
 ## Deferred items
 
-- Chunks 5 and 7: explicitly excluded from this local run.
+- Chunks 5 and 7: explicitly excluded from this local run. No cluster deployment, publishing or Hermes configuration changes.
+- Cursor runtime check: installed CLI supports per-run plugins but requires user authentication; persistent login is outside the run. Exact pending commands are in README and the Chunk 6 evidence.
+- qwen-code and OpenCode v2 runtime checks: installing/replacing tools is prohibited. Exact install/test commands are in README and the Chunk 6 evidence; both are marked untested.
+- Hosted privacy-policy URL: owner explicitly approved deferring this directory-publication-only warning for the local build. Strict plugin validation exits 0; local data handling is documented.
+- Persistent marketplace installations: not performed; only contract-approved ephemeral/per-run harness tests were used.
+- External Aikido source scan: automatic approval review rejected source transmission under this local-only scope. It was not retried or bypassed; local checks and independent code review were completed.
 
 ## Final outcome
 
-Chunks 1, 2, 3, 4 and 6 are complete within local scope, with approved deferrals. Final image rebuild and clean-tree Outcome audit are pending; the goal is not yet claimed achieved.
+Achieved for the authorized local scope. Chunks 1, 2, 3, 4 and 6 are complete. Final verification: 97 mock tests, 22 live tests, formatting and Clippy pass; all four models healthy; local image builds and prints 8ball 0.1.0; Claude/Codex MCP calls verified; approved deferrals documented. Everything is committed on feat/v1 with a clean worktree. The final Outcome audit and command outputs are at the end of this report.
 
 ### Step 1 checks
 
@@ -9216,3 +9221,542 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; fin
 ```
 
 Final counts: 97 mock tests pass; 22 ignored-by-default real-model tests pass when explicitly run. Formatting, Clippy and diff checks pass. Both calibration fits decide 40/40 correctly. Greeting holdout: precision 1.0, coverage .85 (17/20 decided/correct); storage-risk: precision 1.0, coverage .95 (19/20 decided/correct). Full probabilities and thresholds are printed above.
+
+
+## Final Outcome audit — achieved in local scope
+
+1. **Chunks 1, 2, 3, 4 and 6:** checked in the Progress Tracker; every step completed. Chunks 5/7 remain excluded.
+2. **Required local checks:** cargo fmt --all --check and cargo clippy --all-targets -- -D warnings pass; cargo nextest run passes 97 mock tests (22 live tests skipped by default).
+3. **Models and live checks:** all four servers report ok; explicitly running the ignored live suite passes all 22 tests. Latest full outputs are in the preceding section.
+4. **Image:** the final local rebuild succeeds, and docker run --rm 8ball:dev --version prints exactly 8ball 0.1.0. Output follows. Buildx metadata was redirected to an allowed throwaway directory.
+5. **Verification checklists:** completed, with explicit boundary/owner-approved reasons for Cursor login, qwen/OpenCode installs and hosted privacy URL deferrals.
+6. **Report:** final counts, raw real-model probabilities, bands, fit coverage, holdout precision/coverage, all current deferrals and deviations are recorded. Greeting bands yes_at=0.9887315679689266, no_at=0.2215106614748801; holdout precision=1.0, coverage=.85. Storage-risk bands yes_at=0.3945663160806148, no_at=0.09182443961965812; holdout precision=1.0, coverage=.95. Both fits: 40/40 decided and correct.
+7. **Local Git:** feat/v1, no remotes, everything committed and clean; the report-only final audit commit is followed by another clean-status check. No pushes, deployments, tools installed/upgraded or persistent harness configuration edits.
+
+Both prior contract stops are resolved by explicit owner decisions. The logprob ranking amendment is retained exactly. Cache scope, AUTOINCREMENT and backend probability regressions all failed before fixes, then passed. Fresh checks also pass after the fixes. The independent follow-up review reported no additional actionable defects.
+
+### Final image build
+
+```text
+$ DOCKER_CONFIG=/tmp/8ball-resume/docker-config docker build -t 8ball:dev .
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 464B done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 0.7s
+
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+#3 resolve docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e 0.0s done
+#3 CACHED
+
+#4 [internal] load metadata for gcr.io/distroless/static:nonroot
+#4 DONE 0.4s
+
+#5 [internal] load metadata for docker.io/library/rust:1-alpine
+#5 DONE 0.6s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 116B done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [build 1/5] FROM docker.io/library/rust:1-alpine@sha256:7e9e2d068a107a2adafd19930011178d14a78326053cd4c3a9f7ad3fd049557d
+#8 resolve docker.io/library/rust:1-alpine@sha256:7e9e2d068a107a2adafd19930011178d14a78326053cd4c3a9f7ad3fd049557d 0.1s done
+#8 DONE 0.1s
+
+#9 [stage-1 1/2] FROM gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
+#9 resolve gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329 0.1s done
+#9 DONE 0.1s
+
+#7 [internal] load build context
+#7 transferring context: 62.22kB 0.0s done
+#7 DONE 0.0s
+
+#10 [build 2/5] RUN apk add --no-cache musl-dev
+#10 CACHED
+
+#11 [build 3/5] WORKDIR /src
+#11 CACHED
+
+#12 [build 4/5] COPY . .
+#12 DONE 0.3s
+
+#13 [build 5/5] RUN cargo build --release --locked && cp target/release/8ball /8ball
+#13 0.740 info: syncing channel updates for stable-x86_64-unknown-linux-musl
+#13 0.936 info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)
+#13 0.936 info: downloading 5 components
+#13 16.85 warn: the missing active toolchain `stable-x86_64-unknown-linux-musl` has been auto-installed
+#13 16.85 warn: this might cause rustup commands to take longer time to finish than expected
+#13 16.85 info: you may opt out with `RUSTUP_AUTO_INSTALL=0` or `rustup set auto-install disable`
+#13 17.16     Updating crates.io index
+#13 19.44  Downloading crates ...
+#13 19.57   Downloaded anstyle-query v1.1.5
+#13 19.57   Downloaded block-buffer v0.12.1
+#13 19.57   Downloaded cfg-if v1.0.5
+#13 19.58   Downloaded crypto-common v0.2.2
+#13 19.58   Downloaded colorchoice v1.0.5
+#13 19.58   Downloaded cpufeatures v0.3.1
+#13 19.58   Downloaded anstyle v1.0.14
+#13 19.58   Downloaded anstyle-parse v1.0.0
+#13 19.59   Downloaded clap_lex v1.1.1
+#13 19.59   Downloaded anstream v1.0.0
+#13 19.59   Downloaded clap_derive v4.6.7
+#13 19.60   Downloaded cmake v0.1.58
+#13 19.61   Downloaded darling_macro v0.24.1
+#13 19.61   Downloaded ident_case v1.0.1
+#13 19.61   Downloaded zerofrom v0.1.8
+#13 19.61   Downloaded const-oid v0.10.2
+#13 19.62   Downloaded futures-io v0.3.34
+#13 19.62   Downloaded idna_adapter v1.2.2
+#13 19.62   Downloaded zerofrom-derive v0.1.8
+#13 19.63   Downloaded bytes v1.12.1
+#13 19.63   Downloaded clap v4.6.7
+#13 19.65   Downloaded darling v0.24.1
+#13 19.66   Downloaded errno v0.3.14
+#13 19.66   Downloaded futures-macro v0.3.34
+#13 19.66   Downloaded form_urlencoded v1.2.2
+#13 19.66   Downloaded openssl-probe v0.2.2
+#13 19.67   Downloaded mime v0.3.17
+#13 19.67   Downloaded dyn-clone v1.0.20
+#13 19.67   Downloaded foldhash v0.2.0
+#13 19.67   Downloaded autocfg v1.5.1
+#13 19.68   Downloaded atomic-waker v1.1.2
+#13 19.68   Downloaded dunce v1.0.5
+#13 19.68   Downloaded equivalent v1.0.3
+#13 19.68   Downloaded httpdate v1.0.3
+#13 19.68   Downloaded zeroize v1.9.1
+#13 19.68   Downloaded rand_pcg v0.10.2
+#13 19.69   Downloaded displaydoc v0.2.7
+#13 19.69   Downloaded fallible-streaming-iterator v0.1.9
+#13 19.69   Downloaded futures-sink v0.3.34
+#13 19.69   Downloaded futures-task v0.3.34
+#13 19.70   Downloaded heck v0.5.0
+#13 19.70   Downloaded lru-slab v0.1.3
+#13 19.70   Downloaded matchers v0.2.0
+#13 19.70   Downloaded prometheus-client-derive-encode v0.5.1
+#13 19.71   Downloaded iana-time-zone v0.1.65
+#13 19.71   Downloaded potential_utf v0.1.6
+#13 19.71   Downloaded fnv v1.0.7
+#13 19.72   Downloaded hyper-rustls v0.27.10
+#13 19.72   Downloaded percent-encoding v2.3.2
+#13 19.72   Downloaded http-body v1.1.0
+#13 19.72   Downloaded itoa v1.0.18
+#13 19.73   Downloaded lazy_static v1.5.1
+#13 19.73   Downloaded pastey v0.2.3
+#13 19.73   Downloaded serde_urlencoded v0.7.1
+#13 19.73   Downloaded want v0.3.2
+#13 19.74   Downloaded yoke-derive v0.8.4
+#13 19.74   Downloaded cfg_aliases v0.2.2
+#13 19.74   Downloaded futures-core v0.3.34
+#13 19.74   Downloaded utf8_iter v1.1.0
+#13 19.75   Downloaded utf8parse v0.2.2
+#13 19.75   Downloaded is_terminal_polyfill v1.70.2
+#13 19.75   Downloaded stable_deref_trait v1.2.1
+#13 19.75   Downloaded futures-channel v0.3.34
+#13 19.75   Downloaded futures-executor v0.3.34
+#13 19.76   Downloaded ipnet v2.12.2
+#13 19.76   Downloaded jobserver v0.1.35
+#13 19.76   Downloaded litemap v0.8.3
+#13 19.76   Downloaded thread_local v1.1.10
+#13 19.76   Downloaded async-trait v0.1.92
+#13 19.78   Downloaded digest v0.11.3
+#13 19.78   Downloaded dtoa v1.0.11
+#13 19.79   Downloaded fallible-iterator v0.3.0
+#13 19.79   Downloaded find-msvc-tools v0.1.15
+#13 19.79   Downloaded http-body-util v0.1.5
+#13 19.80   Downloaded subtle v2.6.1
+#13 19.80   Downloaded tokio-macros v2.7.2
+#13 19.80   Downloaded lock_api v0.4.14
+#13 19.81   Downloaded writeable v0.6.4
+#13 19.81   Downloaded scopeguard v1.2.0
+#13 19.82   Downloaded strsim v0.11.1
+#13 19.82   Downloaded fs_extra v1.3.0
+#13 19.82   Downloaded hybrid-array v0.4.15
+#13 19.82   Downloaded axum-core v0.5.6
+#13 19.83   Downloaded bitflags v2.13.2
+#13 19.83   Downloaded pin-project-lite v0.2.17
+#13 19.84   Downloaded pkg-config v0.3.34
+#13 19.84   Downloaded chacha20 v0.10.2
+#13 19.85   Downloaded quote v1.0.47
+#13 19.85   Downloaded rand_core v0.10.1
+#13 19.85   Downloaded utf_types v1.0.0
+#13 19.85   Downloaded yoke v0.8.4
+#13 19.85   Downloaded getrandom v0.2.17
+#13 19.86   Downloaded matchit v0.8.4
+#13 19.87   Downloaded tower-layer v0.3.3
+#13 19.87   Downloaded httparse v1.10.1
+#13 19.88   Downloaded icu_normalizer_data v2.4.0
+#13 19.88   Downloaded serde_spanned v1.1.2
+#13 19.89   Downloaded hashlink v0.12.2
+#13 19.89   Downloaded cc v1.11.0
+#13 19.92   Downloaded try-lock v0.2.5
+#13 19.92   Downloaded getrandom v0.4.3
+#13 19.93   Downloaded anyhow v1.0.104
+#13 19.95   Downloaded icu_provider v2.4.0
+#13 19.95   Downloaded log v0.4.35
+#13 19.96   Downloaded aho-corasick v1.1.5
+#13 19.99   Downloaded futures v0.3.34
+#13 20.00   Downloaded ref-cast v1.0.27
+#13 20.00   Downloaded sync_wrapper v1.0.2
+#13 20.00   Downloaded tower-service v0.3.3
+#13 20.00   Downloaded uuid v1.29.0
+#13 20.01   Downloaded rustc-hash v2.1.3
+#13 20.01   Downloaded ref-cast-impl v1.0.27
+#13 20.02   Downloaded darling_core v0.24.1
+#13 20.03   Downloaded http v1.5.0
+#13 20.04   Downloaded zerovec-derive v0.11.7
+#13 20.05   Downloaded base64 v0.23.1
+#13 20.05   Downloaded clap_builder v4.6.7
+#13 20.07   Downloaded icu_collections v2.4.0
+#13 20.09   Downloaded icu_locale_core v2.4.0
+#13 20.11   Downloaded indexmap v2.14.2
+#13 20.12   Downloaded memchr v2.8.3
+#13 20.14   Downloaded mio v1.2.4
+#13 20.15   Downloaded toml_datetime v1.1.2+spec-1.1.0
+#13 20.15   Downloaded hyper-util v0.1.21
+#13 20.17   Downloaded schemars_derive v1.2.3
+#13 20.18   Downloaded thiserror v2.0.21
+#13 20.20   Downloaded tokio-rustls v0.26.6
+#13 20.21   Downloaded shlex v2.0.1
+#13 20.22   Downloaded signal-hook-registry v1.4.8
+#13 20.23   Downloaded tracing-log v0.2.0
+#13 20.23   Downloaded hashbrown v0.17.1
+#13 20.25   Downloaded untrusted v0.9.0
+#13 20.26   Downloaded slab v0.4.12
+#13 20.26   Downloaded sha2 v0.11.1
+#13 20.27   Downloaded quinn-udp v0.5.16
+#13 20.28   Downloaded icu_properties v2.4.0
+#13 20.30   Downloaded idna v1.1.0
+#13 20.31   Downloaded once_cell v1.21.4
+#13 20.31   Downloaded aws-lc-rs v1.19.0
+#13 20.34   Downloaded tinystr v0.8.5
+#13 20.34   Downloaded hyper v1.12.0
+#13 20.36   Downloaded nu-ansi-term v0.50.3
+#13 20.37   Downloaded futures-util v0.3.34
+#13 20.41   Downloaded axum v0.8.9
+#13 20.44   Downloaded h2 v0.4.20
+#13 20.46   Downloaded icu_properties_data v2.4.0
+#13 20.47   Downloaded serde_derive_internals v0.30.0
+#13 20.48   Downloaded sse-stream v0.2.6
+#13 20.48   Downloaded thiserror-impl v2.0.21
+#13 20.49   Downloaded winnow v1.0.4
+#13 20.50   Downloaded rustls-native-certs v0.8.5
+#13 20.50   Downloaded synstructure v0.14.0
+#13 20.51   Downloaded zerotrie v0.2.5
+#13 20.51   Downloaded chrono v0.4.45
+#13 20.52   Downloaded vcpkg v0.2.15
+#13 20.58   Downloaded unicode-ident v1.0.27
+#13 20.58   Downloaded parking_lot v0.12.5
+#13 20.58   Downloaded rustls-pki-types v1.15.1
+#13 20.59   Downloaded serde_path_to_error v0.1.20
+#13 20.59   Downloaded parking_lot_core v0.9.12
+#13 20.59   Downloaded num-traits v0.2.19
+#13 20.59   Downloaded proc-macro2 v1.0.107
+#13 20.60   Downloaded rmcp-macros v3.8.0
+#13 20.60   Downloaded smallvec v1.16.4
+#13 20.60   Downloaded zmij v1.0.23
+#13 20.60   Downloaded toml_parser v1.1.5+spec-1.1.0
+#13 20.60   Downloaded toml_writer v1.1.3+spec-1.1.0
+#13 20.61   Downloaded rustls-platform-verifier v0.7.1
+#13 20.61   Downloaded tokio-stream v0.1.19
+#13 20.61   Downloaded toml v1.1.8+spec-1.1.0
+#13 20.62   Downloaded tracing-attributes v0.1.31
+#13 20.62   Downloaded socket2 v0.6.5
+#13 20.62   Downloaded tracing-core v0.1.36
+#13 20.67   Downloaded icu_normalizer v2.4.0
+#13 20.69   Downloaded ryu v1.0.23
+#13 20.69   Downloaded serde_core v1.0.229
+#13 20.69   Downloaded tinyvec v1.13.3
+#13 20.70   Downloaded sharded-slab v0.1.7
+#13 20.75   Downloaded serde_derive v1.0.229
+#13 20.75   Downloaded schemars v1.2.3
+#13 20.77   Downloaded libc v0.2.191
+#13 20.83   Downloaded prometheus-client v0.25.2
+#13 20.83   Downloaded quinn v0.11.12
+#13 20.84   Downloaded url v2.5.8
+#13 20.84   Downloaded rand v0.10.3
+#13 20.84   Downloaded serde v1.0.229
+#13 20.85   Downloaded tower v0.5.3
+#13 20.86   Downloaded typenum v1.20.1
+#13 20.86   Downloaded rustls-webpki v0.103.16
+#13 20.87   Downloaded zerovec v0.11.9
+#13 20.87   Downloaded tokio-util v0.7.20
+#13 20.88   Downloaded tower-http v0.6.11
+#13 20.89   Downloaded serde_json v1.0.154
+#13 20.90   Downloaded rusqlite v0.41.1
+#13 20.91   Downloaded process-wrap v10.0.1
+#13 20.92   Downloaded reqwest v0.13.5
+#13 20.93   Downloaded tracing-subscriber v0.3.23
+#13 20.94   Downloaded quinn-proto v0.11.19
+#13 20.95   Downloaded nix v0.31.3
+#13 20.97   Downloaded syn v2.0.119
+#13 20.98   Downloaded syn v3.0.9
+#13 20.99   Downloaded regex-syntax v0.8.11
+#13 21.00   Downloaded rustls v0.23.46
+#13 21.01   Downloaded tracing v0.1.44
+#13 21.03   Downloaded libsqlite3-sys v0.39.1
+#13 21.06   Downloaded regex-automata v0.4.18
+#13 21.07   Downloaded rmcp v3.8.0
+#13 21.10   Downloaded tokio v1.54.1
+#13 21.14   Downloaded ring v0.17.14
+#13 21.18   Downloaded aws-lc-sys v0.47.0
+#13 22.25    Compiling proc-macro2 v1.0.107
+#13 22.25    Compiling unicode-ident v1.0.27
+#13 22.27    Compiling quote v1.0.47
+#13 22.27    Compiling libc v0.2.191
+#13 22.27    Compiling pin-project-lite v0.2.17
+#13 22.27    Compiling find-msvc-tools v0.1.15
+#13 22.27    Compiling futures-core v0.3.34
+#13 22.27    Compiling shlex v2.0.1
+#13 22.27    Compiling bytes v1.12.1
+#13 22.27    Compiling itoa v1.0.18
+#13 22.27    Compiling pkg-config v0.3.34
+#13 22.27    Compiling stable_deref_trait v1.2.1
+#13 22.27    Compiling serde_core v1.0.229
+#13 22.28    Compiling smallvec v1.16.4
+#13 22.28    Compiling once_cell v1.21.4
+#13 22.28    Compiling memchr v2.8.3
+#13 22.30    Compiling futures-sink v0.3.34
+#13 22.33    Compiling log v0.4.35
+#13 22.34    Compiling dunce v1.0.5
+#13 22.34    Compiling fs_extra v1.3.0
+#13 22.34    Compiling cfg-if v1.0.5
+#13 22.34    Compiling futures-task v0.3.34
+#13 22.34    Compiling slab v0.4.12
+#13 22.34    Compiling zmij v1.0.23
+#13 22.64    Compiling futures-io v0.3.34
+#13 22.66    Compiling foldhash v0.2.0
+#13 22.68    Compiling zeroize v1.9.1
+#13 22.70    Compiling utf_types v1.0.0
+#13 22.79    Compiling litemap v0.8.3
+#13 22.92    Compiling futures-channel v0.3.34
+#13 22.98    Compiling writeable v0.6.4
+#13 23.00    Compiling aws-lc-rs v1.19.0
+#13 23.11    Compiling hashbrown v0.17.1
+#13 23.19    Compiling icu_normalizer_data v2.4.0
+#13 23.23    Compiling percent-encoding v2.3.2
+#13 23.33    Compiling icu_properties_data v2.4.0
+#13 23.42    Compiling serde v1.0.229
+#13 23.44    Compiling tower-service v0.3.3
+#13 23.48    Compiling rustls-pki-types v1.15.1
+#13 23.53    Compiling httparse v1.10.1
+#13 23.54    Compiling equivalent v1.0.3
+#13 23.64    Compiling try-lock v0.2.5
+#13 23.65    Compiling serde_json v1.0.154
+#13 23.76    Compiling rustls v0.23.46
+#13 23.89    Compiling autocfg v1.5.1
+#13 23.92    Compiling untrusted v0.9.0
+#13 23.92    Compiling want v0.3.2
+#13 23.93    Compiling form_urlencoded v1.2.2
+#13 24.22    Compiling sync_wrapper v1.0.2
+#13 24.23    Compiling getrandom v0.4.3
+#13 24.29    Compiling subtle v2.6.1
+#13 24.32    Compiling httpdate v1.0.3
+#13 24.35    Compiling base64 v0.23.1
+#13 24.36    Compiling typenum v1.20.1
+#13 24.45    Compiling ident_case v1.0.1
+#13 24.47    Compiling rand_core v0.10.1
+#13 24.52    Compiling utf8_iter v1.1.0
+#13 24.57    Compiling tracing-core v0.1.36
+#13 24.61    Compiling tower-layer v0.3.3
+#13 24.66    Compiling atomic-waker v1.1.2
+#13 24.84    Compiling strsim v0.11.1
+#13 25.01    Compiling utf8parse v0.2.2
+#13 25.10    Compiling parking_lot_core v0.9.12
+#13 25.15    Compiling vcpkg v0.2.15
+#13 25.29    Compiling num-traits v0.2.19
+#13 25.30    Compiling ipnet v2.12.2
+#13 25.47    Compiling cpufeatures v0.3.1
+#13 25.59    Compiling ref-cast v1.0.27
+#13 25.67    Compiling anstyle-parse v1.0.0
+#13 25.93    Compiling scopeguard v1.2.0
+#13 26.04    Compiling anstyle v1.0.14
+#13 26.07    Compiling regex-syntax v0.8.11
+#13 26.09    Compiling anstyle-query v1.1.5
+#13 26.13    Compiling colorchoice v1.0.5
+#13 26.25    Compiling is_terminal_polyfill v1.70.2
+#13 26.30    Compiling bitflags v2.13.2
+#13 26.34    Compiling openssl-probe v0.2.2
+#13 26.48    Compiling thiserror v2.0.21
+#13 26.48    Compiling lock_api v0.4.14
+#13 26.75    Compiling chacha20 v0.10.2
+#13 26.94    Compiling rustls-native-certs v0.8.5
+#13 27.00    Compiling prometheus-client v0.25.2
+#13 27.07    Compiling rmcp v3.8.0
+#13 27.39    Compiling ryu v1.0.23
+#13 27.43    Compiling heck v0.5.0
+#13 27.55    Compiling anstream v1.0.0
+#13 27.59    Compiling mime v0.3.17
+#13 27.70    Compiling lazy_static v1.5.1
+#13 27.73    Compiling anyhow v1.0.104
+#13 27.84    Compiling clap_lex v1.1.1
+#13 27.95    Compiling const-oid v0.10.2
+#13 28.03    Compiling http v1.5.0
+#13 28.14    Compiling winnow v1.0.4
+#13 28.15    Compiling dyn-clone v1.0.20
+#13 28.17    Compiling syn v3.0.9
+#13 28.18    Compiling syn v2.0.119
+#13 28.39    Compiling hashlink v0.12.2
+#13 28.43    Compiling sharded-slab v0.1.7
+#13 28.52    Compiling thread_local v1.1.10
+#13 28.58    Compiling toml_writer v1.1.3+spec-1.1.0
+#13 28.60    Compiling pastey v0.2.3
+#13 28.67    Compiling fallible-iterator v0.3.0
+#13 28.74    Compiling fallible-streaming-iterator v0.1.9
+#13 28.83    Compiling clap_builder v4.6.7
+#13 28.99    Compiling nu-ansi-term v0.50.3
+#13 29.08    Compiling tracing-log v0.2.0
+#13 29.11    Compiling matchit v0.8.4
+#13 29.12    Compiling dtoa v1.0.11
+#13 29.49    Compiling errno v0.3.14
+#13 29.55    Compiling mio v1.2.4
+#13 29.63    Compiling socket2 v0.6.5
+#13 29.77    Compiling signal-hook-registry v1.4.8
+#13 30.10    Compiling rand v0.10.3
+#13 30.10    Compiling uuid v1.29.0
+#13 30.41    Compiling toml_parser v1.1.5+spec-1.1.0
+#13 30.70    Compiling parking_lot v0.12.5
+#13 30.81    Compiling hybrid-array v0.4.15
+#13 32.18    Compiling jobserver v0.1.35
+#13 32.41    Compiling regex-automata v0.4.18
+#13 32.51    Compiling cc v1.11.0
+#13 32.74    Compiling http-body v1.1.0
+#13 32.86    Compiling http-body-util v0.1.5
+#13 33.00    Compiling indexmap v2.14.2
+#13 33.00    Compiling serde_path_to_error v0.1.20
+#13 33.00    Compiling serde_spanned v1.1.2
+#13 33.00    Compiling toml_datetime v1.1.2+spec-1.1.0
+#13 33.21    Compiling crypto-common v0.2.2
+#13 33.21    Compiling block-buffer v0.12.1
+#13 34.82    Compiling digest v0.11.3
+#13 35.09    Compiling sha2 v0.11.1
+#13 36.22    Compiling cmake v0.1.58
+#13 36.73    Compiling toml v1.1.8+spec-1.1.0
+#13 37.08    Compiling aws-lc-sys v0.47.0
+#13 37.08    Compiling libsqlite3-sys v0.39.1
+#13 43.75    Compiling matchers v0.2.0
+#13 49.27    Compiling synstructure v0.14.0
+#13 49.46    Compiling darling_core v0.24.1
+#13 49.58    Compiling serde_derive_internals v0.30.0
+#13 49.77    Compiling tracing-attributes v0.1.31
+#13 51.05    Compiling zerofrom-derive v0.1.8
+#13 51.05    Compiling yoke-derive v0.8.4
+#13 51.05    Compiling zerovec-derive v0.11.7
+#13 51.05    Compiling displaydoc v0.2.7
+#13 51.05    Compiling tokio-macros v2.7.2
+#13 51.05    Compiling futures-macro v0.3.34
+#13 51.05    Compiling serde_derive v1.0.229
+#13 51.05    Compiling ref-cast-impl v1.0.27
+#13 51.05    Compiling thiserror-impl v2.0.21
+#13 51.05    Compiling prometheus-client-derive-encode v0.5.1
+#13 51.06    Compiling async-trait v0.1.92
+#13 51.06    Compiling clap_derive v4.6.7
+#13 52.24    Compiling schemars_derive v1.2.3
+#13 52.39    Compiling tracing v0.1.44
+#13 52.53    Compiling tokio v1.54.1
+#13 53.14    Compiling axum-core v0.5.6
+#13 53.20    Compiling tracing-subscriber v0.3.23
+#13 53.39    Compiling futures-util v0.3.34
+#13 54.45    Compiling zerofrom v0.1.8
+#13 54.63    Compiling yoke v0.8.4
+#13 55.12    Compiling zerotrie v0.2.5
+#13 55.58    Compiling zerovec v0.11.9
+#13 57.39    Compiling darling_macro v0.24.1
+#13 58.73    Compiling tinystr v0.8.5
+#13 58.73    Compiling potential_utf v0.1.6
+#13 58.87    Compiling icu_collections v2.4.0
+#13 59.06    Compiling darling v0.24.1
+#13 59.09    Compiling clap v4.6.7
+#13 59.16    Compiling rmcp-macros v3.8.0
+#13 59.17    Compiling icu_locale_core v2.4.0
+#13 61.19    Compiling chrono v0.4.45
+#13 61.19    Compiling serde_urlencoded v0.7.1
+#13 61.86    Compiling icu_provider v2.4.0
+#13 62.25    Compiling icu_normalizer v2.4.0
+#13 62.26    Compiling icu_properties v2.4.0
+#13 64.93    Compiling schemars v1.2.3
+#13 66.30    Compiling idna_adapter v1.2.2
+#13 66.40    Compiling idna v1.1.0
+#13 66.59    Compiling futures-executor v0.3.34
+#13 66.59    Compiling sse-stream v0.2.6
+#13 66.93    Compiling futures v0.3.34
+#13 66.99    Compiling url v2.5.8
+#13 68.28    Compiling hyper v1.12.0
+#13 68.28    Compiling tower v0.5.3
+#13 68.28    Compiling tokio-stream v0.1.19
+#13 68.28    Compiling tokio-util v0.7.20
+#13 69.49    Compiling tower-http v0.6.11
+#13 70.60    Compiling hyper-util v0.1.21
+#13 74.69    Compiling axum v0.8.9
+#13 88.37    Compiling rustls-webpki v0.103.16
+#13 99.57    Compiling tokio-rustls v0.26.6
+#13 99.57    Compiling rustls-platform-verifier v0.7.1
+#13 99.92    Compiling hyper-rustls v0.27.10
+#13 100.1    Compiling reqwest v0.13.5
+#13 160.4    Compiling rusqlite v0.41.1
+#13 163.1    Compiling eightball v0.1.0 (/src)
+#13 289.5     Finished `release` profile [optimized] target(s) in 4m 32s
+#13 DONE 290.1s
+
+#14 [stage-1 2/2] COPY --from=build /8ball /8ball
+#14 CACHED
+
+#15 exporting to image
+#15 exporting layers 0.0s done
+#15 exporting manifest sha256:9055f3b5452addeff2bb54f4578cbb49f50bd6e57f4c39346e219695e4cfe45e done
+#15 exporting config sha256:404cabb0fa2cf33f0e3e87f14c4b303810c52304948a97c192ff2bb334b7ff38 done
+#15 exporting attestation manifest sha256:1c7e0a9c35b5bc32860c495d42e5efd9d2eff9afd28b6cd0d9309ede67b8a845 done
+#15 exporting manifest list sha256:0b31d5d9fe7c2a04138003e8c45dd5a40e811f8d442a759a4a7c99c49a00e926 done
+#15 naming to docker.io/library/8ball:dev done
+#15 unpacking to docker.io/library/8ball:dev done
+#15 DONE 0.1s
+
+```
+
+```text
+$ DOCKER_CONFIG=/tmp/8ball-resume/docker-config docker run --rm 8ball:dev --version
+8ball 0.1.0
+
+```
+
+### Final audit commands
+
+```text
+$ git branch --show-current
+feat/v1
+exit status: 0
+$ git status --short
+exit status: 0
+$ git remote -v
+exit status: 0
+$ git log --oneline -7
+2da2d4d docs(plan): chunk 6 complete
+553274a feat(plugin): harness integrations and readme
+0fade75 docs: add setup and harness integration reference
+fdb640d feat(plugin): add judgment and calibration skill
+5396fe2 feat(plugin): configure HTTP MCP for four harnesses
+88d6863 feat(plugin): add local harness marketplace manifests
+10ef419 docs(plan): chunk 4 complete
+exit status: 0
+$ git diff --check
+exit status: 0
+$ cargo fmt --all --check
+exit status: 0
+Progress Tracker Chunk 1: complete
+Progress Tracker Chunk 2: complete
+Progress Tracker Chunk 3: complete
+Progress Tracker Chunk 4: complete
+Progress Tracker Chunk 6: complete
+All plugin/marketplace JSON parses.
+Skill below 80 lines.
+Temporary harness credential/config directories removed.
+Local image smoke: 8ball 0.1.0
+
+```
+
+Temporary harness credential/config directories and the synthetic server were removed after evidence capture. The remaining /tmp/8ball-resume logs, synthetic SQLite database and Buildx config are removed after this evidence is committed. The four model containers and authorized model cache remain available for local development.
