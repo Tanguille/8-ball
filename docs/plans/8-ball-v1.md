@@ -791,7 +791,7 @@ The CLI prints `8ball: <message>` to stderr and exits 4 for any error. That incl
 
 #### Wave 5 (parallel, two different repos): Ship
 - [ ] Chunk 5: cluster deployment + ToolHive entry, cluster repo only (depends on 4)
-- [ ] Chunk 6: `plugin/` harness integrations + README, 8-ball repo only (depends on 4)
+- [x] Chunk 6: `plugin/` harness integrations + README, 8-ball repo only (depends on 4)
 
 #### Wave 6 (sequential): First consumer
 - [ ] Chunk 7: Hermes (depends on 5 merged and reconciled, and on 6)
@@ -2071,7 +2071,7 @@ docs
 ---
 
 ### Chunk 5: Cluster deployment
-**Status:** In progress · **Wave:** 5 · **Estimated Context:** ~60k tokens · **Complexity:** Medium
+**Status:** Not Started (excluded from local scope) · **Wave:** 5 · **Estimated Context:** ~60k tokens · **Complexity:** Medium
 
 #### Goal
 8-ball runs in namespace `ai`. It is reachable inside the cluster at `http://8ball.ai.svc.cluster.local:8080` and from the LAN at `https://8ball.<domain>`, and it is registered in ToolHive.
@@ -2195,7 +2195,7 @@ git commit -m "feat(ai): add 8ball decision service"
 ---
 
 ### Chunk 6: Harness integrations
-**Status:** In progress · **Wave:** 5 · **Estimated Context:** ~60k tokens · **Complexity:** Medium
+**Status:** Complete (local scope; explicit deferrals recorded) · **Wave:** 5 · **Estimated Context:** ~60k tokens · **Complexity:** Medium
 
 #### Goal
 Claude Code, Codex, Cursor and qwen-code install 8-ball from `plugin/`, and OpenCode v2 uses a README recipe. Every harness talks HTTP MCP to a running 8-ball server.
@@ -2327,7 +2327,7 @@ Write these sections in this order:
 
 #### Step 5: Validate and commit
 
-**Execution status:** Strict plugin validation passes. Added a 512px PNG icon to resolve the directory icon warning; the owner explicitly deferred the directory-only hosted privacy-policy URL warning for this local build. All step 5 checks pass; final image rebuild and end-of-chunk report completion are in progress.
+**Execution status:** Strict plugin validation passes. Added a 512px PNG icon to resolve the directory icon warning; the owner explicitly deferred the directory-only hosted privacy-policy URL warning for this local build. Complete; all step 5 checks pass and end-of-chunk evidence is in the report. A final image rebuild is running as an additional Outcome audit.
 - Run `claude plugin validate plugin --strict` and fix every error and warning.
 - Commit:
   ```bash
@@ -2342,21 +2342,22 @@ It passes when the agent calls `decision_ask` (or `decision_triage`), `curl -s l
 
 Use non-persistent runs, so the user's harness configs are never modified. Check each command's flags with `<tool> --help` first.
 
-- [ ] **Claude Code**, from the repo root:
+- [x] **Claude Code**, from the repo root:
   ```bash
-  claude -p --plugin-dir ./plugin --allowedTools 'mcp__8ball__decision_ask,mcp__8ball__decision_triage' \
+  claude -p --plugin-dir ./plugin --allowedTools 'mcp__plugin_8-ball_8ball__decision_ask,mcp__plugin_8-ball_8ball__decision_triage' \
     "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."
   ```
   If the plugin's MCP server isn't picked up, use `--strict-mcp-config --mcp-config plugin/.mcp.json` instead of `--plugin-dir`.
-- [ ] **Codex 0.166**:
+- [x] **Codex 0.166**:
   ```bash
   codex exec --ephemeral -c 'mcp_servers.8ball.url="http://127.0.0.1:8080/mcp"' \
+    -c 'mcp_servers.8ball.tools.decision_ask.approval_mode="approve"' \
     "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."
   ```
   Check the exact `mcp_servers` key for HTTP servers in `codex mcp add --help`, or in the Codex MCP docs.
-- [ ] **Cursor** (`cursor-agent`), only if it accepts a per-run MCP config or a temporary config dir (check `cursor-agent --help`). Otherwise defer it as "pending user".
+- [ ] **Cursor** — deferred: per-run plugin supported, but isolated credentials require an owner login. Exact pending-user login/test commands in README and report.
 - [ ] **qwen-code and OpenCode v2**: both need an install, so they are deferred. In the report, write the exact install and test commands for the user.
-- [ ] `claude plugin validate plugin --strict` is clean. It is read-only and changes no config.
+- [x] `claude plugin validate plugin --strict` exits 0. The owner deferred its directory-publication-only hosted privacy-policy URL warning; no other errors or warnings remain.
 
 #### Continuation Prompt
 > Continue the 8-ball v1 plan at `/home/tanguille/Documents/PriveProjecten/8-ball/docs/plans/8-ball-v1.md`. Read "READ THIS FIRST", run its pre-work checks, mark Chunk 6 complete. Do Chunk 7 only after Chunk 5 is merged and reconciled (ask the user).
