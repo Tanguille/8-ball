@@ -10,6 +10,8 @@ use crate::{
     verdict::{self, Bands},
 };
 
+pub use crate::metrics::Metrics;
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Decision {
     pub id: i64,          // row id in the decisions table
@@ -126,54 +128,6 @@ impl From<StoreError> for ServiceError {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, prometheus_client::encoding::EncodeLabelSet)]
-struct DecisionLabels {
-    endpoint: String,
-    spec: String,
-    verdict: String,
-}
-#[derive(Clone, Debug, Hash, PartialEq, Eq, prometheus_client::encoding::EncodeLabelSet)]
-struct EndpointLabels {
-    endpoint: String,
-}
-
-pub struct Metrics {
-    registry: prometheus_client::registry::Registry,
-    decisions: prometheus_client::metrics::family::Family<
-        DecisionLabels,
-        prometheus_client::metrics::counter::Counter,
-    >,
-    backend_errors: prometheus_client::metrics::family::Family<
-        EndpointLabels,
-        prometheus_client::metrics::counter::Counter,
-    >,
-}
-impl Default for Metrics {
-    fn default() -> Self {
-        let mut registry = prometheus_client::registry::Registry::default();
-        let decisions = prometheus_client::metrics::family::Family::<
-            DecisionLabels,
-            prometheus_client::metrics::counter::Counter,
-        >::default();
-        let backend_errors = prometheus_client::metrics::family::Family::<
-            EndpointLabels,
-            prometheus_client::metrics::counter::Counter,
-        >::default();
-        registry.register("eightball_decisions", "Decision results", decisions.clone());
-        registry.register(
-            "eightball_backend_errors",
-            "Failed endpoint calls",
-            backend_errors.clone(),
-        );
-
-        Self {
-            registry,
-            decisions,
-            backend_errors,
-        }
-    }
-}
-
 struct Judgment {
     endpoint: String,
     spec: Option<String>,
@@ -214,20 +168,13 @@ impl Service {
     }
 
     pub fn metrics(&self) -> Result<String, ServiceError> {
-        let mut text = String::new();
-        prometheus_client::encoding::text::encode(&mut text, &self.metrics.registry)
-            .map_err(|e| ServiceError::Store(format!("metrics encoding: {e}")))?;
-
-        Ok(text)
+        self.metrics
+            .render()
+            .map_err(|e| ServiceError::Store(format!("metrics encoding: {e}")))
     }
 
     fn backend_error(&self, name: &str, error: crate::backend::BackendError) -> ServiceError {
-        self.metrics
-            .backend_errors
-            .get_or_create(&EndpointLabels {
-                endpoint: name.into(),
-            })
-            .inc();
+        self.metrics.record_backend_error(name);
 
         ServiceError::Backend {
             endpoint: name.into(),
@@ -743,23 +690,11 @@ impl Service {
                 if !judgment.decision.cached {
                     judgment.decision.id = ids.next().expect("id for each fresh decision");
                 }
-                let verdict = if judgment.spec.is_none() {
-                    if judgment.decision.verdict == "unsure" {
-                        "unsure".into()
-                    } else {
-                        "decided".into()
-                    }
-                } else {
-                    judgment.decision.verdict.clone()
-                };
-                self.metrics
-                    .decisions
-                    .get_or_create(&DecisionLabels {
-                        endpoint: judgment.endpoint,
-                        spec: judgment.spec.unwrap_or_default(),
-                        verdict,
-                    })
-                    .inc();
+                self.metrics.record_decision(
+                    judgment.endpoint,
+                    judgment.spec,
+                    &judgment.decision.verdict,
+                );
                 judgment.decision
             })
             .collect())
