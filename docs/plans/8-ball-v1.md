@@ -786,7 +786,7 @@ The CLI prints `8ball: <message>` to stderr and exits 4 for any error. That incl
 - [x] Chunk 3: SQLite store, answer cache, specs in ask, label, calibrate, metrics, retention (depends on 2)
 
 #### Wave 4 (sequential): Agents and image
-- [ ] Chunk 4: MCP over stdio and HTTP, bearer auth, OAuth 404s, Dockerfile (depends on 3)
+- [x] Chunk 4: MCP over stdio and HTTP, bearer auth, OAuth 404s, Dockerfile (depends on 3)
 
 #### Wave 5 (parallel, two different repos): Ship
 - [ ] Chunk 5: cluster deployment + ToolHive entry, cluster repo only (depends on 4)
@@ -1837,7 +1837,7 @@ Calibration only means something on real model output, so this step is the main 
 ---
 
 ### Chunk 4: Agents and image
-**Status:** Blocked after auth/tests: cache/label plan contradiction (see report) · **Wave:** 4 · **Estimated Context:** ~70k tokens · **Complexity:** Medium
+**Status:** Complete (local scope; non-persistent Claude E2E verified) · **Wave:** 4 · **Estimated Context:** ~70k tokens · **Complexity:** Medium
 
 #### Goal
 Agents use 8-ball over MCP (stdio and HTTP). The server can require a bearer key. A container image builds.
@@ -1982,7 +1982,7 @@ async fn no_oauth() -> Response {
 
 #### Step 5: Tests
 
-**Execution status:** Required mock/CLI/HTTP tests pass. Owner resolved the cache/label stop on 2026-11-03: cache is scoped by spec, ids use AUTOINCREMENT, and malformed backend probabilities fail open. Regression fixes and Docker verification are in progress.
+**Execution status:** Required mock/CLI/HTTP tests pass. Owner resolved the cache/label stop on 2026-11-03: cache is scoped by spec, ids use AUTOINCREMENT, and malformed backend probabilities fail open. Regression fixes, Docker verification and non-persistent Claude E2E are complete.
 `tests/mcp_stdio.rs`:
 1. Write a temp config with a wiremock systemone mock and one spec `greeting`. Use a temp DB path.
 2. Build the transport:
@@ -2030,6 +2030,8 @@ Add these to `tests/live.rs`:
    - `decision_ask` returns `is_error == Some(true)`, and the text contains `Fail open`.
 
 #### Step 6: Dockerfile
+
+**Execution status:** Complete; local image builds and prints `8ball 0.1.0`. Buildx state redirected under /tmp/8ball-resume to respect filesystem boundaries.
 `Dockerfile`:
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -2057,10 +2059,10 @@ docs
 - If the alpine build fails on a C dependency (rusqlite's bundled SQLite needs a C compiler; `musl-dev` plus the default `gcc` in `rust:alpine` should cover it), add the missing apk package that the error names.
 
 #### Verification (E2E)
-- [ ] The checks are clean, the image builds, and `--version` works.
-- [ ] Run `8ball serve --config dev/config.toml &` with no key. Then `claude mcp add --transport http 8ball-dev http://127.0.0.1:8080/mcp`.
-- [ ] In a new Claude Code session, ask "Use 8-ball to decide whether 'hi there' is a greeting." Claude calls `decision_ask`, and `curl -s localhost:8080/metrics | grep eightball_decisions` shows the count went up.
-- [ ] Afterwards, run `claude mcp remove 8ball-dev`.
+- [x] The checks are clean, the image builds, and `--version` works.
+- [x] Keyless server on port 18080 (8080 occupied); used a temporary strict per-run MCP config instead of persistent `claude mcp add`, per the contract.
+- [x] New Claude Code 2.1.317 session called `decision_ask` for "hi there", reported yes, and the greeting counter increased 0→1. Evidence in report.
+- [x] No persistent MCP registration was created; temporary harness state is removed at final cleanup.
 
 #### Continuation Prompt
 > Continue the 8-ball v1 plan at `/home/tanguille/Documents/PriveProjecten/8-ball/docs/plans/8-ball-v1.md`. Read "READ THIS FIRST", run its pre-work checks, mark Chunk 4 complete. Chunks 5 and 6 are one parallel wave in different repos: do Chunk 6 first in this session, and tell the user Chunk 5 (cluster repo) can run in another session.
