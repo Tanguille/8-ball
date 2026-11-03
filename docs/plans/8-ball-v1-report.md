@@ -8473,3 +8473,49 @@ eightball_decisions_total{endpoint="d3",spec="greeting",verdict="yes"} 1
 ```
 
 Chunk 4 complete locally: 97 mock tests, 22 live tests, clean formatting/Clippy, local image smoke and actual Claude tool call with metric increase. No persistent harness configuration changes.
+
+
+## Chunk 6 steps 1–2: plugin metadata and MCP entries
+
+Read all nine memini reference files from the plan's existing scratchpad. Copied metadata/marketplace shapes, replaced names/descriptions/author/license/version, removed hooks/commands/headersHelper and upstream repository/homepage URLs (this repository has no published remote). All metadata and MCP JSON files parse.
+
+Current official Qwen docs confirm `httpUrl` for Streamable HTTP, `headers`, `mcpServers` and `skills`:
+- https://qwenlm.github.io/qwen-code-docs/en/users/extension/introduction/
+- https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp/
+
+Claude 2.1.317 loads the plugin MCP entry with the supplied flat URL expansion and an empty key. Its actual tool names are `mcp__plugin_8-ball_8ball__decision_ask` and `mcp__plugin_8-ball_8ball__decision_triage`. The plan's standalone allowlist did not permit that prefix; rerunning with the observed plugin names succeeds with no permission denials. No persistent settings changed.
+
+Tool call:
+```json
+{"type": "tool_use", "id": "toolu_01FbjLFkHhBbEdgG5KpJrZpA", "name": "mcp__plugin_8-ball_8ball__decision_ask", "input": {"state": "disk 98% full on /var", "questions": [{"id": "urgent", "type": "noul", "instructions": "Is this alert urgent, requiring prompt action?", "criteria": {"true": "The alert describes a condition needing prompt action to avoid an outage or data loss", "false": "The alert is informational or can wait"}}]}, "caller": {"type": "direct"}}
+```
+Agent result:
+```text
+8-ball says **yes, it's urgent.**
+
+- **Verdict:** `yes`
+- **Probabilities:** yes 0.931, no 0.069 (confidence 0.862)
+- **Calibrated:** `false`. The question was ad-hoc, so it used the default thresholds rather than tuned ones.
+- **Cached:** `false`
+
+Since the verdict is a clear `yes` and not `unsure`, it's fine to act on it: treat the alert as needing prompt attention.
+
+One thing looks off: the result has `"id": 2`, but I sent `"urgent"` as the id, and `"urgent"` shows up in the `question` field instead. The id doesn't seem to be passed back the way the schema describes ("Caller-chosen id… For a spec, the spec name"), which could be a bug on your `feat/v1` branch.
+```
+Metrics plugin-before:
+```text
+# HELP eightball_decisions Decision results.
+# TYPE eightball_decisions counter
+eightball_decisions_total{endpoint="d3",spec="greeting",verdict="yes"} 1
+# EOF
+
+```
+Metrics plugin-after:
+```text
+# HELP eightball_decisions Decision results.
+# TYPE eightball_decisions counter
+eightball_decisions_total{endpoint="d3",spec="greeting",verdict="yes"} 1
+eightball_decisions_total{endpoint="d3",spec="",verdict="decided"} 1
+# EOF
+
+```

@@ -2226,6 +2226,8 @@ Create the same files under `8-ball/plugin/` and the root, changing:
 Remove every hooks, commands and `headersHelper` entry.
 
 #### Step 2: MCP entries (use exactly these values)
+
+**Execution status:** Complete; all four JSON configs parse; current Qwen docs confirm httpUrl/headers/skills. Actual Claude plugin call with empty bearer succeeded and metric increased. Installed Claude requires mcp__plugin_8-ball_8ball__ tool names in the plugin allowlist; strict standalone MCP uses mcp__8ball__.
 - `plugin/.mcp.json` (Claude Code):
   ```json
   {"mcpServers": {"8ball": {"type": "http", "url": "${EIGHTBALL_URL:-http://127.0.0.1:8080}/mcp",
