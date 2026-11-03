@@ -42,7 +42,7 @@ Step 1: scaffold completed. Dependencies were added using every command listed i
 
 ## Final outcome
 
-Not yet achieved. Owner revised the logprob live requirement on 2026-11-03; the original blocker is resolved and execution has resumed. Historical stop evidence is retained below.
+Not achieved. The owner-resolved logprob blocker is closed. Execution advanced through Chunks 2 and 3 and Chunk 4 auth, then stopped on a reproduced cache/label contradiction in the plan. See the latest contract stop below.
 
 ### Step 1 checks
 
@@ -7067,3 +7067,85 @@ version = "=0.8.4"
 ```
 
 The only older transitive version is matchit 0.8.4; latest Axum explicitly pins it, so 0.8.6 is not an eligible update. No dependency override, tool install or toolchain modification was made. The latest APIs are verified against local crate source; freshness alone does not guarantee compatibility.
+
+## Latest contract stop: shared cache id versus spec-owned labels
+
+The independent general-purpose code review found three correctness issues. They are reproduced below; no production fix was made after the plan contradiction was established.
+
+1. **Invalid backend probabilities are accepted.** A System One `noul: 2` becomes `[2, -1]`, decisive yes, confidence 3. Logprob also lacks a check for positive/nonfinite input logprobs. These need explicit validation and fail-open regression tests.
+2. **Shared cache ids violate label ownership.** The cache key intentionally excludes the question id/spec name, but a cached response reuses the original decision row, including its original spec. A named ask can therefore return an ad-hoc row that cannot be labelled, or a row belonging to another named spec that receives the label incorrectly.
+3. **Retention can recycle decision ids.** SQLite `INTEGER PRIMARY KEY` reuses pruned highest ids. Labelling a saved old id can silently label a replacement state. A monotonic id allocation/migration and regression test are needed.
+
+### Reproduction evidence
+
+Temporary diagnostic functions were appended to the existing cache/store/systemone test files, run against wiremock and throwaway SQLite databases only, then removed. They characterize observed failures; they are not passing acceptance tests claiming the defects are fixed. The original test files were verified unchanged afterwards with `git diff --exit-code`.
+
+```text
+$ cargo nextest run --test cache --test systemone --test store -E 'test(diagnostic_)' --no-capture
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.13s
+────────────
+ Nextest run ID 1fac8584-196b-4744-9a5e-88c988dc638c with nextest profile: default
+    Starting 3 tests across 3 binaries (17 tests skipped)
+       START [         ] (1/3) eightball::cache diagnostic_cache_spec_ownership
+
+running 1 test
+ad-hoc id=1, named id=1, named cached=true, label(named id)=Err(BadRequest("ad-hoc question: save it as a spec in the config first"))
+greeting id=2, greeting-copy id=2, label(copy id) succeeded; labelled rows: greeting=1, greeting-copy=0
+test diagnostic_cache_spec_ownership ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.03s
+
+        PASS [   0.037s] (1/3) eightball::cache diagnostic_cache_spec_ownership
+       START [         ] (2/3) eightball::store diagnostic_pruned_id_is_reused
+
+running 1 test
+old id=1, pruned=1, new id=1; labelling old id labels state="replacement decision"
+test diagnostic_pruned_id_is_reused ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 2.00s
+
+        PASS [   2.009s] (2/3) eightball::store diagnostic_pruned_id_is_reused
+       START [         ] (3/3) eightball::systemone diagnostic_invalid_probability_is_decisive
+
+running 1 test
+invalid backend noul=2 accepted: probabilities=[[2.0, -1.0]], verdict=yes, confidence=3
+test diagnostic_invalid_probability_is_decisive ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.01s
+
+        PASS [   0.022s] (3/3) eightball::systemone diagnostic_invalid_probability_is_decisive
+────────────
+     Summary [   2.072s] 3 tests run: 3 passed, 17 skipped
+```
+
+### Exact contradiction and required input
+
+The plan's Chunk 3 step 4 says:
+
+> Cached answers keep the stored row's id and get `cached = true`, with no new row.
+
+The cache lookup is prescribed as `(calibration_id, state_hash)`, with `calibration_id` explicitly excluding the question id. Chunk 3 step 5 requires rejecting ad-hoc rows for labels and scopes calibration examples by the row's spec. For identical question meaning/state, both rules cannot provide a correctly owned, labelable decision id to every spec request.
+
+The binding stop condition at plan line 70 is: “The plan contradicts itself in a way that changes behaviour.” The reproduction proves this condition; continuing with a silent cache-policy change would override the owner-approved recipe.
+
+**One owner input needed:** Approve amending the cache rule so a cross-scope cache hit may materialize a separate decision row owned by the requested spec (or ad-hoc scope), while reusing the stored probabilities without another model call. Existing rows and labels remain attached to their original scope. Repeated asks within one scope retain that scope's row id. This resolves ownership without giving up probability reuse. The other two safety fixes remain pending while the contract stop applies.
+
+### State at stop
+
+- Requested ranking amendment: committed with the exact message in `9c58a71`; full live rerun passed and is recorded above.
+- Chunks 1, 2, 3: complete. Chunk 4 handler, transports, auth and required mock/live tests: implemented and verified. Docker/image and harness checks, and Chunk 6, remain unfinished.
+- Last full verification: 92 mock tests pass; 22 live tests pass; clippy and formatting pass. These tests do not yet cover the three reproduced review defects.
+- Rust/Cargo 1.99.1 are latest stable; all 22 direct dependencies are latest stable. Latest Axum pins older transitive matchit 0.8.4; Cargo finds zero eligible updates.
+- Four local model containers remain running as authorized. No remote/push, infrastructure action, persistent harness-config edit, external scan or tool installation occurred.
+- Specialized reviewer integration initially required repository-specific scaffolding absent here; a general-purpose read-only reviewer was used instead, without adding scaffolding or changing scope.
+- WIP is committed on `feat/v1`; completion is not claimed. Temporary execution files under `/tmp/8ball-resume` are removed after their evidence is copied here.
+
+Final local Git verification at this stop:
+
+```text
+$ git branch --show-current
+feat/v1
+$ git status --short
+(no output)
+```

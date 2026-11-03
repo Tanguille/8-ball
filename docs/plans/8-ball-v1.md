@@ -1837,7 +1837,7 @@ Calibration only means something on real model output, so this step is the main 
 ---
 
 ### Chunk 4: Agents and image
-**Status:** In Progress · **Wave:** 4 · **Estimated Context:** ~70k tokens · **Complexity:** Medium
+**Status:** Blocked after auth/tests: cache/label plan contradiction (see report) · **Wave:** 4 · **Estimated Context:** ~70k tokens · **Complexity:** Medium
 
 #### Goal
 Agents use 8-ball over MCP (stdio and HTTP). The server can require a bearer key. A container image builds.
@@ -1981,6 +1981,8 @@ async fn no_oauth() -> Response {
 - If a state-type mismatch makes `from_fn_with_state` not compile, check axum 0.8.9's `middleware/from_fn.rs` for the right extractor order.
 
 #### Step 5: Tests
+
+**Execution status:** Required mock/CLI/HTTP tests pass. Independent review reproduced a cache/label contradiction; execution is stopped before Docker pending owner decision.
 `tests/mcp_stdio.rs`:
 1. Write a temp config with a wiremock systemone mock and one spec `greeting`. Use a temp DB path.
 2. Build the transport:
@@ -2010,6 +2012,8 @@ async fn no_oauth() -> Response {
 - The CLI `8ball ask ... --api-key k` exits 0; without the key it exits 4 with `401` in stderr.
 
 #### Step 5b: Live MCP tests (write them before step 2's code)
+
+**Execution status:** Complete; all three prescribed MCP live tests and all 22 live tests pass; raw evidence in report.
 Add these to `tests/live.rs`:
 1. **`live_mcp_stdio_ask`**:
    - spawn `8ball mcp --config dev/config.toml --db <tempfile>` through `TokioChildProcess`, the same as `tests/mcp_stdio.rs`;
