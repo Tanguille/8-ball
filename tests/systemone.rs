@@ -52,7 +52,13 @@ async fn three_questions_one_request() {
             assert!((a - e).abs() < 1e-9);
         }
     }
-    let requests = server.received_requests().await.unwrap();
+    let requests: Vec<_> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method == "POST")
+        .collect();
     assert_eq!(requests.len(), 1);
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["questions"]["q1"]["type"], "noul");
@@ -81,8 +87,9 @@ async fn long_state_is_fitted() {
         .await
         .unwrap();
     assert_eq!(sent, "abcde\n…\nz0123");
-    let body: Value =
-        serde_json::from_slice(&server.received_requests().await.unwrap()[0].body).unwrap();
+    let requests = server.received_requests().await.unwrap();
+    let request = requests.iter().find(|r| r.method == "POST").unwrap();
+    let body: Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(body["state"], "abcde\n…\nz0123");
 }
 #[test]
@@ -134,7 +141,13 @@ async fn bearer_only_when_set() {
         }
         let ep = Endpoint::new("d3", &config, key.clone()).unwrap();
         ep.ask("hi", &[question()]).await.unwrap();
-        let requests = server.received_requests().await.unwrap();
+        let requests: Vec<_> = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.method == "POST")
+            .collect();
         assert_eq!(
             requests[0]
                 .headers

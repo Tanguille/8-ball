@@ -1322,6 +1322,8 @@ kubectl -n ai exec deploy/hermes -c app -- curl -s http://bge-reranker-v2-m3.ai.
 Write the finding, with the raw output, into this plan under this step, and use it in step 4.
 
 #### Step 2: Detection (tests first)
+
+**Execution status:** Complete; six mock detection tests, both live detection tests and all earlier tests pass; evidence in report.
 Add to `Endpoint`:
 ```rust
 info: tokio::sync::OnceCell<Info>,   // detected once; a failed detection is NOT cached

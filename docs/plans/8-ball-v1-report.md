@@ -999,3 +999,303 @@ $ curl -fsS localhost:9933/v1/rerank -H content-type:application/json -d <disk-f
 ```
 
 These are logits; use sigmoid. Cluster inspection is excluded by the local-only boundary.
+
+### Step 2: detection
+
+```text
+$ cargo nextest run --test detect (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+  --> tests/detect.rs:17:17
+   |
+17 |     let info=ep.info().await.unwrap();assert_eq!(info.kind,BackendKind::Systemone);assert_eq!(info.concurrency,4);assert_eq!(info.fi...
+   |                 ^^^^
+   |
+help: there is a method `into` with a similar name
+   |
+17 -     let info=ep.info().await.unwrap();assert_eq!(info.kind,BackendKind::Systemone);assert_eq!(info.concurrency,4);assert_eq!(info.fingerprint,"/m/a.gguf@b1-x");
+17 +     let info=ep.into().await.unwrap();assert_eq!(info.kind,BackendKind::Systemone);assert_eq!(info.concurrency,4);assert_eq!(info.fingerprint,"/m/a.gguf@b1-x");
+   |
+
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+  --> tests/detect.rs:18:8
+   |
+18 |     ep.info().await.unwrap();assert_eq!(server.received_requests().await.unwrap().len(),2);
+   |        ^^^^
+   |
+help: there is a method `into` with a similar name
+   |
+18 -     ep.info().await.unwrap();assert_eq!(server.received_requests().await.unwrap().len(),2);
+18 +     ep.into().await.unwrap();assert_eq!(server.received_requests().await.unwrap().len(),2);
+   |
+
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+  --> tests/detect.rs:25:17
+   |
+25 |     let info=ep.info().await.unwrap();assert_eq!(info.kind,BackendKind::Logprob);assert_eq!(info.fingerprint,"m");
+   |                 ^^^^
+   |
+help: there is a method `into` with a similar name
+   |
+25 -     let info=ep.info().await.unwrap();assert_eq!(info.kind,BackendKind::Logprob);assert_eq!(info.fingerprint,"m");
+25 +     let info=ep.into().await.unwrap();assert_eq!(info.kind,BackendKind::Logprob);assert_eq!(info.fingerprint,"m");
+   |
+
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+  --> tests/detect.rs:31:16
+   |
+31 |     assert!(ep.info().await.unwrap_err().to_string().contains("set kind"));
+   |                ^^^^
+   |
+help: there is a method `into` with a similar name
+   |
+31 -     assert!(ep.info().await.unwrap_err().to_string().contains("set kind"));
+31 +     assert!(ep.into().await.unwrap_err().to_string().contains("set kind"));
+   |
+
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+  --> tests/detect.rs:37:17
+   |
+37 |     let info=ep.info().await.unwrap();assert_eq!(info.kind,BackendKind::Rerank);assert_eq!(info.concurrency,1);
+   |                 ^^^^
+   |
+help: there is a method `into` with a similar name
+   |
+37 -     let info=ep.info().await.unwrap();assert_eq!(info.kind,BackendKind::Rerank);assert_eq!(info.concurrency,1);
+37 +     let info=ep.into().await.unwrap();assert_eq!(info.kind,BackendKind::Rerank);assert_eq!(info.concurrency,1);
+   |
+
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+  --> tests/detect.rs:46:16
+   |
+46 |     assert!(ep.info().await.is_err());assert_eq!(ep.info().await.unwrap().kind,BackendKind::Systemone);
+   |                ^^^^
+   |
+help: there is a method `into` with a similar name
+   |
+46 -     assert!(ep.info().await.is_err());assert_eq!(ep.info().await.unwrap().kind,BackendKind::Systemone);
+46 +     assert!(ep.into().await.is_err());assert_eq!(ep.info().await.unwrap().kind,BackendKind::Systemone);
+   |
+
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+  --> tests/detect.rs:46:53
+   |
+46 |     assert!(ep.info().await.is_err());assert_eq!(ep.info().await.unwrap().kind,BackendKind::Systemone);
+   |                                                     ^^^^
+   |
+help: there is a method `into` with a similar name
+   |
+46 -     assert!(ep.info().await.is_err());assert_eq!(ep.info().await.unwrap().kind,BackendKind::Systemone);
+46 +     assert!(ep.info().await.is_err());assert_eq!(ep.into().await.unwrap().kind,BackendKind::Systemone);
+   |
+
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+  --> tests/detect.rs:54:19
+   |
+54 |     assert_eq!(ep.info().await.unwrap().concurrency,1);
+   |                   ^^^^
+   |
+help: there is a method `into` with a similar name
+   |
+54 -     assert_eq!(ep.info().await.unwrap().concurrency,1);
+54 +     assert_eq!(ep.into().await.unwrap().concurrency,1);
+   |
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `eightball` (test "detect") due to 8 previous errors
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=detect'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only -E test(live_detect) (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+   --> tests/live.rs:182:29
+    |
+182 |     let ep=d3();let info=ep.info().await.unwrap();eprintln!("d3 info: {info:?}");
+    |                             ^^^^
+    |
+help: there is a method `into` with a similar name
+    |
+182 -     let ep=d3();let info=ep.info().await.unwrap();eprintln!("d3 info: {info:?}");
+182 +     let ep=d3();let info=ep.into().await.unwrap();eprintln!("d3 info: {info:?}");
+    |
+
+error[E0599]: no method named `info` found for struct `Endpoint` in the current scope
+   --> tests/live.rs:192:17
+    |
+192 |     let info=ep.info().await.unwrap();eprintln!("chat info: {info:?}");
+    |                 ^^^^
+    |
+help: there is a method `into` with a similar name
+    |
+192 -     let info=ep.info().await.unwrap();eprintln!("chat info: {info:?}");
+192 +     let info=ep.into().await.unwrap();eprintln!("chat info: {info:?}");
+    |
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `eightball` (test "live") due to 2 previous errors
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=live'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test detect (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.21s
+────────────
+ Nextest run ID 6f4bd66b-1c79-4e82-b583-0899c8f8de68 with nextest profile: default
+    Starting 6 tests across 1 binary
+        PASS [   0.020s] (1/6) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.023s] (2/6) eightball::detect detection_gets_send_bearer
+        PASS [   0.023s] (3/6) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.030s] (4/6) eightball::detect explicit_kind_skips_models
+        PASS [   0.034s] (5/6) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.037s] (6/6) eightball::detect failed_detection_is_not_cached
+────────────
+     Summary [   0.037s] 6 tests run: 6 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.66s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.66s
+────────────
+ Nextest run ID d7addd94-4b8f-45e9-a84e-e04c570785e7 with nextest profile: default
+    Starting 38 tests across 10 binaries (8 tests skipped)
+        PASS [   0.010s] ( 1/38) eightball::question score_labels
+        PASS [   0.012s] ( 2/38) eightball::config bad_spec_name
+        PASS [   0.013s] ( 3/38) eightball::config zero_concurrency
+        PASS [   0.015s] ( 4/38) eightball::config retention_default
+        PASS [   0.015s] ( 5/38) eightball::config unknown_key_rejected
+        PASS [   0.016s] ( 6/38) eightball::config default_must_exist
+        PASS [   0.015s] ( 7/38) eightball::config logprob_needs_model
+        PASS [   0.016s] ( 8/38) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.018s] ( 9/38) eightball::config spec_parses
+        PASS [   0.019s] (10/38) eightball::question validate_rejects
+        PASS [   0.019s] (11/38) eightball::question noul_without_criteria_parses
+        PASS [   0.021s] (12/38) eightball::config minimal_ok
+        PASS [   0.007s] (13/38) eightball::verdict noul_default_bands
+        PASS [   0.012s] (14/38) eightball::verdict choice_default_bands
+        PASS [   0.015s] (15/38) eightball::verdict score_confidence_readme
+        PASS [   0.018s] (16/38) eightball::verdict choice_confidence_readme
+        PASS [   0.012s] (17/38) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.026s] (18/38) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.041s] (19/38) eightball::detect detection_gets_send_bearer
+        PASS [   0.042s] (20/38) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.011s] (21/38) eightball::verdict uniform_is_zero
+        PASS [   0.044s] (22/38) eightball::detect explicit_kind_skips_models
+        PASS [   0.046s] (23/38) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.049s] (24/38) eightball::detect failed_detection_is_not_cached
+        PASS [   0.050s] (25/38) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.040s] (26/38) eightball::systemone three_questions_one_request
+        PASS [   0.044s] (27/38) eightball::systemone long_state_is_fitted
+        PASS [   0.070s] (28/38) eightball::rest_ask empty_questions_is_400
+        PASS [   0.070s] (29/38) eightball::rest_ask backend_failure_is_502
+        PASS [   0.069s] (30/38) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.082s] (31/38) eightball::rest_ask healthz_is_ok
+        PASS [   0.078s] (32/38) eightball::systemone bearer_only_when_set
+        PASS [   0.073s] (33/38) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.078s] (34/38) eightball::systemone http_400_is_error_with_body
+        PASS [   0.097s] (35/38) eightball::cli_ask choice_prints_billing
+        PASS [   0.105s] (36/38) eightball::cli_ask dead_server_exits_four
+        PASS [   0.176s] (37/38) eightball::cli_ask noul_exit_codes
+        PASS [   0.670s] (38/38) eightball::systemone concurrency_one_serializes
+────────────
+     Summary [   0.684s] 38 tests run: 38 passed, 8 skipped
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only --no-capture
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+────────────
+ Nextest run ID 4d42be37-35ba-45d5-a29a-eee97869841a with nextest profile: default
+    Starting 8 tests across 1 binary
+       START [         ] (1/8) eightball::live live_cli_ask
+
+running 1 test
+cli: {"results":[{"id":0,"question":"q","verdict":"yes","confidence":0.9928223977168203,"probabilities":{"yes":0.9964111988584102,"no":0.0035888011415897703},"calibrated":false,"cached":false}]}
+
+test live_cli_ask ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.33s
+
+        PASS [   0.336s] (1/8) eightball::live live_cli_ask
+       START [         ] (2/8) eightball::live live_detect_chat
+
+running 1 test
+chat info: Info { kind: Logprob, fingerprint: "/cache/Qwen3.5-0.8B-Q8_0.gguf@b12033-785322d17", concurrency: 2 }
+test live_detect_chat ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.05s
+
+        PASS [   0.059s] (2/8) eightball::live live_detect_chat
+       START [         ] (3/8) eightball::live live_detect_d3
+
+running 1 test
+d3 info: Info { kind: Systemone, fingerprint: "/cache/vllm-d3-nano-Q8_0.gguf@b12033-785322d17", concurrency: 2 }
+test live_detect_d3 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.04s
+
+        PASS [   0.042s] (3/8) eightball::live live_detect_d3
+       START [         ] (4/8) eightball::live live_systemone_choice
+
+running 1 test
+"I was charged twice for my order": [[0.9947940023511472, 0.002052840041547463, 0.0031531576073055736]]
+"My parcel never arrived": [[0.03348390306046388, 0.9576809061787368, 0.008835190760799286]]
+"The app crashes when I log in": [[0.00010016085974423134, 8.911070125869211e-5, 0.999810728438997]]
+test live_systemone_choice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.45s
+
+        PASS [   0.461s] (4/8) eightball::live live_systemone_choice
+       START [         ] (5/8) eightball::live live_systemone_long_state_fits
+
+running 1 test
+long state: [[0.8418858296564597, 0.15811417034354025]]; fitted characters 2003
+test live_systemone_long_state_fits ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.66s
+
+        PASS [   0.668s] (5/8) eightball::live live_systemone_long_state_fits
+       START [         ] (6/8) eightball::live live_systemone_noul_clear_cases
+
+running 1 test
+"hi there, how are you?": [[0.9977792984110628, 0.0022207015889371684]]
+"Good morning everyone!": [[0.9973104968558432, 0.002689503144156835]]
+"The disk on node control-2 is 98% full.": [[0.0006734414207704911, 0.9993265585792295]]
+"Invoice #4411 is attached.": [[0.0005724723698325666, 0.9994275276301674]]
+test live_systemone_noul_clear_cases ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.56s
+
+        PASS [   0.561s] (6/8) eightball::live live_systemone_noul_clear_cases
+       START [         ] (7/8) eightball::live live_systemone_score
+
+running 1 test
+urgent: [[0.0035533644092976225, 0.0024632714944271077, 0.09199483747399864, 0.9019885266222766]], score 2.892418526309254; typo: [[0.8658067956293518, 0.016835738079480713, 0.0534055786459527, 0.06395188764521488]], score 0.3155025583070308
+test live_systemone_score ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.29s
+
+        PASS [   0.299s] (7/8) eightball::live live_systemone_score
+       START [         ] (8/8) eightball::live live_systemone_three_questions_one_call
+
+running 1 test
+multi: [[0.001626082216226916, 0.998373917783773], [0.9930987578168688, 0.00038615523376224806, 0.006515086949368796], [0.05358819608051216, 0.013706931575184388, 0.47920685379576855, 0.4534980185485349]]
+test live_systemone_three_questions_one_call ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.34s
+
+        PASS [   0.350s] (8/8) eightball::live live_systemone_three_questions_one_call
+────────────
+     Summary [   2.776s] 8 tests run: 8 passed, 0 skipped
+```
+
+`cargo fmt --all` passed. Full suite: 38 passed, 8 ignored; live: 8 passed. Updated System One request-count/body assertions to inspect POSTs because detection introduces the specified GETs. Their original single judgment request contract remains checked.

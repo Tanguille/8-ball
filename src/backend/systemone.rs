@@ -38,8 +38,12 @@ pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Prob
     if let Some(model) = &ep.model {
         body["model"] = json!(model);
     }
+    ep.info().await?;
     let permit = ep
-        .permits
+        .info
+        .get()
+        .expect("info initialized")
+        .1
         .acquire()
         .await
         .map_err(|e| BackendError(e.to_string()))?;

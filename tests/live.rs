@@ -174,3 +174,24 @@ async fn live_cli_ask() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_detect_d3() {
+    require(9931).await;
+    let ep = d3();
+    let info = ep.info().await.unwrap();
+    eprintln!("d3 info: {info:?}");
+    assert_eq!(info.kind, eightball::config::BackendKind::Systemone);
+    assert_eq!(info.concurrency, 2);
+    assert!(info.fingerprint.contains("vllm-d3-nano-Q8_0.gguf@b"));
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_detect_chat() {
+    require(9934).await;
+    let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let info = ep.info().await.unwrap();
+    eprintln!("chat info: {info:?}");
+    assert_eq!(info.kind, eightball::config::BackendKind::Logprob);
+}

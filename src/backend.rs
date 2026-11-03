@@ -12,12 +12,13 @@ pub type Probs = Vec<f64>;
 pub struct Endpoint {
     pub name: String,
     url: String,
-    kind: BackendKind,
+    kind: Option<BackendKind>,
     model: Option<String>,
     api_key: Option<String>,
     max_state_chars: Option<usize>,
     client: reqwest::Client,
-    permits: tokio::sync::Semaphore,
+    concurrency: Option<usize>,
+    info: tokio::sync::OnceCell<(Info, tokio::sync::Semaphore)>,
 }
 
 // Decision models answer in under 1 s; 20 s only absorbs a cold model load.
@@ -39,20 +40,109 @@ impl Endpoint {
         cfg: &EndpointConfig,
         api_key: Option<String>,
     ) -> Result<Self, BackendError> {
-        if cfg.kind != Some(BackendKind::Systemone) {
+        if cfg.concurrency == Some(0) {
             return Err(BackendError(format!(
-                "endpoint {name}: set kind = \"systemone\" (auto-detect arrives in chunk 2)"
+                "endpoint {name}: concurrency must be positive"
             )));
         }
         Ok(Self {
             name: name.into(),
             url: cfg.url.clone(),
-            kind: BackendKind::Systemone,
+            kind: cfg.kind,
             model: cfg.model.clone(),
             api_key,
-            max_state_chars: Some(cfg.max_state_chars.unwrap_or(2000)),
+            max_state_chars: cfg.max_state_chars,
             client: reqwest::Client::new(),
-            permits: tokio::sync::Semaphore::new(cfg.concurrency.unwrap_or(2)),
+            concurrency: cfg.concurrency,
+            info: tokio::sync::OnceCell::new(),
+        })
+    }
+
+    pub async fn info(&self) -> Result<&Info, BackendError> {
+        let (info, _) = self
+            .info
+            .get_or_try_init(|| async {
+                let info = self.detect().await?;
+                let permits = tokio::sync::Semaphore::new(info.concurrency);
+                Ok::<_, BackendError>((info, permits))
+            })
+            .await?;
+        Ok(info)
+    }
+
+    async fn get_info_json(&self, path: &str) -> Result<serde_json::Value, BackendError> {
+        let mut request = self
+            .client
+            .get(format!("{}{path}", self.url))
+            .timeout(Duration::from_secs(5));
+        if let Some(key) = &self.api_key {
+            request = request.bearer_auth(key);
+        }
+        Ok(request.send().await?.error_for_status()?.json().await?)
+    }
+
+    async fn detect(&self) -> Result<Info, BackendError> {
+        let props = self
+            .get_info_json("/props")
+            .await
+            .unwrap_or(serde_json::Value::Null);
+        let mut models = serde_json::Value::Null;
+        let kind = if let Some(kind) = self.kind {
+            kind
+        } else {
+            models = self.get_info_json("/v1/models").await.map_err(|e| {
+                BackendError(format!(
+                    "cannot detect kind of {}: {e}; set kind in config",
+                    self.name
+                ))
+            })?;
+            let data = models["data"].as_array();
+            if data.is_some_and(|data| {
+                data.iter().any(|m| {
+                    m["architecture"]["output_modalities"]
+                        .as_array()
+                        .is_some_and(|modes| modes.iter().any(|mode| mode == "decisions"))
+                })
+            }) {
+                BackendKind::Systemone
+            } else if self.model.is_some()
+                && data.is_some_and(|data| data.iter().any(|m| m.get("architecture").is_some()))
+            {
+                BackendKind::Logprob
+            } else {
+                return Err(BackendError(format!(
+                    "cannot detect kind of {}: no decisions model and no `model` set; set kind in config",
+                    self.name
+                )));
+            }
+        };
+        let fingerprint = props["model_path"].as_str().map_or_else(
+            || {
+                self.model
+                    .as_deref()
+                    .or_else(|| models["data"][0]["id"].as_str())
+                    .unwrap_or(&self.url)
+                    .into()
+            },
+            |path| {
+                format!(
+                    "{path}@{}",
+                    props["build_info"].as_str().unwrap_or_default()
+                )
+            },
+        );
+        let concurrency = self
+            .concurrency
+            .or_else(|| {
+                props["total_slots"]
+                    .as_u64()
+                    .and_then(|v| usize::try_from(v).ok())
+            })
+            .unwrap_or(2);
+        Ok(Info {
+            kind,
+            fingerprint,
+            concurrency,
         })
     }
 
@@ -62,16 +152,25 @@ impl Endpoint {
         state: &str,
         qs: &[Question],
     ) -> Result<(Vec<Probs>, String), BackendError> {
-        let state = fit(state, self.max_state_chars);
-        let probs = tokio::time::timeout(DECISION_TIMEOUT, async {
-            match self.kind {
-                BackendKind::Systemone => systemone::ask(self, &state, qs).await,
-                _ => unreachable!("constructor only accepts systemone"),
-            }
+        tokio::time::timeout(DECISION_TIMEOUT, async {
+            let info = self.info().await?;
+            let max = self.max_state_chars.or(match info.kind {
+                BackendKind::Systemone | BackendKind::Rerank => Some(2000),
+                BackendKind::Logprob => None,
+            });
+            let state = fit(state, max);
+            let probs = match info.kind {
+                BackendKind::Systemone => systemone::ask(self, &state, qs).await?,
+                _ => {
+                    return Err(BackendError(
+                        "backend implementation arrives in subsequent steps".into(),
+                    ));
+                }
+            };
+            Ok((probs, state))
         })
         .await
-        .map_err(|_| BackendError("timed out after 20s".into()))??;
-        Ok((probs, state))
+        .map_err(|_| BackendError("timed out after 20s".into()))?
     }
 }
 
@@ -88,4 +187,11 @@ pub fn fit(state: &str, max: Option<usize>) -> String {
     let head: String = state.chars().take(max / 2).collect();
     let tail: String = state.chars().skip(count - max / 2).collect();
     format!("{head}\n…\n{tail}")
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Info {
+    pub kind: BackendKind,
+    pub fingerprint: String,
+    pub concurrency: usize,
 }
