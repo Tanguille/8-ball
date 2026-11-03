@@ -884,3 +884,48 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; fini
 ```
 
 `cargo fmt --all` passed. 32 mock tests passed; 6 ignored live tests all passed explicitly. `assert_cmd::Command::cargo_bin` is deprecated in the resolved crate; used its documented `cargo_bin_cmd!` macro instead. Schema annotation for ordered probabilities follows the question criteria annotation, preserving the JSON shape.
+
+### Step 7 and Chunk 1 verification
+
+All five backend live tests were written before step 5 implementation, and the CLI live test before step 6 implementation. The step 6 complete live-suite output above proves all six required live tests.
+
+E2E initially encountered an existing listener on port 8080:
+
+```text
+$ 8ball serve --config dev/config.toml
+8ball: Address already in use (os error 98)
+Traceback (most recent call last):
+  File "<stdin>", line 11, in <module>
+RuntimeError: server exited without a listener
+```
+
+Deviation: left the existing listener untouched and used the plan's ephemeral-port approach (`--listen 127.0.0.1:0`, explicit CLI `--url`). The same real-model commands then passed:
+
+```text
+$ 8ball serve --config dev/config.toml --listen 127.0.0.1:0
+2026-11-03T15:48:54.987917Z  INFO 8ball: listening on 127.0.0.1:37161
+$ 8ball ask noul Is this message a greeting? --url http://127.0.0.1:37161
+{"results":[{"id":0,"question":"q","verdict":"yes","confidence":0.9950115747244608,"probabilities":{"yes":0.9975057873622304,"no":0.0024942126377696106},"calibrated":false,"cached":false}]}
+exit 0
+$ 8ball ask choice Which team should handle this? --option billing --option shipping --option technical --state I was charged twice --url http://127.0.0.1:37161
+{"results":[{"id":0,"question":"q","verdict":"billing","confidence":0.9920360399654649,"probabilities":{"billing":0.99469069331031,"shipping":0.00029151584804333017,"technical":0.005017790841646783},"calibrated":false,"cached":false}]}
+exit 0
+$ 8ball ask noul Greeting? --state hi --url http://127.0.0.1:37161  # server stopped
+8ball: error sending request for url (http://127.0.0.1:37161/v1/ask): client error (Connect): tcp connect error: Connection refused (os error 111)
+exit 4
+```
+
+```text
+$ dev/models.sh status
+NAME           IMAGE                                                                                                              COMMAND                  SERVICE   CREATED         STATUS                   PORTS
+dev-chat-1     ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   chat      9 minutes ago   Up 9 minutes (healthy)   127.0.0.1:9934->9934/tcp
+dev-d3-1       ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   d3        9 minutes ago   Up 9 minutes (healthy)   127.0.0.1:9931->9931/tcp
+dev-embed-1    ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   embed     9 minutes ago   Up 9 minutes (healthy)   127.0.0.1:9932->9932/tcp
+dev-rerank-1   ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   rerank    9 minutes ago   Up 9 minutes (healthy)   127.0.0.1:9933->9933/tcp
+9931 {"status":"ok"}
+9932 {"status":"ok"}
+9933 {"status":"ok"}
+9934 {"status":"ok"}
+```
+
+`cargo fmt --all --check` passed. Chunk 1 complete: 32 mock tests pass, six live tests pass, all four servers healthy, real CLI greeting/team and stopped-server behavior verified.

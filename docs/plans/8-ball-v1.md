@@ -777,7 +777,7 @@ The CLI prints `8ball: <message>` to stderr and exits 4 for any error. That incl
 ### Progress Tracker
 
 #### Wave 1 (sequential): Vertical slice
-- [ ] Chunk 1: crate, config, question, systemone backend, confidence and default verdict, `serve` with `POST /v1/ask` and `/healthz`, CLI `ask`
+- [x] Chunk 1: crate, config, question, systemone backend, confidence and default verdict, `serve` with `POST /v1/ask` and `/healthz`, CLI `ask`
 
 #### Wave 2 (sequential): Any endpoint
 - [ ] Chunk 2: detection, logprob, rerank, embedder, triage, doctor (depends on 1)
@@ -811,7 +811,7 @@ Chunks 5 and 6 are in different git repositories, so they never share a checkout
 ---
 
 ### Chunk 1: Vertical slice
-**Status:** Not Started · **Wave:** 1 · **Estimated Context:** ~90k tokens · **Complexity:** High
+**Status:** Complete · **Wave:** 1 · **Estimated Context:** ~90k tokens · **Complexity:** High
 
 #### Goal
 `8ball serve` answers `POST /v1/ask` using a System One endpoint, and `8ball ask` prints the result. There's no database yet: `id` is 0, `cached` is false and `calibrated` is false.
@@ -1240,6 +1240,8 @@ If the user says no to the download, skip the live steps in every chunk and repo
 6. Run the checks, then commit with `feat: serve /v1/ask and cli ask`.
 
 #### Step 7: Live tests against the real D3 (write them before step 5's code where you can)
+
+**Execution status:** Complete; all six tests passed; evidence in `8-ball-v1-report.md`.
 **When to write them:** write `live_systemone_*` in step 5, right after the mock tests and before `backend/systemone.rs`. They stay red until the backend works. Write `live_cli_*` in step 6, before the CLI code.
 
 Create `tests/live.rs` with the `require` helper from "Local model stack", plus a helper `fn dev_config() -> Config` that loads `dev/config.toml` from `env!("CARGO_MANIFEST_DIR")`. Every test is `#[ignore = "needs dev/models.sh up"]`.
@@ -1272,12 +1274,12 @@ If a clear-cut case fails, check in order:
 Only if the raw curl gives the same "wrong" answer is it the model. In that case, report it to the user and change nothing.
 
 #### Verification (E2E, real model)
-- [ ] `dev/models.sh status` shows all four servers ok.
-- [ ] `8ball serve --config dev/config.toml &`.
-- [ ] `echo "hi there, how are you?" | 8ball ask noul "Is this message a greeting?"` prints `"verdict":"yes"`.
-- [ ] `8ball ask choice "Which team should handle this?" --option billing --option shipping --option technical --state "I was charged twice"` prints `"verdict":"billing"`.
-- [ ] After stopping the server, the same command exits 4.
-- [ ] `cargo nextest run` (mock tests) and `cargo nextest run --test live --run-ignored only` (live tests) are both green, and clippy is clean.
+- [x] `dev/models.sh status` shows all four servers ok.
+- [x] `8ball serve --config dev/config.toml &`.
+- [x] `echo "hi there, how are you?" | 8ball ask noul "Is this message a greeting?"` prints `"verdict":"yes"`.
+- [x] `8ball ask choice "Which team should handle this?" --option billing --option shipping --option technical --state "I was charged twice"` prints `"verdict":"billing"`.
+- [x] After stopping the server, the same command exits 4.
+- [x] `cargo nextest run` (mock tests) and `cargo nextest run --test live --run-ignored only` (live tests) are both green, and clippy is clean.
 
 #### Continuation Prompt
 > Continue the 8-ball v1 plan at `/home/tanguille/Documents/PriveProjecten/8-ball/docs/plans/8-ball-v1.md`. Read "READ THIS FIRST", run its pre-work checks, mark Chunk 1 complete in the Progress Tracker, then do Chunk 2 step by step.
