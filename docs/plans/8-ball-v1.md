@@ -50,7 +50,8 @@ When you were started with a Codex `/goal` that points at this section, this sec
   - `~/.cache/8ball-models`;
   - the cargo dirs (`~/.cargo`, `~/.cargo-target`);
   - throwaway dirs under `/tmp/8ball-*`.
-- **Deferred, not blocking:** harness checks that need an install or a persistent config change (qwen-code, OpenCode v2, Cursor if `cursor-agent` can't take a per-run MCP config). Write each one in the report as "pending user: <exact command to run>", and mark it in its README section as "untested".
+- **Owner-approved local-only exception (2026-11-03):** The directory-publication-only missing hosted privacy-policy URL warning may be deferred. `claude plugin validate plugin --strict` must still exit 0; local privacy handling is documented in README. No publication is authorized.
+- **Deferred, not blocking:** harness checks that need an install or a persistent config change (qwen-code, OpenCode v2, Cursor if `cursor-agent` can't take a per-run MCP config, or authentication requires an owner login). Write each one in the report as "pending user: <exact command to run>", and mark it in its README section as "untested".
 
 **Iteration policy:**
 - Work chunk by chunk in order (1 → 2 → 3 → 4 → 6). Inside each chunk, follow the steps and the TDD loop of rule 3.
@@ -2325,6 +2326,8 @@ Write these sections in this order:
     - **Hermes**: written in Chunk 7.
 
 #### Step 5: Validate and commit
+
+**Execution status:** Strict plugin validation passes. Added a 512px PNG icon to resolve the directory icon warning; the owner explicitly deferred the directory-only hosted privacy-policy URL warning for this local build. All step 5 checks pass; final image rebuild and end-of-chunk report completion are in progress.
 - Run `claude plugin validate plugin --strict` and fix every error and warning.
 - Commit:
   ```bash

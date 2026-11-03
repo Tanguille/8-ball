@@ -8582,3 +8582,75 @@ eightball_decisions_total{endpoint="d3",spec="",verdict="unsure"} 1
 # EOF
 
 ```
+
+
+## Chunk 6 step 5: validation and approved directory-only deferral
+
+`claude plugin validate plugin --strict` exits 0. The earlier missing-skill error was fixed by the supplied skill. A 512×512 PNG icon (30,118 bytes, generated locally with installed ImageMagick) resolves the icon warning. README resolves the missing-readme check. The hosted privacy-policy URL is a directory-publication-only warning; the owner explicitly approved deferring it for the local build on 2026-11-03. README documents local privacy handling; no public URL is invented and no publication is attempted.
+
+The independent read-only follow-up review found no additional actionable defects in cache ownership, id migration, probability validation, manifests or README. It did not rerun tests or external scans; command evidence below supplies runtime proof.
+
+Final Claude plugin test read the supplied skill before asking, then reported the verdict. Its observed tool calls and metrics follow.
+
+```json
+{"type": "tool_use", "id": "toolu_01D9yNgUq1np1NLsbmJhecLL", "name": "Read", "input": {"file_path": "/home/tanguille/Documents/PriveProjecten/8-ball/plugin/skills/8-ball/SKILL.md"}, "caller": {"type": "direct"}}
+```
+```json
+{"type": "tool_use", "id": "toolu_01PeqWRWwcVn4NdkCHWQ7T6m", "name": "mcp__plugin_8-ball_8ball__decision_ask", "input": {"state": "disk 98% full on /var", "questions": [{"id": "urgent", "type": "noul", "instructions": "Is this alert urgent, requiring prompt human attention?", "criteria": {"true": "Urgent: needs prompt attention to avoid an outage or data loss", "false": "Not urgent: can wait or is informational"}}]}, "caller": {"type": "direct"}}
+```
+```text
+8-ball says **yes**, "disk 98% full on /var" is urgent.
+
+- **Verdict:** `yes`, confidence 0.80 (p(yes) = 0.90, p(no) = 0.10)
+- **Calibrated:** `false`, so this used the default thresholds, not tuned ones.
+- **Cached:** `false`, so this was a fresh answer.
+
+The skill says to act on a clear verdict, and this is one, so treat the alert as urgent and handle it now. Because the result isn't calibrated, the confidence is only a rough guide.
+
+To make this kind of check more reliable, the server already has a named `storage-risk` spec, which can be calibrated. Label real decisions with `8ball label <id> yes|no`, then run `8ball calibrate storage-risk` once each side has at least 20 examples.
+```
+Permission denials: []
+
+```text
+# HELP eightball_decisions Decision results.
+# TYPE eightball_decisions counter
+eightball_decisions_total{endpoint="d3",spec="greeting",verdict="yes"} 2
+eightball_decisions_total{endpoint="d3",spec="",verdict="decided"} 1
+eightball_decisions_total{endpoint="d3",spec="",verdict="unsure"} 1
+# EOF
+
+```
+
+```text
+# HELP eightball_decisions Decision results.
+# TYPE eightball_decisions counter
+eightball_decisions_total{endpoint="d3",spec="greeting",verdict="yes"} 2
+eightball_decisions_total{endpoint="d3",spec="",verdict="decided"} 2
+eightball_decisions_total{endpoint="d3",spec="",verdict="unsure"} 1
+# EOF
+
+```
+
+```text
+$ claude plugin validate plugin --strict
+Validating plugin manifest: /home/tanguille/Documents/PriveProjecten/8-ball/plugin/.claude-plugin/plugin.json
+
+Plugin directory checks for /home/tanguille/Documents/PriveProjecten/8-ball/plugin. The plugin directory is the catalog that plugins are submitted to; this is a subset of what it runs.
+
+⚠ Found 1 plugin directory warning:
+
+  ❯ .claude-plugin/plugin.json privacyPolicyUrl: No privacy policy URL (PRIVACY_URL_MISSING). This plugin connects to a remote MCP server or HTTP hook but declares no privacy policy URL (plugin.json `privacyPolicyUrl`, or a 'Privacy' link in README).
+    Fix: Set `privacyPolicyUrl` in plugin.json.
+
+About these checks:
+
+  ❯ The repository root was taken to be /home/tanguille/Documents/PriveProjecten/8-ball, the nearest parent folder with a .git folder or file. README.md was taken from it, because this plugin folder has none of its own. For a plugin submitted from a git repository, the repository root is the top folder of that repository, with only what is committed there, so check that the folder named above is that top folder.
+
+These plugin directory checks do not change the result below.
+
+The directory also runs a safety scan and a policy review that this command does not.
+
+✔ Validation passed
+
+exit status: 0
+```

@@ -269,6 +269,8 @@ Remove only `mcp.servers.8ball` from the config and the skill symlink you create
 
 Untested and deferred: deployment, shared MCP registration and Hermes gates belong to Chunks 5 and 7, outside this local run. No Hermes configuration was changed.
 
+The directory-publication check for a hosted privacy-policy URL is deferred by the owner for this local build. Strict plugin validation passes; no public marketplace submission is claimed.
+
 ## Development verification
 
 ```sh
