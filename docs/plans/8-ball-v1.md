@@ -1837,12 +1837,14 @@ Calibration only means something on real model output, so this step is the main 
 ---
 
 ### Chunk 4: Agents and image
-**Status:** Not Started · **Wave:** 4 · **Estimated Context:** ~70k tokens · **Complexity:** Medium
+**Status:** In Progress · **Wave:** 4 · **Estimated Context:** ~70k tokens · **Complexity:** Medium
 
 #### Goal
 Agents use 8-ball over MCP (stdio and HTTP). The server can require a bearer key. A container image builds.
 
 #### Step 1: Dependencies
+
+**Execution status:** Complete; full checks pass; evidence in report.
 ```bash
 cargo add subtle
 cargo add tokio-util

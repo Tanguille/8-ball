@@ -44,13 +44,16 @@ rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 sha2 = "0.11.1"
+subtle = "2.6.1"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "process", "io-util"] }
+tokio-util = "0.7.20"
 toml = { version = "1.1.8", features = ["preserve_order"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.2"
+rmcp = { version = "3.8.0", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 tempfile = "3.27.0"
 wiremock = "0.6.5"

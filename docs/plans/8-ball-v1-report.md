@@ -5444,3 +5444,196 @@ dev-rerank-1   ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a
 ```
 
 `cargo fmt --all --check` passed with no output. Chunk 3 complete: 84 mock tests and all 18 live tests pass, clippy clean, all local models healthy. No calibration requirement was loosened.
+
+## Chunk 4
+
+### Step 1: MCP/auth dependencies
+
+Added the exact prescribed dependencies (`subtle`, `tokio-util`, dev rmcp client/child-process/HTTP features) and an empty MCP module.
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+   Compiling libc v0.2.191
+    Checking subtle v2.6.1
+   Compiling cfg_aliases v0.2.2
+   Compiling rmcp v3.8.0
+   Compiling nix v0.31.3
+   Compiling jobserver v0.1.35
+   Compiling cc v1.11.0
+    Checking errno v0.3.14
+    Checking socket2 v0.6.5
+    Checking mio v1.2.4
+    Checking getrandom v0.4.3
+    Checking parking_lot_core v0.9.12
+    Checking num_cpus v1.17.0
+    Checking wait-timeout v0.2.1
+    Checking signal-hook-registry v1.4.8
+    Checking uuid v1.29.0
+    Checking rand v0.10.3
+    Checking tempfile v3.27.0
+    Checking assert_cmd v2.2.2
+    Checking parking_lot v0.12.5
+    Checking tokio v1.54.1
+   Compiling cmake v0.1.58
+   Compiling libsqlite3-sys v0.39.1
+    Checking prometheus-client v0.25.2
+   Compiling aws-lc-sys v0.47.0
+    Checking rusqlite v0.41.1
+   Compiling aws-lc-rs v1.19.0
+   Compiling rustls v0.23.46
+    Checking tokio-util v0.7.20
+    Checking tower v0.5.3
+    Checking tokio-stream v0.1.19
+    Checking process-wrap v10.0.1
+    Checking deadpool v0.12.3
+    Checking rustls-webpki v0.103.16
+    Checking tower-http v0.6.11
+    Checking h2 v0.4.20
+    Checking tokio-rustls v0.26.6
+    Checking rustls-platform-verifier v0.7.1
+    Checking hyper v1.12.0
+    Checking hyper-util v0.1.21
+    Checking hyper-rustls v0.27.10
+    Checking axum v0.8.9
+    Checking wiremock v0.6.5
+    Checking reqwest v0.13.5
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.85s
+```
+
+```text
+$ cargo nextest run
+   Compiling libc v0.2.191
+   Compiling subtle v2.6.1
+   Compiling libsqlite3-sys v0.39.1
+   Compiling aws-lc-sys v0.47.0
+   Compiling rusqlite v0.41.1
+   Compiling aws-lc-rs v1.19.0
+   Compiling errno v0.3.14
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling getrandom v0.4.3
+   Compiling parking_lot_core v0.9.12
+   Compiling nix v0.31.3
+   Compiling num_cpus v1.17.0
+   Compiling wait-timeout v0.2.1
+   Compiling signal-hook-registry v1.4.8
+   Compiling uuid v1.29.0
+   Compiling rand v0.10.3
+   Compiling assert_cmd v2.2.2
+   Compiling tempfile v3.27.0
+   Compiling parking_lot v0.12.5
+   Compiling tokio v1.54.1
+   Compiling rustls-webpki v0.103.16
+   Compiling prometheus-client v0.25.2
+   Compiling rustls v0.23.46
+   Compiling rustls-platform-verifier v0.7.1
+   Compiling tokio-util v0.7.20
+   Compiling tower v0.5.3
+   Compiling tokio-rustls v0.26.6
+   Compiling process-wrap v10.0.1
+   Compiling tokio-stream v0.1.19
+   Compiling deadpool v0.12.3
+   Compiling tower-http v0.6.11
+   Compiling h2 v0.4.20
+   Compiling hyper v1.12.0
+   Compiling hyper-util v0.1.21
+   Compiling hyper-rustls v0.27.10
+   Compiling axum v0.8.9
+   Compiling wiremock v0.6.5
+   Compiling reqwest v0.13.5
+   Compiling rmcp v3.8.0
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 38.72s
+────────────
+ Nextest run ID 5e69ee58-2bb9-4139-8dea-ba7d7576eb30 with nextest profile: default
+    Starting 84 tests across 20 binaries (18 tests skipped)
+        PASS [   0.006s] ( 1/84) eightball::config minimal_ok
+        PASS [   0.007s] ( 2/84) eightball::calibrate_math separable_noul
+        PASS [   0.007s] ( 3/84) eightball::config unknown_key_rejected
+        PASS [   0.013s] ( 4/84) eightball::calibrate_math choice_threshold
+        PASS [   0.013s] ( 5/84) eightball::calibrate_math too_few_examples
+        PASS [   0.013s] ( 6/84) eightball::calibrate_math calibration_id_changes_with_fingerprint
+        PASS [   0.014s] ( 7/84) eightball::config logprob_needs_model
+        PASS [   0.016s] ( 8/84) eightball::calibrate_math bad_target
+        PASS [   0.020s] ( 9/84) eightball::calibrate_math question_hash_changes
+        PASS [   0.021s] (10/84) eightball::config default_must_exist
+        PASS [   0.022s] (11/84) eightball::config retention_default
+        PASS [   0.022s] (12/84) eightball::calibrate_math overlap_gives_unsure
+        PASS [   0.023s] (13/84) eightball::config spec_parses
+        PASS [   0.023s] (14/84) eightball::config zero_concurrency
+        PASS [   0.031s] (15/84) eightball::config bad_spec_name
+        PASS [   0.009s] (16/84) eightball::embed cosine_similarity
+        PASS [   0.036s] (17/84) eightball::cache rejects_unknown_spec_and_mixed_question_sources
+        PASS [   0.038s] (18/84) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.042s] (19/84) eightball::detect detection_gets_send_bearer
+        PASS [   0.045s] (20/84) eightball::detect explicit_kind_skips_models
+        PASS [   0.038s] (21/84) eightball::embed mixed_dimensions_rejected
+        PASS [   0.051s] (22/84) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.073s] (23/84) eightball::cache repeated_ask_reuses_answer_and_row_id
+        PASS [   0.063s] (24/84) eightball::detect failed_detection_is_not_cached
+        PASS [   0.077s] (25/84) eightball::cache cache_hashes_exactly_the_fitted_state
+        PASS [   0.080s] (26/84) eightball::calibrate_loop label_validation_rejects_unknown_adhoc_old_and_invalid_values
+        PASS [   0.081s] (27/84) eightball::cache spec_uses_bands_but_ad_hoc_uses_defaults_on_same_cache
+        PASS [   0.050s] (28/84) eightball::logprob case_and_space_variants_add_mass
+        PASS [   0.087s] (29/84) eightball::calibrate_loop conflicting_labels_are_excluded
+        PASS [   0.055s] (30/84) eightball::embed ten_texts_use_two_ordered_batches
+        PASS [   0.028s] (31/84) eightball::logprob state_closing_delimiter_is_escaped
+        PASS [   0.072s] (32/84) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.034s] (33/84) eightball::logprob lowercase_choice_does_not_match_and_low_mass_errors
+        PASS [   0.012s] (34/84) eightball::question noul_without_criteria_parses
+        PASS [   0.014s] (35/84) eightball::question score_labels
+        PASS [   0.058s] (36/84) eightball::logprob extra_body_is_merged
+        PASS [   0.014s] (37/84) eightball::question validate_rejects
+        PASS [   0.073s] (38/84) eightball::embed shuffled_indices_restore_order
+        PASS [   0.026s] (39/84) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.087s] (40/84) eightball::doctor reports_healthy_probe_and_dead_error
+        PASS [   0.013s] (41/84) eightball::store batch_insert_returns_each_row_id
+        PASS [   0.051s] (42/84) eightball::logprob twenty_seven_options_rejected
+        PASS [   0.063s] (43/84) eightball::logprob letters_map_in_option_order
+        PASS [   0.017s] (44/84) eightball::store labels_can_be_replaced_and_are_scoped
+        PASS [   0.019s] (45/84) eightball::store insert_and_cache_lookup
+        PASS [   0.025s] (46/84) eightball::store file_is_private_and_migrations_are_idempotent
+        PASS [   0.101s] (47/84) eightball::embed missing_or_duplicate_indices_are_errors
+        PASS [   0.125s] (48/84) eightball::cli_ask dead_server_exits_four
+        PASS [   0.019s] (49/84) eightball::store pruning_preserves_labelled_rows
+        PASS [   0.041s] (50/84) eightball::rerank choice_is_rejected
+        PASS [   0.013s] (51/84) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.046s] (52/84) eightball::store calibration_upsert_keeps_latest_bands
+        PASS [   0.070s] (53/84) eightball::metrics spec_verdict_and_cache_hits_are_counted
+        PASS [   0.063s] (54/84) eightball::rerank score_is_mapped_from_logit
+        PASS [   0.153s] (55/84) eightball::cli_ask choice_prints_billing
+        PASS [   0.088s] (56/84) eightball::metrics ad_hoc_decision_has_bounded_labels_and_openmetrics_type
+        PASS [   0.005s] (57/84) eightball::verdict choice_default_bands
+        PASS [   0.010s] (58/84) eightball::verdict choice_confidence_readme
+        PASS [   0.070s] (59/84) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.005s] (60/84) eightball::verdict noul_default_bands
+        PASS [   0.041s] (61/84) eightball::systemone long_state_is_fitted
+        PASS [   0.042s] (62/84) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.045s] (63/84) eightball::systemone http_400_is_error_with_body
+        PASS [   0.005s] (64/84) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.007s] (65/84) eightball::verdict score_confidence_readme
+        PASS [   0.013s] (66/84) eightball::verdict uniform_is_zero
+        PASS [   0.089s] (67/84) eightball::rest_ask empty_questions_is_400
+        PASS [   0.110s] (68/84) eightball::metrics backend_errors_are_counted
+        PASS [   0.062s] (69/84) eightball::systemone three_questions_one_request
+        PASS [   0.097s] (70/84) eightball::rest_ask healthz_is_ok
+        PASS [   0.047s] (71/84) eightball::triage top_k_requires_embedder
+        PASS [   0.085s] (72/84) eightball::triage dedupes_and_partitions_verdicts
+        PASS [   0.128s] (73/84) eightball::rest_ask backend_failure_is_502
+        PASS [   0.111s] (74/84) eightball::systemone bearer_only_when_set
+        PASS [   0.088s] (75/84) eightball::triage failed_embedder_judges_every_item_with_warning
+        PASS [   0.092s] (76/84) eightball::triage one_failed_judgment_fails_whole_triage
+        PASS [   0.104s] (77/84) eightball::triage cli_reads_json_items_from_stdin
+        PASS [   0.086s] (78/84) eightball::triage sixty_five_items_rejected
+        PASS [   0.220s] (79/84) eightball::doctor cli_exit_depends_on_default_endpoint
+        PASS [   0.119s] (80/84) eightball::triage prefilter_judges_only_closest_items
+        PASS [   0.306s] (81/84) eightball::calibrate_loop cli_supports_spec_labels_calibration_and_exit_codes
+        PASS [   0.312s] (82/84) eightball::cli_ask noul_exit_codes
+        PASS [   0.658s] (83/84) eightball::systemone concurrency_one_serializes
+        PASS [   1.143s] (84/84) eightball::calibrate_loop full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits
+────────────
+     Summary [   1.143s] 84 tests run: 84 passed, 18 skipped
+```
+
+`cargo fmt --all` passed. 84 mock tests pass; 18 live tests ignored in this dependency-only run. No new behavior yet.
