@@ -16,6 +16,8 @@ pub use crate::metrics::Metrics;
 pub struct Decision {
     pub id: i64,          // row id in the decisions table
     pub question: String, // the question id
+    #[serde(rename = "type")]
+    pub question_type: String,
     pub verdict: String,
     pub confidence: f64,
     #[schemars(with = "std::collections::BTreeMap<String, f64>")]
@@ -416,6 +418,18 @@ impl Service {
             request.endpoint.as_deref(),
         )?;
         let question = questions.into_iter().next().expect("one triage question");
+        let keep = request.keep.as_deref().unwrap_or("yes");
+        let valid_keep = match &question.kind {
+            Kind::Score { criteria } => keep
+                .parse::<usize>()
+                .is_ok_and(|minimum| minimum < criteria.len()),
+            _ => question.kind.labels().iter().any(|label| label == keep),
+        };
+        if !valid_keep {
+            return Err(ServiceError::BadRequest(format!(
+                "invalid keep value: {keep}"
+            )));
+        }
         let mut unique = IndexMap::new();
         for (index, item) in request.items.into_iter().enumerate() {
             let text = match item {
@@ -455,7 +469,6 @@ impl Service {
             }))
             .await?;
         decisions.sort_by_key(|(index, _)| *index);
-        let keep = request.keep.as_deref().unwrap_or("yes");
         let mut kept = Vec::new();
         let mut unsure = Vec::new();
         let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
@@ -653,6 +666,7 @@ impl Service {
             let decision = Decision {
                 id,
                 question: question.id,
+                question_type: question.kind.type_name().into(),
                 verdict: outcome,
                 confidence: verdict::confidence(&question.kind, &probabilities),
                 score: matches!(question.kind, Kind::Score { .. })

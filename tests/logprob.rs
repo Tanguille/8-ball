@@ -41,6 +41,18 @@ async fn case_and_space_variants_add_mass() {
     assert!((probabilities[0][1] - 0.1).abs() < 1e-9);
 }
 #[tokio::test]
+async fn trailing_whitespace_and_punctuation_match_labels() {
+    for (kind, tokens) in [
+        ("noul", vec![(" Yes.\n", 0.9), ("no,", 0.1)]),
+        ("choice", vec![(" A:", 0.9), ("B. ", 0.1)]),
+    ] {
+        let (endpoint, _mock) = endpoint(&tokens, "").await;
+        let probabilities = endpoint.ask("hi", &[question(kind)]).await.unwrap();
+        assert!((probabilities[0][0] - 0.9).abs() < 1e-9);
+        assert!((probabilities[0][1] - 0.1).abs() < 1e-9);
+    }
+}
+#[tokio::test]
 async fn lowercase_choice_does_not_match_and_low_mass_errors() {
     let (endpoint, _mock) = endpoint(&[("a", 0.5), ("B", 0.45)], "").await;
     let e = endpoint

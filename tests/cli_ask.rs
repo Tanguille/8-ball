@@ -100,6 +100,42 @@ async fn noul_exit_codes() {
     }
 }
 #[tokio::test]
+async fn spec_exit_codes_do_not_probe_doctor() {
+    for (kind, code) in [("noul", 1), ("choice", 0)] {
+        let mock = MockServer::start().await;
+        Mock::given(matchers::method("POST"))
+            .and(matchers::path("/v1/ask"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"results":[{"type":kind,"verdict":"no"}]})),
+            )
+            .expect(1)
+            .mount(&mock)
+            .await;
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+            .args([
+                "ask",
+                "--spec",
+                "named",
+                "--state",
+                "hi",
+                "--exit-code",
+                "--url",
+                &mock.uri(),
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(code),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(mock.received_requests().await.unwrap().len(), 1);
+    }
+}
+#[tokio::test]
 async fn choice_prints_billing() {
     let mock = MockServer::start().await;
     Mock::given(matchers::method("POST"))

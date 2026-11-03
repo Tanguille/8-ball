@@ -16,7 +16,12 @@ use eightball::{
 };
 
 async fn require(port: u16) {
-    let healthy = reqwest::get(format!("http://127.0.0.1:{port}/health"))
+    let healthy = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap()
+        .get(format!("http://127.0.0.1:{port}/health"))
+        .send()
         .await
         .is_ok_and(|response| response.status().is_success());
     assert!(
@@ -27,8 +32,16 @@ async fn require(port: u16) {
 fn dev_config() -> Config {
     Config::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml")).unwrap()
 }
+fn endpoint(name: &str, config: &eightball::config::EndpointConfig) -> Endpoint {
+    let key = config
+        .api_key_env
+        .as_deref()
+        .and_then(|name| std::env::var(name).ok());
+
+    Endpoint::new(name, config, key).unwrap()
+}
 fn d3() -> Endpoint {
-    Endpoint::new("d3", &dev_config().endpoints["d3"], None).unwrap()
+    endpoint("d3", &dev_config().endpoints["d3"])
 }
 fn questions() -> Vec<Question> {
     serde_json::from_value(json!([
@@ -143,6 +156,8 @@ async fn live_systemone_long_state_fits() {
         sent.chars().count()
     );
     assert_eq!(sent.chars().count(), 2003);
+    assert_eq!(probabilities.len(), 1);
+    assert!((probabilities[0].iter().sum::<f64>() - 1.0).abs() < 1e-6);
 }
 
 #[tokio::test]
@@ -219,7 +234,7 @@ async fn live_detect_d3() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_detect_chat() {
     require(9934).await;
-    let endpoint = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let endpoint = endpoint("chat", &dev_config().endpoints["chat"]);
     let info = endpoint.info().await.unwrap();
     eprintln!("chat info: {info:?}");
     assert_eq!(info.kind, eightball::config::BackendKind::Logprob);
@@ -229,7 +244,7 @@ async fn live_detect_chat() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_noul() {
     require(9934).await;
-    let endpoint = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let endpoint = endpoint("chat", &dev_config().endpoints["chat"]);
     let test_questions = questions();
     let mut greetings = Vec::new();
     let mut non_greetings = Vec::new();
@@ -268,7 +283,7 @@ async fn live_logprob_noul() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_choice() {
     require(9934).await;
-    let endpoint = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let endpoint = endpoint("chat", &dev_config().endpoints["chat"]);
     let test_questions = questions();
     let mut correct = 0;
     for (state, index) in [
@@ -292,7 +307,7 @@ async fn live_logprob_choice() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_mass() {
     require(9934).await;
-    let endpoint = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let endpoint = endpoint("chat", &dev_config().endpoints["chat"]);
     let result = endpoint
         .ask("hi there, how are you?", &questions()[..1])
         .await;
@@ -304,7 +319,7 @@ async fn live_logprob_mass() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_rerank_relevance() {
     require(9933).await;
-    let endpoint = Endpoint::new("rerank", &dev_config().endpoints["rerank"], None).unwrap();
+    let endpoint = endpoint("rerank", &dev_config().endpoints["rerank"]);
     let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"disk full"})).unwrap();
     for (state, relevant) in [("the disk is 98% full", true), ("a recipe for soup", false)] {
@@ -326,7 +341,12 @@ async fn live_rerank_relevance() {
 async fn live_embed() {
     require(9932).await;
     let config = dev_config();
-    let embedder = embed::Embedder::new(config.embedder.as_ref().unwrap(), None);
+    let embedder_config = config.embedder.as_ref().unwrap();
+    let key = embedder_config
+        .api_key_env
+        .as_deref()
+        .and_then(|name| std::env::var(name).ok());
+    let embedder = embed::Embedder::new(embedder_config, key);
     let vectors = embedder
         .embed(&[
             "disk is full".into(),
@@ -357,12 +377,7 @@ async fn live_triage_with_prefilter() {
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, endpoint_config)| {
-            (
-                name.clone(),
-                Endpoint::new(name, endpoint_config, None).unwrap(),
-            )
-        })
+        .map(|(name, endpoint_config)| (name.clone(), endpoint(name, endpoint_config)))
         .collect();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = Store::open(&directory.path().join("db.sqlite"))
@@ -396,12 +411,7 @@ async fn live_doctor() {
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, endpoint_config)| {
-            (
-                name.clone(),
-                Endpoint::new(name, endpoint_config, None).unwrap(),
-            )
-        })
+        .map(|(name, endpoint_config)| (name.clone(), endpoint(name, endpoint_config)))
         .collect();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = Store::open(&directory.path().join("db.sqlite"))
@@ -435,12 +445,7 @@ async fn live_cache_skips_model() {
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, endpoint_config)| {
-            (
-                name.clone(),
-                Endpoint::new(name, endpoint_config, None).unwrap(),
-            )
-        })
+        .map(|(name, endpoint_config)| (name.clone(), endpoint(name, endpoint_config)))
         .collect();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = Store::open(&directory.path().join("db.sqlite"))
@@ -467,12 +472,7 @@ async fn calibration_service(config: Config, path: &std::path::Path) -> Service 
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, endpoint_config)| {
-            (
-                name.clone(),
-                Endpoint::new(name, endpoint_config, None).unwrap(),
-            )
-        })
+        .map(|(name, endpoint_config)| (name.clone(), endpoint(name, endpoint_config)))
         .collect();
     Service::new(config, endpoints, Store::open(path).await.unwrap())
 }
@@ -517,11 +517,14 @@ async fn fit_fixture(service: &Service, spec: &str) -> eightball::service::Calib
             })
             .await
             .unwrap();
+        assert_eq!(result.results.len(), 1);
+        let decision = &result.results[0];
+        assert_eq!(decision.question, spec);
         eprintln!(
             "{spec} fit {state:?}: label={label}, probabilities={:?}",
-            result.results[0].probabilities
+            decision.probabilities
         );
-        service.label(result.results[0].id, label).await.unwrap();
+        service.label(decision.id, label).await.unwrap();
     }
     let result = service.calibrate(spec, Some(0.95), false).await.unwrap();
     eprintln!(

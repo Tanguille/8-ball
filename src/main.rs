@@ -390,15 +390,7 @@ async fn ask(
         } else if let Some(noul) = noul {
             noul
         } else {
-            let report = remote.get("/v1/doctor").await?;
-            report["specs"]
-                .as_array()
-                .and_then(|specs| {
-                    specs
-                        .iter()
-                        .find(|item| item["name"] == spec.as_deref().unwrap_or_default())
-                })
-                .is_some_and(|item| item["type"] == "noul")
+            body["results"][0]["type"] == "noul"
         };
         i32::from(noul && verdict == "no")
     })

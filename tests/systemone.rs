@@ -1,4 +1,10 @@
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use serde_json::{Value, json};
 use wiremock::{MockServer, ResponseTemplate, matchers};
@@ -161,30 +167,51 @@ async fn bearer_only_when_set() {
 #[tokio::test]
 async fn concurrency_one_serializes() {
     for concurrency in [1, 2] {
-        let server = MockServer::start().await;
-        mount(
-            &server,
-            ResponseTemplate::new(200)
-                .set_body_json(response())
-                .set_delay(Duration::from_millis(200)),
-        )
-        .await;
-        let mut config = endpoint_config(&server.uri());
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let router = axum::Router::new().route(
+            "/v1/systemone",
+            axum::routing::post({
+                let active = active.clone();
+                let peak = peak.clone();
+                move || {
+                    let active = active.clone();
+                    let peak = peak.clone();
+                    let barrier = barrier.clone();
+                    async move {
+                        let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(count, Ordering::SeqCst);
+                        if concurrency == 2 {
+                            // Both handlers must be in flight; serial execution times out instead.
+                            barrier.wait().await;
+                        } else {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
+                        active.fetch_sub(1, Ordering::SeqCst);
+
+                        axum::Json(response())
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let mut config = endpoint_config(&url);
         config.concurrency = Some(concurrency);
         let endpoint = Endpoint::new("d3", &config, None).unwrap();
         let test_questions = [question()];
-        let start = std::time::Instant::now();
         let (a, b) = tokio::join!(
             endpoint.ask("hi", &test_questions),
             endpoint.ask("hi", &test_questions)
         );
         a.unwrap();
         b.unwrap();
-        if concurrency == 1 {
-            assert!(start.elapsed() >= Duration::from_millis(400));
-        } else {
-            assert!(start.elapsed() < Duration::from_millis(380));
-        }
+        assert_eq!(peak.load(Ordering::SeqCst), concurrency);
+        task.abort();
     }
 }
 

@@ -25,18 +25,43 @@ async fn app(
                 "unsure" => 0.5,
                 _ => 0.97,
             };
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"answers":{"q":{"type":"noul","noul":probabilities}}}))
+            let answers: serde_json::Map<String, Value> = body["questions"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(|id| (id.clone(), json!({"type":"noul","noul":probabilities})))
+                .collect();
+
+            ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
         })
         .mount(&model)
         .await;
     if let Some(healthy) = embed {
         Mock::given(matchers::method("POST"))
             .and(matchers::path("/v1/embeddings"))
-            .respond_with(if healthy {
-                ResponseTemplate::new(200).set_body_json(json!({"data":[{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[0.0,1.0]},{"index":2,"embedding":[0.0,1.0]},{"index":3,"embedding":[1.0,0.0]},{"index":4,"embedding":[1.0,0.0]}]}))
-            } else {
-                ResponseTemplate::new(500)
+            .respond_with(move |request: &wiremock::Request| {
+                if !healthy {
+                    return ResponseTemplate::new(500);
+                }
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                let data: Vec<_> = body["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, input)| {
+                        let vector =
+                            if index == 0 || matches!(input.as_str(), Some("three" | "four")) {
+                                [1.0, 0.0]
+                            } else {
+                                [0.0, 1.0]
+                            };
+
+                        json!({"index":index,"embedding":vector})
+                    })
+                    .collect();
+
+                ResponseTemplate::new(200).set_body_json(json!({"data":data}))
             })
             .mount(&embedding)
             .await;
@@ -47,7 +72,7 @@ async fn app(
         String::new()
     };
     let config: eightball::config::Config = toml::from_str(&format!(
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n{extra}",
+        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n{extra}\n[specs.relevant]\ntype='noul'\ninstructions='Is this relevant?'",
         model.uri()
     ))
     .unwrap();
@@ -124,6 +149,49 @@ async fn sixty_five_items_rejected() {
     task.abort();
 }
 #[tokio::test]
+async fn invalid_keep_is_rejected_before_model_requests() {
+    let (url, model, _embedding, task, _dir) = app(None).await;
+    for (question, keep) in [
+        (
+            json!({"id":"q","type":"noul","instructions":"Relevant?"}),
+            "typo",
+        ),
+        (
+            json!({"id":"q","type":"choice","instructions":"Which?","criteria":{"a":"","b":""}}),
+            "yes",
+        ),
+        (
+            json!({"id":"q","type":"score","instructions":"Urgent?","criteria":["low","high"]}),
+            "no",
+        ),
+        (
+            json!({"id":"q","type":"score","instructions":"Urgent?","criteria":["low","high"]}),
+            "2",
+        ),
+        (
+            json!({"id":"q","type":"score","instructions":"Urgent?","criteria":["low","high"]}),
+            "-1",
+        ),
+    ] {
+        let response = triage(
+            &url,
+            &json!({"items":["one"],"question":question,"keep":keep}),
+        )
+        .await;
+        assert_eq!(response.status(), 400, "keep={keep}");
+        assert!(response.text().await.unwrap().contains("keep"));
+    }
+    assert!(
+        model
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| request.method != "POST")
+    );
+    task.abort();
+}
+#[tokio::test]
 async fn prefilter_judges_only_closest_items() {
     let (url, model, _embedding, task, _dir) = app(Some(true)).await;
     let mut body = request(&json!(["one", "two", "three", "four"]));
@@ -142,6 +210,38 @@ async fn prefilter_judges_only_closest_items() {
             .filter(|response| response.method == "POST")
             .count(),
         2
+    );
+    task.abort();
+}
+#[tokio::test]
+async fn named_spec_triage_uses_the_spec_question_id() {
+    let (url, _model, _embedding, task, _dir) = app(None).await;
+    let response = triage(&url, &json!({"items":["yes1","no"],"spec":"relevant"})).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["kept"][0]["decision"]["question"], "relevant");
+    assert_eq!(body["dropped"], 1);
+    task.abort();
+}
+#[tokio::test]
+async fn prefilter_handles_a_smaller_batch() {
+    let (url, model, _embedding, task, _dir) = app(Some(true)).await;
+    let mut body = request(&json!(["one", "three"]));
+    body["top_k"] = json!(1);
+    let response = triage(&url, &body).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["kept"][0]["index"], 1);
+    assert!(body.get("warning").is_none());
+    assert_eq!(
+        model
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|request| request.method == "POST")
+            .count(),
+        1
     );
     task.abort();
 }

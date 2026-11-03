@@ -36,7 +36,8 @@ pub async fn ask(
             let token = entry["token"]
                 .as_str()
                 .ok_or_else(|| BackendError("missing logprob token".into()))?
-                .trim_start();
+                .trim()
+                .trim_end_matches(['.', ',', ':', ';', '!', '?']);
             let token = if matches!(question.kind, Kind::Noul { .. }) {
                 token.to_lowercase()
             } else {

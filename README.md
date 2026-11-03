@@ -61,7 +61,7 @@ Use the server root without a trailing slash. On the server, `EIGHTBALL_API_KEY`
 - `doctor`: inspect endpoint detection, health, model fingerprints and spec calibration.
 - `config check <path>`: validate TOML without starting the service.
 
-`results[].id` is a saved decision row id for labelling; `results[].question` is the caller's question id. Repeated identical requests within the same spec reuse a row; ad-hoc and different named specs have separate rows. Invalid backend probabilities return a backend error.
+`results[].id` is a saved decision row id for labelling; `results[].question` is the caller's question id; `results[].type` is `noul`, `choice`, or `score`. Repeated identical requests within the same spec reuse a row; ad-hoc and different named specs have separate rows. Invalid backend probabilities return a backend error.
 
 ## Config reference
 
@@ -127,12 +127,14 @@ The database stores the raw text of every successful decision and is created wit
 
 [Privacy Policy](README.md#privacy) describes this local plugin's data handling. Review a shared server operator's policy before sending private data.
 
+Run the integration commands below from the repository root. `EIGHTBALL_URL` configures the CLI and Claude plugin; the other MCP clients require the explicit URL edits described in their sections.
+
 ## Claude Code
 
 **Install**
 
 ```sh
-claude plugin marketplace add /home/tanguille/Documents/PriveProjecten/8-ball
+claude plugin marketplace add .
 claude plugin install 8-ball@8-ball
 ```
 
@@ -160,7 +162,7 @@ claude plugin uninstall 8-ball@8-ball
 **Install**
 
 ```sh
-codex plugin marketplace add /home/tanguille/Documents/PriveProjecten/8-ball
+codex plugin marketplace add .
 codex plugin add 8-ball@8-ball
 ```
 
@@ -170,7 +172,7 @@ Fallback:
 
 ```sh
 codex mcp add 8ball --url http://127.0.0.1:8080/mcp --bearer-token-env-var EIGHTBALL_API_KEY
-ln -s /home/tanguille/Documents/PriveProjecten/8-ball/plugin/skills/8-ball ~/.agents/skills/8-ball
+ln -s "$PWD/plugin/skills/8-ball" ~/.agents/skills/8-ball
 ```
 
 **Verify**
@@ -221,7 +223,7 @@ Untested: qwen-code is not installed; installing tools is outside this local run
 
 ```sh
 npm install -g @qwen-code/qwen-code@latest
-qwen extensions install /home/tanguille/Documents/PriveProjecten/8-ball/plugin
+qwen extensions install ./plugin
 ```
 
 **Verify**
@@ -249,7 +251,7 @@ Untested: this machine has v1; replacing it is outside this local run. Pending u
 ```
 
 ```sh
-ln -s /home/tanguille/Documents/PriveProjecten/8-ball/plugin/skills/8-ball ~/.agents/skills/8-ball
+ln -s "$PWD/plugin/skills/8-ball" ~/.agents/skills/8-ball
 ```
 
 [Official MCP docs](https://opencode.ai/v2/docs/mcp-servers) confirm `mcp.servers` and `oauth: false` for bearer-only authentication. Keep the default Code Mode initially.
