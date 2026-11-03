@@ -1486,6 +1486,8 @@ Tests in `tests/triage.rs`:
 - One systemone call returns 500, so the whole triage gets 502.
 
 #### Step 7: Doctor
+
+**Execution status:** Complete; mock/CLI and real doctor checks pass; evidence in report.
 `Service::doctor() -> DoctorReport`, served at `GET /v1/doctor` and printed by `8ball doctor --url ...`. For each endpoint the report has:
 - `name`, `url`;
 - `kind` and `fingerprint` from `info()`, or `error` if detection failed;

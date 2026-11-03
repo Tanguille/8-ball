@@ -69,6 +69,11 @@ enum Command {
         #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
         url: String,
     },
+    /// Inspect endpoint detection and health.
+    Doctor {
+        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
+        url: String,
+    },
     /// Validate a config file.
     Config {
         #[command(subcommand)]
@@ -161,6 +166,26 @@ async fn run() -> anyhow::Result<i32> {
             .await?;
             println!("{body}");
             Ok(0)
+        }
+        Command::Doctor { url } => {
+            let report: Value = reqwest::get(format!("{}/v1/doctor", url.trim_end_matches('/')))
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            println!("{report}");
+            let default = report["endpoints"]
+                .as_array()
+                .and_then(|eps| eps.iter().find(|ep| ep["name"] == report["default"]));
+            Ok(
+                if default
+                    .is_none_or(|ep| !ep["error"].is_null() || !ep["probe"]["error"].is_null())
+                {
+                    4
+                } else {
+                    0
+                },
+            )
         }
         Command::Config {
             action: ConfigAction::Check { path },

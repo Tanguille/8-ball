@@ -337,3 +337,28 @@ async fn live_triage_with_prefilter() {
     );
     assert!(result.warning.is_none());
 }
+
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_doctor() {
+    use eightball::service::Service;
+    for port in [9931, 9932, 9933, 9934] {
+        require(port).await;
+    }
+    let config = dev_config();
+    let endpoints = config
+        .endpoints
+        .iter()
+        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .collect();
+    let report = Service::new(config, endpoints).doctor().await;
+    eprintln!("doctor: {report:?}");
+    for endpoint in &report.endpoints {
+        assert!(endpoint.error.is_none());
+        if let Some(probe) = &endpoint.probe {
+            assert!(probe["error"].is_null());
+        }
+    }
+    let d3 = report.endpoints.iter().find(|ep| ep.name == "d3").unwrap();
+    assert_eq!(d3.probe.as_ref().unwrap()["verdict"], "yes");
+}

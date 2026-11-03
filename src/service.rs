@@ -3,7 +3,7 @@ use crate::{
         Endpoint,
         embed::{Embedder, cosine},
     },
-    config::Config,
+    config::{BackendKind, Config},
     question::{Kind, Question, validate_all},
     verdict::{self, Bands},
 };
@@ -86,6 +86,25 @@ pub enum ServiceError {
     Store(String), // REST 500
 }
 
+#[derive(Debug, Serialize)]
+pub struct DoctorReport {
+    pub default: String,
+    pub endpoints: Vec<DoctorEndpoint>,
+    pub embedder: Option<serde_json::Value>,
+    pub specs: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DoctorEndpoint {
+    pub name: String,
+    pub url: String,
+    pub kind: Option<BackendKind>,
+    pub fingerprint: Option<String>,
+    pub concurrency: Option<usize>,
+    pub probe: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 pub struct Service {
     config: Config,
     endpoints: IndexMap<String, Endpoint>,
@@ -106,6 +125,38 @@ impl Service {
             config,
             endpoints,
             embedder,
+        }
+    }
+
+    pub async fn doctor(&self) -> DoctorReport {
+        let endpoints=futures::future::join_all(self.endpoints.iter().map(|(name,endpoint)|async move {
+            let mut report=DoctorEndpoint {name:name.clone(),url:self.config.endpoints[name].url.clone(),kind:None,fingerprint:None,concurrency:None,probe:None,error:None};
+            let info=match endpoint.info().await {
+                Ok(info)=>info,
+                Err(e)=> {report.error=Some(e.to_string());return report;},
+            };
+            report.kind=Some(info.kind);report.fingerprint=Some(info.fingerprint.clone());report.concurrency=Some(info.concurrency);
+            if info.kind!=BackendKind::Rerank {
+                let question=Question {id:"probe".into(),instructions:"Is the sky blue on a clear day?".into(),kind:Kind::Noul {criteria:None}};
+                let start=std::time::Instant::now();
+                let result=endpoint.ask("The sky is clear and blue today.",std::slice::from_ref(&question)).await;
+                let ms=start.elapsed().as_millis();
+                report.probe=Some(match result {
+                    Ok((probs,_))=>serde_json::json!({"verdict":verdict::verdict(&question.kind,&question.kind.labels(),&probs[0],Bands::default_for(&question.kind)),"p_yes":probs[0][0],"ms":ms}),
+                    Err(e)=>serde_json::json!({"error":e.to_string(),"ms":ms}),
+                });
+            }
+            report
+        })).await;
+        DoctorReport {
+            default: self.config.default.clone(),
+            endpoints,
+            embedder: self
+                .config
+                .embedder
+                .as_ref()
+                .map(|cfg| serde_json::json!({"url":cfg.url,"model":cfg.model})),
+            specs: Vec::new(),
         }
     }
 
