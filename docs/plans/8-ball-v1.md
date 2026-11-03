@@ -1296,11 +1296,15 @@ Only if the raw curl gives the same "wrong" answer is it the model. In that case
 - `doctor` reports each endpoint's health.
 
 #### Step 0: Grow `dev/config.toml`
+
+**Execution status:** Complete; config parsing already supported by Chunk 1, noted in report.
 - Remove `kind = "systemone"` from `[endpoints.d3]`.
 - Add `[endpoints.chat]`, `[endpoints.rerank]` and `[embedder]` exactly as in "Local model stack → dev/config.toml".
 - `8ball config check dev/config.toml` will fail until steps 2 to 5 add the matching config support. That's the red state; it must pass by the end of this chunk.
 
 #### Step 1: Check the reranker's score range (read-only, no code)
+
+**Execution finding:** Complete. Logits; use sigmoid. Raw local response: `{"model":"bge-reranker-v2-m3","object":"list","usage":{"prompt_tokens":19,"total_tokens":19},"results":[{"index":0,"relevance_score":2.2409818172454834},{"index":1,"relevance_score":-10.912446975708008}]}`.
 Run this against the local reranker, which uses the same model and image as the cluster:
 ```bash
 curl -s localhost:9933/v1/rerank -H 'content-type: application/json' \

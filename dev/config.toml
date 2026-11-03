@@ -2,5 +2,18 @@ default = "d3"
 
 [endpoints.d3]
 url = "http://127.0.0.1:9931"
-# chunk 2 removes this line: the kind is auto-detected from /v1/models
-kind = "systemone"
+
+[endpoints.chat]
+url = "http://127.0.0.1:9934"
+model = "qwen3.5-0.8b"
+# together with --reasoning-budget 0: a one-token answer must not start inside a thinking block
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[endpoints.rerank]
+url = "http://127.0.0.1:9933"
+kind = "rerank"
+
+[embedder]
+url = "http://127.0.0.1:9932"
+model = "embeddinggemma-2"
+

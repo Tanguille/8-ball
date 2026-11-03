@@ -929,3 +929,73 @@ dev-rerank-1   ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a
 ```
 
 `cargo fmt --all --check` passed. Chunk 1 complete: 32 mock tests pass, six live tests pass, all four servers healthy, real CLI greeting/team and stopped-server behavior verified.
+
+## Chunk 2
+
+### Step 0: grow dev config
+
+```text
+$ cargo run -- config check dev/config.toml
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.40s
+     Running `target/debug/8ball config check dev/config.toml`
+ok
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+```
+
+```text
+$ cargo nextest run
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+────────────
+ Nextest run ID 7e038bc7-51cd-4cff-9e78-bfa75cd9c69f with nextest profile: default
+    Starting 32 tests across 9 binaries (6 tests skipped)
+        PASS [   0.007s] ( 1/32) eightball::config default_must_exist
+        PASS [   0.007s] ( 2/32) eightball::config unknown_key_rejected
+        PASS [   0.007s] ( 3/32) eightball::config spec_parses
+        PASS [   0.007s] ( 4/32) eightball::config retention_default
+        PASS [   0.007s] ( 5/32) eightball::question noul_without_criteria_parses
+        PASS [   0.008s] ( 6/32) eightball::config logprob_needs_model
+        PASS [   0.008s] ( 7/32) eightball::config bad_spec_name
+        PASS [   0.009s] ( 8/32) eightball::config minimal_ok
+        PASS [   0.014s] ( 9/32) eightball::question score_labels
+        PASS [   0.006s] (10/32) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.007s] (11/32) eightball::verdict noul_default_bands
+        PASS [   0.006s] (12/32) eightball::verdict uniform_is_zero
+        PASS [   0.007s] (13/32) eightball::verdict score_confidence_readme
+        PASS [   0.015s] (14/32) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.015s] (15/32) eightball::config zero_concurrency
+        PASS [   0.010s] (16/32) eightball::verdict choice_confidence_readme
+        PASS [   0.018s] (17/32) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.018s] (18/32) eightball::question validate_rejects
+        PASS [   0.014s] (19/32) eightball::verdict choice_default_bands
+        PASS [   0.034s] (20/32) eightball::systemone three_questions_one_request
+        PASS [   0.041s] (21/32) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.048s] (22/32) eightball::systemone http_400_is_error_with_body
+        PASS [   0.042s] (23/32) eightball::systemone long_state_is_fitted
+        PASS [   0.058s] (24/32) eightball::systemone bearer_only_when_set
+        PASS [   0.059s] (25/32) eightball::rest_ask empty_questions_is_400
+        PASS [   0.061s] (26/32) eightball::rest_ask healthz_is_ok
+        PASS [   0.062s] (27/32) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.062s] (28/32) eightball::rest_ask backend_failure_is_502
+        PASS [   0.074s] (29/32) eightball::cli_ask dead_server_exits_four
+        PASS [   0.078s] (30/32) eightball::cli_ask choice_prints_billing
+        PASS [   0.157s] (31/32) eightball::cli_ask noul_exit_codes
+        PASS [   0.663s] (32/32) eightball::systemone concurrency_one_serializes
+────────────
+     Summary [   0.664s] 32 tests run: 32 passed, 6 skipped
+```
+
+Deviation: the plan predicts config parsing will fail until later Chunk 2 steps, but Chunk 1 explicitly required all shared config types and parsing. The config check already passes; no parser regression was introduced merely to manufacture that predicted red state. Real auto-detection/backend support still needs implementation and tests. `cargo fmt --all` passed.
+
+### Step 1: reranker range
+
+```text
+$ curl -fsS localhost:9933/v1/rerank -H content-type:application/json -d <disk-full/soup request from plan>
+{"model":"bge-reranker-v2-m3","object":"list","usage":{"prompt_tokens":19,"total_tokens":19},"results":[{"index":0,"relevance_score":2.2409818172454834},{"index":1,"relevance_score":-10.912446975708008}]}
+```
+
+These are logits; use sigmoid. Cluster inspection is excluded by the local-only boundary.
