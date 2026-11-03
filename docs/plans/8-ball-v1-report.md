@@ -5382,3 +5382,65 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; fin
 ```
 
 `cargo fmt --all` passed. Full suite: 84 mock and 18 live tests pass. Source confirmed prometheus-client appends `_total`; register names omit that suffix. Ad-hoc labels are bounded to decided/unsure, spec labels use reviewed verdicts, cached results count as decisions, and endpoint failures increment the error counter. The route has the prescribed OpenMetrics content type. No deviations.
+
+### Chunk 3 steps 7–8 and E2E verification
+
+The loop/cache tests were written with steps 4–5 before the code they exercise. Fixture validation:
+
+```text
+tests/fixtures/greeting.jsonl rows 60 unique 60 yes 30 no 30 fit 40 holdout 20
+tests/fixtures/storage-risk.jsonl rows 60 unique 60 yes 30 no 30 fit 40 holdout 20
+```
+
+The full live output in step 6 contains both fit sets, both holdouts, cache timing and edited-question invalidation. Latest holdout results remain greeting precision 1.0 / coverage 0.85, storage-risk precision 1.0 / coverage 0.95; fit precision/coverage 1.0/1.0 for both.
+
+```text
+$ /home/tanguille/Documents/PriveProjecten/8-ball/target/debug/8ball serve --config dev/config.toml --listen 127.0.0.1:0 --db /tmp/8ball-u7sm978a/db.sqlite
+2026-11-03T16:51:00.990174Z  INFO 8ball: pruned 0 old decisions
+2026-11-03T16:51:01.010521Z  INFO 8ball: listening on 127.0.0.1:38031
+$ 8ball ask --spec greeting --state hey there --url http://127.0.0.1:38031
+{"results":[{"id":1,"question":"greeting","verdict":"yes","confidence":0.9899158097126513,"probabilities":{"yes":0.9949579048563256,"no":0.005042095143674374},"calibrated":false,"cached":false}]}
+exit 0
+$ 8ball label 1 yes --url http://127.0.0.1:38031
+{"id":1,"label":"yes"}
+exit 0
+$ 8ball label 1 maybe --url http://127.0.0.1:38031
+8ball: bad request: label must be yes or no
+exit 4
+$ 8ball calibrate greeting --dry-run --url http://127.0.0.1:38031
+{"spec":"greeting","calibration_id":"995a3e3dd7cc4823","bands":{"yes_at":1.01,"no_at":-0.01},"report":{"examples":1,"decided":0,"correct":0,"precision":0.0,"coverage":0.0,"target":0.95,"in_sample":true,"warnings":["yes side: not enough evidence for the target","no side: not enough evidence for the target","fewer than 20 examples"]},"stored":false}
+exit 0
+$ 8ball doctor --url http://127.0.0.1:38031
+{"default":"d3","endpoints":[{"name":"d3","url":"http://127.0.0.1:9931","kind":"systemone","fingerprint":"/cache/vllm-d3-nano-Q8_0.gguf@b12033-785322d17","concurrency":2,"probe":{"verdict":"yes","p_yes":0.998925410724238,"ms":85},"error":null},{"name":"chat","url":"http://127.0.0.1:9934","kind":"logprob","fingerprint":"/cache/Qwen3.5-0.8B-Q8_0.gguf@b12033-785322d17","concurrency":2,"probe":{"verdict":"yes","p_yes":0.9985265338885576,"ms":219},"error":null},{"name":"rerank","url":"http://127.0.0.1:9933","kind":"rerank","fingerprint":"/cache/bge-reranker-v2-m3-Q8_0.gguf@b12033-785322d17","concurrency":1,"probe":null,"error":null}],"embedder":{"url":"http://127.0.0.1:9932","model":"embeddinggemma-2"},"specs":[{"name":"greeting","type":"noul","instructions":"Is this message a greeting?","calibration_id":"995a3e3dd7cc4823","calibrated":false,"report":null},{"name":"storage-risk","type":"noul","instructions":"Is storage or data at risk according to this message?","calibration_id":"418b20bf7ff2cb83","calibrated":false,"report":null}]}
+exit 0
+$ 8ball ask --spec greeting --state hey there --url http://127.0.0.1:38031
+{"results":[{"id":1,"question":"greeting","verdict":"yes","confidence":0.9899158097126513,"probabilities":{"yes":0.9949579048563256,"no":0.005042095143674374},"calibrated":false,"cached":true}]}
+exit 0
+$ 8ball ask choice Which team? --option a --option b --state test --endpoint rerank --url http://127.0.0.1:38031
+8ball: backend rerank: rerank answers noul questions only
+exit 4
+$ curl http://127.0.0.1:38031/metrics
+# HELP eightball_decisions Decision results.
+# TYPE eightball_decisions counter
+eightball_decisions_total{endpoint="d3",spec="greeting",verdict="yes"} 2
+# HELP eightball_backend_errors Failed endpoint calls.
+# TYPE eightball_backend_errors counter
+eightball_backend_errors_total{endpoint="rerank"} 1
+# EOF
+
+```
+
+```text
+$ dev/models.sh status
+NAME           IMAGE                                                                                                              COMMAND                  SERVICE   CREATED             STATUS                       PORTS
+dev-chat-1     ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   chat      About an hour ago   Up About an hour (healthy)   127.0.0.1:9934->9934/tcp
+dev-d3-1       ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   d3        About an hour ago   Up About an hour (healthy)   127.0.0.1:9931->9931/tcp
+dev-embed-1    ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   embed     About an hour ago   Up About an hour (healthy)   127.0.0.1:9932->9932/tcp
+dev-rerank-1   ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   rerank    About an hour ago   Up About an hour (healthy)   127.0.0.1:9933->9933/tcp
+9931 {"status":"ok"}
+9932 {"status":"ok"}
+9933 {"status":"ok"}
+9934 {"status":"ok"}
+```
+
+`cargo fmt --all --check` passed with no output. Chunk 3 complete: 84 mock tests and all 18 live tests pass, clippy clean, all local models healthy. No calibration requirement was loosened.

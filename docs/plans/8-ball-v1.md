@@ -783,7 +783,7 @@ The CLI prints `8ball: <message>` to stderr and exits 4 for any error. That incl
 - [x] Chunk 2: detection, logprob, rerank, embedder, triage, doctor (depends on 1)
 
 #### Wave 3 (sequential): Trust
-- [ ] Chunk 3: SQLite store, answer cache, specs in ask, label, calibrate, metrics, retention (depends on 2)
+- [x] Chunk 3: SQLite store, answer cache, specs in ask, label, calibrate, metrics, retention (depends on 2)
 
 #### Wave 4 (sequential): Agents and image
 - [ ] Chunk 4: MCP over stdio and HTTP, bearer auth, OAuth 404s, Dockerfile (depends on 3)
@@ -1539,7 +1539,7 @@ Run `cargo nextest run --test live --run-ignored only --no-capture`. Every test 
 ---
 
 ### Chunk 3: Trust
-**Status:** In Progress · **Wave:** 3 · **Estimated Context:** ~80k tokens · **Complexity:** High
+**Status:** Complete · **Wave:** 3 · **Estimated Context:** ~80k tokens · **Complexity:** High
 
 #### Goal
 - Every decision is stored.
@@ -1784,6 +1784,8 @@ pub struct Metrics {
 - `GET /metrics` returns `prometheus_client::encoding::text::encode(&mut String, &registry)` output with content type `application/openmetrics-text; version=1.0.0; charset=utf-8`.
 
 #### Step 7: Tests for the loop
+
+**Execution status:** Complete; cache, full ask/label/calibrate loop, edit invalidation and metrics tests pass; evidence in report.
 - `tests/cache.rs`: the same ask twice. The second response has `cached: true` and the same `id`, and the mock received only one request.
 - `tests/calibrate_loop.rs`, with a wiremock systemone mock whose response depends on the state. Use a custom `wiremock::Respond` impl that reads the request body: states containing `"hello"` get `noul: 0.9..0.99`, all others get `0.01..0.1`. Vary the value by a hash of the state so the values differ.
   1. Configure `[specs.greeting]` and ask it for 50 states (25 greetings, 25 not).
@@ -1794,6 +1796,8 @@ pub struct Metrics {
 - `tests/metrics.rs`: after one ad-hoc ask, `/metrics` contains `eightball_decisions_total{endpoint="d3",spec="",verdict="decided"} 1`, or the same with `verdict="unsure"`.
 
 #### Step 8: Real-model calibration fixtures and live tests
+
+**Execution status:** Complete; both 60-line fixtures audited, both 40/20 calibration holdouts pass, cache and edit tests pass; real numbers in report.
 Calibration only means something on real model output, so this step is the main feedback loop for `verdict::calibrate`.
 
 1. **Grow `dev/config.toml`:** add `[specs.greeting]` and the spec below, then run `8ball config check dev/config.toml`.
@@ -1820,12 +1824,12 @@ Calibration only means something on real model output, so this step is the main 
 5. **`live_question_edit_invalidates`**: after `live_calibrate_holdout`, build a second `Service` from a modified copy of `dev/config.toml` in a tempdir, with the same DB, where `greeting`'s instructions get one extra word. Asking reports `calibrated: false`, and calibrating reports `examples == 0`.
 
 #### Verification (E2E)
-- [ ] With `8ball serve --config dev/config.toml &` running: `8ball ask --spec greeting --state "hey there"` returns a result with an `id`.
-- [ ] `8ball label <that id> yes` succeeds, and `8ball label <that id> maybe` fails with exit 4.
-- [ ] `8ball calibrate greeting --dry-run` prints a report (it may warn about too few examples), and `8ball doctor` still shows `calibrated: false` for that spec, because a dry run stores nothing.
-- [ ] Asking the same state again prints `"cached":true`.
-- [ ] `curl -s localhost:8080/metrics | grep eightball_` shows both counters.
-- [ ] Mock tests, live tests and clippy are all green. Paste `live_calibrate_holdout`'s printed numbers.
+- [x] With `8ball serve --config dev/config.toml &` running: `8ball ask --spec greeting --state "hey there"` returns a result with an `id`.
+- [x] `8ball label <that id> yes` succeeds, and `8ball label <that id> maybe` fails with exit 4.
+- [x] `8ball calibrate greeting --dry-run` prints a report (it may warn about too few examples), and `8ball doctor` still shows `calibrated: false` for that spec, because a dry run stores nothing.
+- [x] Asking the same state again prints `"cached":true`.
+- [x] `curl -s localhost:8080/metrics | grep eightball_` shows both counters.
+- [x] Mock tests, live tests and clippy are all green. Paste `live_calibrate_holdout`'s printed numbers.
 
 #### Continuation Prompt
 > Continue the 8-ball v1 plan at `/home/tanguille/Documents/PriveProjecten/8-ball/docs/plans/8-ball-v1.md`. Read "READ THIS FIRST", run its pre-work checks, mark Chunk 3 complete, then do Chunk 4 step by step.
