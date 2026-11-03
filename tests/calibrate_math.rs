@@ -1,15 +1,15 @@
 use eightball::{
     config::BackendKind,
-    question::{Kind, Question},
-    verdict::{Bands, Example, calibrate, calibration_id, question_hash, short_hash, verdict},
+    question::Kind,
+    verdict::{self, Bands, Example},
 };
 
 const fn noul() -> Kind {
     Kind::Noul { criteria: None }
 }
-fn example(p: f64, label: &str) -> Example {
+fn example(probabilities: f64, label: &str) -> Example {
     Example {
-        probs: vec![p, 1.0 - p],
+        probs: vec![probabilities, 1.0 - probabilities],
         label: label.into(),
     }
 }
@@ -19,7 +19,7 @@ fn separable_noul() {
         .map(|i| example(0.80 + 0.19 * f64::from(i) / 23.0, "yes"))
         .chain((0_u32..24).map(|i| example(0.01 + 0.19 * f64::from(i) / 23.0, "no")))
         .collect();
-    let (bands, report) = calibrate(&noul(), &examples, 0.95).unwrap();
+    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95).unwrap();
     let Bands::Noul { yes_at, no_at } = bands else {
         panic!("noul bands")
     };
@@ -35,7 +35,7 @@ fn too_few_examples() {
         .map(|_| example(0.9, "yes"))
         .chain((0..5).map(|_| example(0.1, "no")))
         .collect();
-    let (bands, report) = calibrate(&noul(), &examples, 0.95).unwrap();
+    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95).unwrap();
     let Bands::Noul { yes_at, no_at } = bands else {
         panic!("noul bands")
     };
@@ -47,13 +47,13 @@ fn too_few_examples() {
 #[test]
 fn bad_target() {
     for target in [0.4, 1.0] {
-        assert!(calibrate(&noul(), &[], target).is_err());
+        assert!(verdict::calibrate(&noul(), &[], target).is_err());
     }
 }
 #[test]
 fn overlap_gives_unsure() {
     assert_eq!(
-        verdict(
+        verdict::verdict(
             &noul(),
             &noul().labels(),
             &[0.5, 0.5],
@@ -74,7 +74,7 @@ fn choice_threshold() {
         .map(|_| example(0.9, "a"))
         .chain((0..10).map(|_| example(0.55, "b")))
         .collect();
-    let (bands, report) = calibrate(&kind, &examples, 0.95).unwrap();
+    let (bands, report) = verdict::calibrate(&kind, &examples, 0.95).unwrap();
     let Bands::Level { min_confidence } = bands else {
         panic!("level bands")
     };
@@ -84,22 +84,28 @@ fn choice_threshold() {
 }
 #[test]
 fn question_hash_changes() {
-    let q = Question {
+    let question = eightball::question::Question {
         id: "first".into(),
         instructions: "Greeting?".into(),
         kind: noul(),
     };
-    let mut other = q.clone();
+    let mut other = question.clone();
     other.id = "second".into();
-    assert_eq!(question_hash(&q), question_hash(&other));
+    assert_eq!(
+        verdict::question_hash(&question),
+        verdict::question_hash(&other)
+    );
     other.instructions = "Storage risk?".into();
-    assert_ne!(question_hash(&q), question_hash(&other));
-    assert_eq!(short_hash("hello"), "2cf24dba5fb0a30e");
+    assert_ne!(
+        verdict::question_hash(&question),
+        verdict::question_hash(&other)
+    );
+    assert_eq!(verdict::short_hash("hello"), "2cf24dba5fb0a30e");
 }
 #[test]
 fn calibration_id_changes_with_fingerprint() {
     assert_ne!(
-        calibration_id("q", BackendKind::Systemone, "file@b1"),
-        calibration_id("q", BackendKind::Systemone, "file@b2")
+        verdict::calibration_id("q", BackendKind::Systemone, "file@b1"),
+        verdict::calibration_id("q", BackendKind::Systemone, "file@b2")
     );
 }

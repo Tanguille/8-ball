@@ -1,8 +1,6 @@
-use crate::{
-    config::{BackendKind, EndpointConfig},
-    question::Question,
-};
 use std::time::Duration;
+
+use crate::config::BackendKind;
 
 pub mod embed;
 pub mod logprob;
@@ -41,24 +39,25 @@ impl From<reqwest::Error> for BackendError {
 impl Endpoint {
     pub fn new(
         name: &str,
-        cfg: &EndpointConfig,
+        config: &crate::config::EndpointConfig,
         api_key: Option<String>,
     ) -> Result<Self, BackendError> {
-        if cfg.concurrency == Some(0) {
+        if config.concurrency == Some(0) {
             return Err(BackendError(format!(
                 "endpoint {name}: concurrency must be positive"
             )));
         }
+
         Ok(Self {
             name: name.into(),
-            url: cfg.url.clone(),
-            kind: cfg.kind,
-            model: cfg.model.clone(),
+            url: config.url.clone(),
+            kind: config.kind,
+            model: config.model.clone(),
             api_key,
-            extra_body: cfg.extra_body.clone(),
-            max_state_chars: cfg.max_state_chars,
+            extra_body: config.extra_body.clone(),
+            max_state_chars: config.max_state_chars,
             client: reqwest::Client::new(),
-            concurrency: cfg.concurrency,
+            concurrency: config.concurrency,
             info: tokio::sync::OnceCell::new(),
         })
     }
@@ -72,6 +71,7 @@ impl Endpoint {
             .get_or_try_init(|| async {
                 let info = self.detect().await?;
                 let permits = tokio::sync::Semaphore::new(info.concurrency);
+
                 Ok((info, permits))
             })
             .await
@@ -82,6 +82,7 @@ impl Endpoint {
             .client
             .get(format!("{}{path}", self.url))
             .timeout(Duration::from_secs(5));
+
         Ok(authed(request, self.api_key.as_deref())
             .send()
             .await?
@@ -114,13 +115,15 @@ impl Endpoint {
             } else {
                 ""
             };
+
             return Err(BackendError(format!("HTTP {status}: {text}{hint}")));
         }
+
         serde_json::from_str(&text).map_err(|e| BackendError(e.to_string()))
     }
 
     async fn detect(&self) -> Result<Info, BackendError> {
-        let props = self
+        let properties = self
             .get_info_json("/props")
             .await
             .unwrap_or(serde_json::Value::Null);
@@ -136,15 +139,17 @@ impl Endpoint {
             })?;
             let data = models["data"].as_array();
             if data.is_some_and(|data| {
-                data.iter().any(|m| {
-                    m["architecture"]["output_modalities"]
+                data.iter().any(|model| {
+                    model["architecture"]["output_modalities"]
                         .as_array()
                         .is_some_and(|modes| modes.iter().any(|mode| mode == "decisions"))
                 })
             }) {
                 BackendKind::Systemone
             } else if self.model.is_some()
-                && data.is_some_and(|data| data.iter().any(|m| m.get("architecture").is_some()))
+                && data.is_some_and(|data| {
+                    data.iter().any(|model| model.get("architecture").is_some())
+                })
             {
                 BackendKind::Logprob
             } else {
@@ -154,7 +159,7 @@ impl Endpoint {
                 )));
             }
         };
-        let fingerprint = props["model_path"].as_str().map_or_else(
+        let fingerprint = properties["model_path"].as_str().map_or_else(
             || {
                 self.model
                     .as_deref()
@@ -165,18 +170,19 @@ impl Endpoint {
             |path| {
                 format!(
                     "{path}@{}",
-                    props["build_info"].as_str().unwrap_or_default()
+                    properties["build_info"].as_str().unwrap_or_default()
                 )
             },
         );
         let concurrency = self
             .concurrency
             .or_else(|| {
-                props["total_slots"]
+                properties["total_slots"]
                     .as_u64()
-                    .and_then(|v| usize::try_from(v).ok())
+                    .and_then(|value| usize::try_from(value).ok())
             })
             .unwrap_or(2);
+
         Ok(Info {
             kind,
             fingerprint,
@@ -191,21 +197,27 @@ impl Endpoint {
             .info
             .get()
             .map_or(self.kind, |(info, _)| Some(info.kind));
-        let max = self.max_state_chars.or(match kind {
+        let maximum = self.max_state_chars.or(match kind {
             Some(BackendKind::Systemone | BackendKind::Rerank) => Some(2000),
             _ => None,
         });
-        fit(state, max)
+
+        fit(state, maximum)
     }
 
     /// Ask all questions about an already-fitted state.
-    pub async fn ask(&self, state: &str, qs: &[Question]) -> Result<Vec<Probs>, BackendError> {
+    pub async fn ask(
+        &self,
+        state: &str,
+        questions: &[crate::question::Question],
+    ) -> Result<Vec<Probs>, BackendError> {
         tokio::time::timeout(DECISION_TIMEOUT, async {
             let info = self.info().await?;
+
             match info.kind {
-                BackendKind::Systemone => systemone::ask(self, state, qs).await,
-                BackendKind::Logprob => logprob::ask(self, state, qs).await,
-                BackendKind::Rerank => rerank::ask(self, state, qs).await,
+                BackendKind::Systemone => systemone::ask(self, state, questions).await,
+                BackendKind::Logprob => logprob::ask(self, state, questions).await,
+                BackendKind::Rerank => rerank::ask(self, state, questions).await,
             }
         })
         .await
@@ -221,18 +233,19 @@ pub fn authed(request: reqwest::RequestBuilder, key: Option<&str>) -> reqwest::R
     }
 }
 
-/// Keep the first and last max/2 characters (chars, not bytes), joined by "\n…\n".
+/// Keep the first and last maximum/2 characters (chars, not bytes), joined by "\n…\n".
 #[must_use]
-pub fn fit(state: &str, max: Option<usize>) -> String {
-    let Some(max) = max else {
+pub fn fit(state: &str, maximum: Option<usize>) -> String {
+    let Some(maximum) = maximum else {
         return state.into();
     };
     let count = state.chars().count();
-    if count <= max {
+    if count <= maximum {
         return state.into();
     }
-    let head: String = state.chars().take(max / 2).collect();
-    let tail: String = state.chars().skip(count - max / 2).collect();
+    let head: String = state.chars().take(maximum / 2).collect();
+    let tail: String = state.chars().skip(count - maximum / 2).collect();
+
     format!("{head}\n…\n{tail}")
 }
 

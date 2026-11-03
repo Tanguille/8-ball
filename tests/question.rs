@@ -1,34 +1,35 @@
-use eightball::question::{Kind, Question, validate_all};
 use serde_json::json;
+
+use eightball::question::{Kind, Question};
 
 #[test]
 fn choice_roundtrip_keeps_order() {
     let input = r#"{"id":"q","instructions":"x","type":"choice","criteria":{"b":"","a":"desc"}}"#;
-    let q: Question = serde_json::from_str(input).unwrap();
-    assert_eq!(q.kind.labels(), ["b", "a"]);
-    assert_eq!(serde_json::to_string(&q).unwrap(), input);
-    assert_eq!(q.kind.type_name(), "choice");
+    let question: Question = serde_json::from_str(input).unwrap();
+    assert_eq!(question.kind.labels(), ["b", "a"]);
+    assert_eq!(serde_json::to_string(&question).unwrap(), input);
+    assert_eq!(question.kind.type_name(), "choice");
 }
 
 #[test]
 fn noul_without_criteria_parses() {
-    let q: Question =
+    let question: Question =
         serde_json::from_value(json!({"id":"q","instructions":"x","type":"noul"})).unwrap();
-    assert_eq!(q.kind, Kind::Noul { criteria: None });
-    assert_eq!(q.kind.labels(), ["yes", "no"]);
-    assert_eq!(q.kind.type_name(), "noul");
-    q.validate().unwrap();
+    assert_eq!(question.kind, Kind::Noul { criteria: None });
+    assert_eq!(question.kind.labels(), ["yes", "no"]);
+    assert_eq!(question.kind.type_name(), "noul");
+    question.validate().unwrap();
 }
 
 #[test]
 fn score_labels() {
-    let q: Question = serde_json::from_value(
+    let question: Question = serde_json::from_value(
         json!({"id":"q","instructions":"x","type":"score","criteria":["low","mid","high"]}),
     )
     .unwrap();
-    assert_eq!(q.kind.labels(), ["0", "1", "2"]);
-    assert_eq!(q.kind.type_name(), "score");
-    q.validate().unwrap();
+    assert_eq!(question.kind.labels(), ["0", "1", "2"]);
+    assert_eq!(question.kind.type_name(), "score");
+    question.validate().unwrap();
 }
 
 #[test]
@@ -53,33 +54,40 @@ fn validate_rejects() {
             "levels",
         ),
     ] {
-        let q = Question {
+        let question = Question {
             id: "q".into(),
             instructions: "x".into(),
             kind,
         };
-        assert!(q.validate().unwrap_err().to_string().contains(message));
+        assert!(
+            question
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains(message)
+        );
     }
-    let mut q = Question {
+    let mut question = Question {
         id: "q".into(),
         instructions: String::new(),
         kind: Kind::Noul { criteria: None },
     };
     assert!(
-        q.validate()
+        question
+            .validate()
             .unwrap_err()
             .to_string()
             .contains("instructions")
     );
-    q.instructions = "x".into();
+    question.instructions = "x".into();
     assert!(
-        validate_all(&[q.clone(), q])
+        eightball::question::validate_all(&[question.clone(), question])
             .unwrap_err()
             .to_string()
             .contains("duplicate")
     );
     assert!(
-        validate_all(&[])
+        eightball::question::validate_all(&[])
             .unwrap_err()
             .to_string()
             .contains("no questions")

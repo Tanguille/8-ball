@@ -1,25 +1,32 @@
-use crate::{
-    backend::{BackendError, Endpoint, Probs},
-    question::{Kind, Question},
-};
 use serde_json::json;
 
-pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Probs>, BackendError> {
-    if qs.iter().any(|q| !matches!(q.kind, Kind::Noul { .. })) {
+use crate::backend::BackendError;
+
+pub async fn ask(
+    endpoint: &crate::backend::Endpoint,
+    state: &str,
+    questions: &[crate::question::Question],
+) -> Result<Vec<crate::backend::Probs>, BackendError> {
+    if questions
+        .iter()
+        .any(|question| !matches!(question.kind, crate::question::Kind::Noul { .. }))
+    {
         return Err(BackendError("rerank answers noul questions only".into()));
     }
-    futures::future::try_join_all(qs.iter().map(|q| async move {
-        let mut body = json!({"query":q.instructions,"documents":[state]});
-        if let Some(model) = &ep.model {
+
+    futures::future::try_join_all(questions.iter().map(|question| async move {
+        let mut body = json!({"query":question.instructions,"documents":[state]});
+        if let Some(model) = &endpoint.model {
             body["model"] = json!(model);
         }
-        let response = ep.post_json("/v1/rerank", &body).await?;
+        let response = endpoint.post_json("/v1/rerank", &body).await?;
         let score = response["results"][0]["relevance_score"]
             .as_f64()
             .ok_or_else(|| BackendError("missing relevance_score".into()))?;
         // The pinned reranker's live sanity response contains logits, including negative values.
-        let p = 1.0 / (1.0 + (-score).exp());
-        Ok(vec![p, 1.0 - p])
+        let probability = 1.0 / (1.0 + (-score).exp());
+
+        Ok(vec![probability, 1.0 - probability])
     }))
     .await
 }

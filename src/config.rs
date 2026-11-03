@@ -1,5 +1,5 @@
-use crate::question::Question;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -65,7 +65,7 @@ const fn default_retention() -> u32 {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Self, ConfigError> {
+    pub fn load(path: &std::path::Path) -> Result<Self, ConfigError> {
         let path_string = path.display().to_string();
         let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
             path: path_string.clone(),
@@ -75,36 +75,38 @@ impl Config {
             path: path_string.clone(),
             message,
         };
-        let mut cfg: Self =
+        let mut config: Self =
             toml::from_str(&text).map_err(|e: toml::de::Error| invalid(e.to_string()))?;
-        for ep in cfg.endpoints.values_mut() {
-            ep.url = normalize_url(&ep.url);
+        for endpoint in config.endpoints.values_mut() {
+            endpoint.url = normalize_url(&endpoint.url);
         }
-        if let Some(embedder) = &mut cfg.embedder {
+        if let Some(embedder) = &mut config.embedder {
             embedder.url = normalize_url(&embedder.url);
         }
-        cfg.validate().map_err(invalid)?;
-        Ok(cfg)
+        config.validate().map_err(invalid)?;
+
+        Ok(config)
     }
 
     pub fn validate(&self) -> Result<(), String> {
         if !self.endpoints.contains_key(&self.default) {
             return Err(format!("unknown default endpoint {}", self.default));
         }
-        for (name, ep) in &self.endpoints {
-            if ep.concurrency == Some(0) {
+        for (name, endpoint) in &self.endpoints {
+            if endpoint.concurrency == Some(0) {
                 return Err(format!("endpoint {name}: concurrency must be positive"));
             }
-            if ep.kind == Some(BackendKind::Logprob) && ep.model.is_none() {
+            if endpoint.kind == Some(BackendKind::Logprob) && endpoint.model.is_none() {
                 return Err(format!("endpoint {name}: logprob needs model"));
             }
         }
         for (name, spec) in &self.specs {
-            let mut chars = name.chars();
-            let alnum = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+            let mut characters = name.chars();
+            let alphanumeric =
+                |character: char| character.is_ascii_lowercase() || character.is_ascii_digit();
             if name.len() > 64
-                || !chars.next().is_some_and(alnum)
-                || !chars.all(|c| alnum(c) || c == '-')
+                || !characters.next().is_some_and(alphanumeric)
+                || !characters.all(|character| alphanumeric(character) || character == '-')
             {
                 return Err(format!("invalid spec name {name}"));
             }
@@ -113,7 +115,7 @@ impl Config {
             {
                 return Err(format!("spec {name}: unknown endpoint {endpoint}"));
             }
-            Question {
+            crate::question::Question {
                 id: name.clone(),
                 instructions: spec.instructions.clone(),
                 kind: spec.kind.clone(),
@@ -121,12 +123,14 @@ impl Config {
             .validate()
             .map_err(|e| format!("spec {name}: {e}"))?;
         }
+
         Ok(())
     }
 }
 
 fn normalize_url(url: &str) -> String {
     let url = url.strip_suffix('/').unwrap_or(url);
+
     url.strip_suffix("/v1").unwrap_or(url).into()
 }
 
@@ -135,14 +139,14 @@ pub fn default_config_path() -> PathBuf {
     xdg_path("XDG_CONFIG_HOME", ".config", "8ball/config.toml")
 }
 
-/// `$var/rel`, else `$HOME/fallback/rel` when the XDG variable is unset or empty.
+/// `$variable/relative`, else `$HOME/fallback/relative` when the XDG variable is unset or empty.
 #[must_use]
-pub fn xdg_path(var: &str, fallback: &str, rel: &str) -> PathBuf {
-    std::env::var_os(var)
-        .filter(|v| !v.is_empty())
+pub fn xdg_path(variable: &str, fallback: &str, relative: &str) -> PathBuf {
+    std::env::var_os(variable)
+        .filter(|value| !value.is_empty())
         .map_or_else(
             || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(fallback),
             PathBuf::from,
         )
-        .join(rel)
+        .join(relative)
 }

@@ -1,35 +1,36 @@
+use serde_json::json;
+use wiremock::{MockServer, matchers};
+
 use eightball::{backend::Endpoint, config::EndpointConfig, question::Question};
-use serde_json::{Value, json};
-use wiremock::{
-    Mock, MockServer, ResponseTemplate,
-    matchers::{method, path},
-};
 
 #[tokio::test]
 async fn score_is_mapped_from_logit() {
     let mock = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/rerank"))
+    wiremock::Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/rerank"))
         .respond_with(
-            ResponseTemplate::new(200)
+            wiremock::ResponseTemplate::new(200)
                 .set_body_json(json!({"results":[{"index":0,"relevance_score":0.8}]})),
         )
         .mount(&mock)
         .await;
-    let cfg: EndpointConfig = toml::from_str(&format!(
+    let endpoint_config: EndpointConfig = toml::from_str(&format!(
         "url='{}'\nkind='rerank'\nmodel='ranker'",
         mock.uri()
     ))
     .unwrap();
-    let ep = Endpoint::new("rerank", &cfg, None).unwrap();
-    let q: Question =
+    let endpoint = Endpoint::new("rerank", &endpoint_config, None).unwrap();
+    let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"disk full"})).unwrap();
-    let p = ep.ask("disk at 98%", &[q]).await.unwrap();
-    assert!((p[0][0] - 0.689_974_481_127_612_5).abs() < 1e-9);
-    assert!((p[0][1] - 0.310_025_518_872_387_5).abs() < 1e-9);
+    let probabilities = endpoint.ask("disk at 98%", &[question]).await.unwrap();
+    assert!((probabilities[0][0] - 0.689_974_481_127_612_5).abs() < 1e-9);
+    assert!((probabilities[0][1] - 0.310_025_518_872_387_5).abs() < 1e-9);
     let requests = mock.received_requests().await.unwrap();
-    let request = requests.iter().find(|r| r.method == "POST").unwrap();
-    let body: Value = serde_json::from_slice(&request.body).unwrap();
+    let request = requests
+        .iter()
+        .find(|request| request.method == "POST")
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(
         body,
         json!({"query":"disk full","documents":["disk at 98%"],"model":"ranker"})
@@ -38,15 +39,16 @@ async fn score_is_mapped_from_logit() {
 #[tokio::test]
 async fn choice_is_rejected() {
     let mock = MockServer::start().await;
-    let cfg: EndpointConfig =
+    let endpoint_config: EndpointConfig =
         toml::from_str(&format!("url='{}'\nkind='rerank'", mock.uri())).unwrap();
-    let ep = Endpoint::new("rerank", &cfg, None).unwrap();
-    let q: Question = serde_json::from_value(
+    let endpoint = Endpoint::new("rerank", &endpoint_config, None).unwrap();
+    let question: Question = serde_json::from_value(
         json!({"id":"q","type":"choice","instructions":"team","criteria":{"a":"","b":""}}),
     )
     .unwrap();
     assert!(
-        ep.ask("hi", &[q])
+        endpoint
+            .ask("hi", &[question])
             .await
             .unwrap_err()
             .to_string()
@@ -57,6 +59,6 @@ async fn choice_is_rejected() {
             .await
             .unwrap()
             .iter()
-            .all(|r| r.method != "POST")
+            .all(|request| request.method != "POST")
     );
 }

@@ -1,5 +1,6 @@
 # 8-ball conventions
 
+- Follow [docs/rust-style.md](docs/rust-style.md): descriptive identifiers, import placement/order, blank lines before exits, and domain-appropriate types.
 - Read docs/plans/8-ball-v1.md "READ THIS FIRST" before any work.
 - Rust 2024, stable toolchain. Lints: clippy pedantic + nursery + style under -D warnings.
 - Module foo lives in src/foo.rs, children in src/foo/bar.rs. Never mod.rs.

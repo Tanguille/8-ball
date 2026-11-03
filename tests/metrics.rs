@@ -1,16 +1,9 @@
-use eightball::{
-    backend::Endpoint,
-    config::Config,
-    http::router,
-    service::{AskRequest, Service},
-    store::Store,
-};
-use serde_json::{Value, json};
 use std::sync::Arc;
-use wiremock::{
-    Mock, MockServer, Request, ResponseTemplate,
-    matchers::{method, path},
-};
+
+use serde_json::{Value, json};
+use wiremock::{MockServer, ResponseTemplate, matchers};
+
+use eightball::service::{AskRequest, Service};
 
 async fn app() -> (
     String,
@@ -20,10 +13,10 @@ async fn app() -> (
     tokio::task::JoinHandle<()>,
 ) {
     let mock = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/systemone"))
-        .respond_with(|r: &Request| {
-            let body: Value = serde_json::from_slice(&r.body).unwrap();
+    wiremock::Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/systemone"))
+        .respond_with(|response: &wiremock::Request| {
+            let body: Value = serde_json::from_slice(&response.body).unwrap();
             if body["state"] == "fail" {
                 return ResponseTemplate::new(500);
             }
@@ -31,9 +24,9 @@ async fn app() -> (
                 .as_object()
                 .unwrap()
                 .iter()
-                .map(|(id, q)| {
-                    let answer = if q["type"] == "choice" {
-                        let names = q["criteria"].as_object().unwrap();
+                .map(|(id, question)| {
+                    let answer = if question["type"] == "choice" {
+                        let names = question["criteria"].as_object().unwrap();
                         let probabilities: serde_json::Map<String, Value> = names
                             .keys()
                             .enumerate()
@@ -52,29 +45,44 @@ async fn app() -> (
         })
         .mount(&mock)
         .await;
-    let config:Config=toml::from_str(&format!("default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'",mock.uri())).unwrap();
-    let ep = Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&dir.path().join("db.sqlite")).await.unwrap();
-    let service = Arc::new(Service::new(config, [("d3".into(), ep)].into(), store));
+    let config: eightball::config::Config =
+        toml::from_str(
+            &format!(
+                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'",
+                mock.uri(),
+            ),
+        )
+        .unwrap();
+    let endpoint = eightball::backend::Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
+        .await
+        .unwrap();
+    let service = Arc::new(Service::new(
+        config,
+        [("d3".into(), endpoint)].into(),
+        store,
+    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let served = service.clone();
     let task = tokio::spawn(async move {
         axum::serve(
             listener,
-            router(served, None, &tokio_util::sync::CancellationToken::new()),
+            eightball::http::router(served, None, &tokio_util::sync::CancellationToken::new()),
         )
         .await
         .unwrap();
     });
-    (url, service, mock, dir, task)
+
+    (url, service, mock, directory, task)
 }
 #[tokio::test]
 async fn ad_hoc_decision_has_bounded_labels_and_openmetrics_type() {
     let (url, service, _mock, _dir, task) = app().await;
-    let req:AskRequest=serde_json::from_value(json!({"state":"hi","questions":[{"id":"q","type":"choice","instructions":"Pick","criteria":{"private-client-label":"","another-client-label":""}}]})).unwrap();
-    service.ask(req).await.unwrap();
+    let request: AskRequest = serde_json::from_value(json!({"state":"hi","questions":[{"id":"q","type":"choice","instructions":"Pick","criteria":{"private-client-label":"","another-client-label":""}}]}))
+    .unwrap();
+    service.ask(request).await.unwrap();
     let response = reqwest::get(format!("{url}/metrics")).await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -93,11 +101,11 @@ async fn ad_hoc_decision_has_bounded_labels_and_openmetrics_type() {
 #[tokio::test]
 async fn backend_errors_are_counted() {
     let (url, service, _mock, _dir, task) = app().await;
-    let req: AskRequest = serde_json::from_value(
+    let request: AskRequest = serde_json::from_value(
         json!({"state":"fail","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}),
     )
     .unwrap();
-    assert!(service.ask(req).await.is_err());
+    assert!(service.ask(request).await.is_err());
     let text = reqwest::get(format!("{url}/metrics"))
         .await
         .unwrap()
@@ -113,9 +121,10 @@ async fn backend_errors_are_counted() {
 #[tokio::test]
 async fn spec_verdict_and_cache_hits_are_counted() {
     let (url, service, _mock, _dir, task) = app().await;
-    let req: AskRequest = serde_json::from_value(json!({"state":"hi","spec":"greeting"})).unwrap();
-    service.ask(req.clone()).await.unwrap();
-    assert!(service.ask(req).await.unwrap().results[0].cached);
+    let request: AskRequest =
+        serde_json::from_value(json!({"state":"hi","spec":"greeting"})).unwrap();
+    service.ask(request.clone()).await.unwrap();
+    assert!(service.ask(request).await.unwrap().results[0].cached);
     let text = reqwest::get(format!("{url}/metrics"))
         .await
         .unwrap()

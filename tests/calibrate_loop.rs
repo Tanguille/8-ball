@@ -1,23 +1,20 @@
+use std::sync::Arc;
+
+use serde_json::{Value, json};
+use wiremock::{MockServer, matchers};
+
 use eightball::{
     backend::Endpoint,
     config::Config,
-    http::router,
-    question::Question,
     service::{AskRequest, Service},
-    store::{NewDecision, Store},
-    verdict::{question_hash, short_hash},
-};
-use serde_json::{Value, json};
-use std::sync::Arc;
-use wiremock::{
-    Mock, MockServer, Request, ResponseTemplate,
-    matchers::{method, path},
+    store::Store,
+    verdict,
 };
 
 struct App {
     service: Arc<Service>,
     model: MockServer,
-    dir: tempfile::TempDir,
+    directory: tempfile::TempDir,
     url: String,
     task: tokio::task::JoinHandle<()>,
     config: Config,
@@ -30,13 +27,13 @@ impl Drop for App {
 }
 async fn app() -> App {
     let model = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/systemone"))
-        .respond_with(|r: &Request| {
-            let body: Value = serde_json::from_slice(&r.body).unwrap();
+    wiremock::Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/systemone"))
+        .respond_with(|request: &wiremock::Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
             let state = body["state"].as_str().unwrap();
             let offset = f64::from(state.bytes().fold(0_u8, u8::wrapping_add) % 10) / 100.0;
-            let p = if state.contains("hello") {
+            let probabilities = if state.contains("hello") {
                 0.90 + offset
             } else {
                 0.01 + offset
@@ -45,9 +42,9 @@ async fn app() -> App {
                 .as_object()
                 .unwrap()
                 .iter()
-                .map(|(id, q)| {
-                    let answer = match q["type"].as_str().unwrap() {
-                        "noul" => json!({"type":"noul","noul":p}),
+                .map(|(id, question)| {
+                    let answer = match question["type"].as_str().unwrap() {
+                        "noul" => json!({"type":"noul","noul":probabilities}),
                         "choice" => json!({"type":"choice","probabilities":{"a":0.9,"b":0.1}}),
                         "score" => json!({"type":"score","probabilities":{"0":0.1,"1":0.9}}),
                         _ => unreachable!(),
@@ -55,17 +52,25 @@ async fn app() -> App {
                     (id.clone(), answer)
                 })
                 .collect();
-            ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
+            wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
         })
         .mount(&model)
         .await;
-    let config:Config=toml::from_str(&format!("default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.team]\ntype='choice'\ninstructions='Team?'\ncriteria={{a='',b=''}}\n[specs.urgency]\ntype='score'\ninstructions='Urgent?'\ncriteria=['low','high']",model.uri())).unwrap();
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&dir.path().join("db.sqlite")).await.unwrap();
+    let config: Config = toml::from_str(
+        &format!(
+            "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.team]\ntype='choice'\ninstructions='Team?'\ncriteria={{a='',b=''}}\n[specs.urgency]\ntype='score'\ninstructions='Urgent?'\ncriteria=['low','high']",
+            model.uri(),
+        ),
+    )
+    .unwrap();
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = Store::open(&directory.path().join("db.sqlite"))
+        .await
+        .unwrap();
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .map(|(name, settings)| (name.clone(), Endpoint::new(name, settings, None).unwrap()))
         .collect();
     let service = Arc::new(Service::new(config.clone(), endpoints, store.clone()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -74,7 +79,7 @@ async fn app() -> App {
     let task = tokio::spawn(async move {
         axum::serve(
             listener,
-            router(served, None, &tokio_util::sync::CancellationToken::new()),
+            eightball::http::router(served, None, &tokio_util::sync::CancellationToken::new()),
         )
         .await
         .unwrap();
@@ -82,7 +87,7 @@ async fn app() -> App {
     App {
         service,
         model,
-        dir,
+        directory,
         url,
         task,
         config,
@@ -97,7 +102,7 @@ async fn post(app: &App, path: &str, body: Value) -> reqwest::Response {
         .await
         .unwrap()
 }
-fn req(spec: &str, state: &str) -> AskRequest {
+fn request(spec: &str, state: &str) -> AskRequest {
     AskRequest {
         spec: Some(spec.into()),
         state: state.into(),
@@ -111,7 +116,7 @@ async fn posts(app: &App) -> usize {
         .await
         .unwrap()
         .iter()
-        .filter(|r| r.method == "POST")
+        .filter(|request| request.method == "POST")
         .count()
 }
 #[tokio::test]
@@ -126,7 +131,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
         };
         let decision = app
             .service
-            .ask(req("greeting", &state))
+            .ask(request("greeting", &state))
             .await
             .unwrap()
             .results
@@ -154,7 +159,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     assert_eq!(dry["stored"], false);
     assert!(
         !app.service
-            .ask(req("greeting", "hello dry run"))
+            .ask(request("greeting", "hello dry run"))
             .await
             .unwrap()
             .results[0]
@@ -175,7 +180,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     assert_eq!(posts(&app).await, before_stored);
     assert!(
         app.service
-            .ask(req("greeting", "hello new state"))
+            .ask(request("greeting", "hello new state"))
             .await
             .unwrap()
             .results[0]
@@ -186,18 +191,18 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .map(|(name, settings)| (name.clone(), Endpoint::new(name, settings, None).unwrap()))
         .collect();
     let changed = Service::new(
         config,
         endpoints,
-        Store::open(&app.dir.path().join("db.sqlite"))
+        Store::open(&app.directory.path().join("db.sqlite"))
             .await
             .unwrap(),
     );
     assert!(
         !changed
-            .ask(req("greeting", "hello new state"))
+            .ask(request("greeting", "hello new state"))
             .await
             .unwrap()
             .results[0]
@@ -244,7 +249,7 @@ async fn label_validation_rejects_unknown_adhoc_old_and_invalid_values() {
     ] {
         let id = app
             .service
-            .ask(req(spec, "hello label"))
+            .ask(request(spec, "hello label"))
             .await
             .unwrap()
             .results[0]
@@ -255,7 +260,7 @@ async fn label_validation_rejects_unknown_adhoc_old_and_invalid_values() {
     }
     let id = app
         .service
-        .ask(req("greeting", "hello old"))
+        .ask(request("greeting", "hello old"))
         .await
         .unwrap()
         .results[0]
@@ -265,7 +270,7 @@ async fn label_validation_rejects_unknown_adhoc_old_and_invalid_values() {
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .map(|(name, settings)| (name.clone(), Endpoint::new(name, settings, None).unwrap()))
         .collect();
     let changed = Service::new(config, endpoints, app.store.clone());
     assert!(
@@ -283,22 +288,22 @@ async fn conflicting_labels_are_excluded() {
     let state = "hello conflict";
     let id = app
         .service
-        .ask(req("greeting", state))
+        .ask(request("greeting", state))
         .await
         .unwrap()
         .results[0]
         .id;
     app.service.label(id, "yes".into()).await.unwrap();
-    let q: Question =
+    let question: eightball::question::Question =
         serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
             .unwrap();
     let other = app
         .store
-        .insert(NewDecision {
+        .insert(eightball::store::NewDecision {
             spec: Some("greeting".into()),
-            question_hash: question_hash(&q),
+            question_hash: verdict::question_hash(&question),
             calibration_id: "previous-model".into(),
-            state_hash: short_hash(state),
+            state_hash: verdict::short_hash(state),
             state: state.into(),
             answer: vec![0.9, 0.1],
             verdict: "yes".into(),
@@ -318,7 +323,7 @@ async fn conflicting_labels_are_excluded() {
             .report
             .warnings
             .iter()
-            .any(|w| w.starts_with("conflicting labels for decision ids"))
+            .any(|warning| warning.starts_with("conflicting labels for decision ids"))
     );
 }
 

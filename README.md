@@ -275,6 +275,8 @@ The directory-publication check for a hosted privacy-policy URL is deferred by t
 
 ## Development verification
 
+Follow the [Rust style guide](docs/rust-style.md), adapted from Mesh Organiser, for source and tests.
+
 ```sh
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings

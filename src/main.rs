@@ -1,18 +1,14 @@
+use std::{io::Read, path::PathBuf, sync::Arc};
+
 use clap::Parser;
-use eightball::{
-    backend::{Endpoint, authed},
-    config::{Config, default_config_path, xdg_path},
-    http::router,
-    mcp::Mcp,
-    question::{Kind, Question},
-    service::Service,
-    store::Store,
-};
-use indexmap::IndexMap;
 use rmcp::ServiceExt;
 use serde_json::{Value, json};
-use std::{io::Read, path::PathBuf, sync::Arc};
-use tokio_util::sync::CancellationToken;
+
+use eightball::{
+    config::{self, Config},
+    question::{Kind, Question},
+    service::Service,
+};
 
 #[derive(clap::Parser)]
 #[command(
@@ -73,7 +69,12 @@ impl Remote {
     }
 
     async fn send(&self, request: reqwest::RequestBuilder) -> anyhow::Result<Value> {
-        response_json(authed(request, self.api_key.as_deref()).send().await?).await
+        response_json(
+            eightball::backend::authed(request, self.api_key.as_deref())
+                .send()
+                .await?,
+        )
+        .await
     }
 }
 
@@ -177,13 +178,15 @@ async fn run() -> anyhow::Result<i32> {
             api_key,
         } => {
             serve(config, listen, db, api_key).await?;
+
             Ok(0)
         }
         Command::Mcp { config, db } => {
-            let server = Mcp::new(build_service(config, db).await?)
+            let server = eightball::mcp::Mcp::new(build_service(config, db).await?)
                 .serve(rmcp::transport::stdio())
                 .await?;
             server.waiting().await?;
+
             Ok(0)
         }
         Command::Ask(args) => ask(args).await,
@@ -197,13 +200,24 @@ async fn run() -> anyhow::Result<i32> {
             endpoint,
             remote,
         } => {
-            let q = make_question(&kind, instructions, options, levels);
+            let question = make_question(&kind, instructions, options, levels);
             let mut input = String::new();
             std::io::stdin().read_to_string(&mut input)?;
             let items: Vec<Value> = serde_json::from_str(&input)?;
-            let body = remote.post("/v1/triage", &json!({"items":items,"question":q,"keep":keep,"top_k":top_k,"endpoint":endpoint}))
-            .await?;
+            let body = remote
+                .post(
+                    "/v1/triage",
+                    &json!({
+                        "items": items,
+                        "question": question,
+                        "keep": keep,
+                        "top_k": top_k,
+                        "endpoint": endpoint
+                    }),
+                )
+                .await?;
             println!("{body}");
+
             Ok(0)
         }
         Command::Doctor { remote } => doctor(&remote).await,
@@ -214,6 +228,7 @@ async fn run() -> anyhow::Result<i32> {
                     .post("/v1/label", &json!({"id":id,"value":value}))
                     .await?
             );
+
             Ok(0)
         }
         Command::Calibrate {
@@ -231,13 +246,15 @@ async fn run() -> anyhow::Result<i32> {
                     )
                     .await?
             );
+
             Ok(0)
         }
         Command::Config {
             action: ConfigAction::Check { path },
         } => {
-            Config::load(&path.unwrap_or_else(default_config_path))?;
+            Config::load(&path.unwrap_or_else(config::default_config_path))?;
             println!("ok");
+
             Ok(0)
         }
     }
@@ -246,7 +263,10 @@ async fn run() -> anyhow::Result<i32> {
 async fn shutdown() {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("SIGTERM handler");
-    tokio::select! { _=tokio::signal::ctrl_c()=>{},_=terminate.recv()=>{} }
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {},
+        _ = terminate.recv() => {}
+    }
 }
 
 async fn serve(
@@ -256,21 +276,25 @@ async fn serve(
     api_key: Option<String>,
 ) -> anyhow::Result<()> {
     let service = build_service(config, db).await?;
-    let ct = CancellationToken::new();
+    let cancellation_token = tokio_util::sync::CancellationToken::new();
     let listener = tokio::net::TcpListener::bind(&listen).await?;
-    let addr = listener.local_addr()?;
-    if api_key.is_none() && !addr.ip().is_loopback() {
+    let address = listener.local_addr()?;
+    if api_key.is_none() && !address.ip().is_loopback() {
         tracing::warn!(
-            "no EIGHTBALL_API_KEY set and listening on {addr}: anyone on the network can use this server"
+            "no EIGHTBALL_API_KEY set and listening on {address}: anyone on the network can use this server"
         );
     }
-    tracing::info!("listening on {addr}");
-    axum::serve(listener, router(service, api_key.as_deref(), &ct))
-        .with_graceful_shutdown(async move {
-            shutdown().await;
-            ct.cancel();
-        })
-        .await?;
+    tracing::info!("listening on {address}");
+    axum::serve(
+        listener,
+        eightball::http::router(service, api_key.as_deref(), &cancellation_token),
+    )
+    .with_graceful_shutdown(async move {
+        shutdown().await;
+        cancellation_token.cancel();
+    })
+    .await?;
+
     Ok(())
 }
 
@@ -285,15 +309,18 @@ fn make_question(
         "choice" => Kind::Choice {
             criteria: options
                 .into_iter()
-                .map(|s| {
-                    s.split_once('=')
-                        .map_or_else(|| (s.clone(), String::new()), |(a, b)| (a.into(), b.into()))
+                .map(|text| {
+                    text.split_once('=').map_or_else(
+                        || (text.clone(), String::new()),
+                        |(name, description)| (name.into(), description.into()),
+                    )
                 })
                 .collect(),
         },
         "score" => Kind::Score { criteria: levels },
         _ => unreachable!("clap validates kind"),
     };
+
     Question {
         id: "q".into(),
         instructions,
@@ -310,6 +337,7 @@ async fn response_json(response: reqwest::Response) -> anyhow::Result<Value> {
             body["error"].as_str().unwrap_or("request failed")
         );
     }
+
     Ok(body)
 }
 
@@ -332,16 +360,16 @@ async fn ask(
         let (Some(kind), Some(instructions)) = (kind, instructions) else {
             anyhow::bail!("give --spec or <kind> <instructions>");
         };
-        let q = make_question(&kind, instructions, options, levels);
-        let noul = matches!(q.kind, Kind::Noul { .. });
-        (vec![q], Some(noul))
+        let question = make_question(&kind, instructions, options, levels);
+        let noul = matches!(question.kind, Kind::Noul { .. });
+        (vec![question], Some(noul))
     };
     let state = if let Some(state) = state {
         state
     } else {
-        let mut s = String::new();
-        std::io::stdin().read_to_string(&mut s)?;
-        s
+        let mut text = String::new();
+        std::io::stdin().read_to_string(&mut text)?;
+        text
     };
     let body = remote
         .post(
@@ -351,6 +379,7 @@ async fn ask(
         .await?;
     println!("{body}");
     let verdict = body["results"][0]["verdict"].as_str().unwrap_or("unsure");
+
     Ok(if !exit_code {
         0
     } else if verdict == "unsure" {
@@ -379,35 +408,46 @@ async fn build_service(
     config: Option<PathBuf>,
     db: Option<PathBuf>,
 ) -> anyhow::Result<Arc<Service>> {
-    let config = Config::load(&config.unwrap_or_else(default_config_path))?;
+    let config = Config::load(&config.unwrap_or_else(config::default_config_path))?;
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, cfg)| {
-            let key = cfg
+        .map(|(name, configuration)| {
+            let key = configuration
                 .api_key_env
                 .as_ref()
                 .and_then(|name| std::env::var(name).ok());
-            Ok((name.clone(), Endpoint::new(name, cfg, key)?))
+
+            Ok((
+                name.clone(),
+                eightball::backend::Endpoint::new(name, configuration, key)?,
+            ))
         })
-        .collect::<Result<IndexMap<_, _>, eightball::backend::BackendError>>()?;
-    let store = Store::open(
-        &db.unwrap_or_else(|| xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")),
-    )
-    .await?;
-    let n = store.prune(config.retention_days).await?;
-    tracing::info!("pruned {n} old decisions");
+        .collect::<Result<indexmap::IndexMap<_, _>, eightball::backend::BackendError>>()?;
+    let store =
+        eightball::store::Store::open(&db.unwrap_or_else(|| {
+            config::xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
+        }))
+        .await?;
+    let pruned = store.prune(config.retention_days).await?;
+    tracing::info!("pruned {pruned} old decisions");
+
     Ok(Arc::new(Service::new(config, endpoints, store)))
 }
 
 async fn doctor(remote: &Remote) -> anyhow::Result<i32> {
     let report = remote.get("/v1/doctor").await?;
     println!("{report}");
-    let default = report["endpoints"]
-        .as_array()
-        .and_then(|eps| eps.iter().find(|ep| ep["name"] == report["default"]));
+    let default = report["endpoints"].as_array().and_then(|endpoints| {
+        endpoints
+            .iter()
+            .find(|endpoint| endpoint["name"] == report["default"])
+    });
+
     Ok(
-        if default.is_none_or(|ep| !ep["error"].is_null() || !ep["probe"]["error"].is_null()) {
+        if default.is_none_or(|endpoint| {
+            !endpoint["error"].is_null() || !endpoint["probe"]["error"].is_null()
+        }) {
             4
         } else {
             0

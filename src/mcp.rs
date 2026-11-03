@@ -1,19 +1,14 @@
-use crate::service::{
-    AskRequest, AskResponse, Service, ServiceError, TriageRequest, TriageResponse,
-};
-use rmcp::{
-    Json, ServerHandler,
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{ServerCapabilities, ServerConfig},
-    tool, tool_handler, tool_router,
-};
-use std::sync::Arc;
+use std::{fmt::Write, sync::Arc};
+
+use rmcp::{Json, handler::server::wrapper::Parameters, model::ServerConfig, tool, tool_router};
+
+use crate::service::Service;
 
 #[derive(Clone)]
 pub struct Mcp {
     service: Arc<Service>,
     instructions: Arc<str>,
-    tool_router: ToolRouter<Self>,
+    tool_router: rmcp::handler::server::router::tool::ToolRouter<Self>,
 }
 
 #[tool_router]
@@ -21,6 +16,7 @@ impl Mcp {
     #[must_use]
     pub fn new(service: Arc<Service>) -> Self {
         let instructions = build_instructions(&service).into();
+
         Self {
             service,
             instructions,
@@ -34,10 +30,10 @@ impl Mcp {
     )]
     async fn decision_ask(
         &self,
-        Parameters(req): Parameters<AskRequest>,
-    ) -> Result<Json<AskResponse>, String> {
+        Parameters(request): Parameters<crate::service::AskRequest>,
+    ) -> Result<Json<crate::service::AskResponse>, String> {
         self.service
-            .ask(req)
+            .ask(request)
             .await
             .map(Json)
             .map_err(|e| fail_open(&e))
@@ -49,22 +45,22 @@ impl Mcp {
     )]
     async fn decision_triage(
         &self,
-        Parameters(req): Parameters<TriageRequest>,
-    ) -> Result<Json<TriageResponse>, String> {
+        Parameters(request): Parameters<crate::service::TriageRequest>,
+    ) -> Result<Json<crate::service::TriageResponse>, String> {
         self.service
-            .triage(req)
+            .triage(request)
             .await
             .map(Json)
             .map_err(|e| fail_open(&e))
     }
 }
 
-fn fail_open(e: &ServiceError) -> String {
+fn fail_open(e: &crate::service::ServiceError) -> String {
     format!("8ball failed: {e}. Fail open: do the work you were gating.")
 }
 
-#[tool_handler(router = self.tool_router)]
-impl ServerHandler for Mcp {
+#[rmcp::tool_handler(router = self.tool_router)]
+impl rmcp::ServerHandler for Mcp {
     // Match rmcp's macro output without its await-free async method, which fails our clippy gate.
     fn list_tools(
         &self,
@@ -85,13 +81,16 @@ impl ServerHandler for Mcp {
     }
 
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions(self.instructions.to_string())
+        ServerConfig::new(
+            rmcp::model::ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+        )
+        .with_instructions(self.instructions.to_string())
     }
 }
 
 fn build_instructions(service: &Service) -> String {
-    use std::fmt::Write;
     let mut instructions = String::from(
         r#"8-ball answers typed questions about a text (`state`) with a small decision model, in about half a second, without an LLM turn.
 Use it to gate (is this worth waking an agent / posting?), triage (which of these items matter?) and bucket (which category?).
@@ -118,5 +117,6 @@ Named specs (use with `spec`, they can be calibrated):
             .expect("writing to String");
         }
     }
+
     instructions
 }

@@ -1,12 +1,14 @@
-use eightball::config::{Config, ConfigError};
 use std::io::Write;
 
-fn load(text: &str) -> Result<Config, ConfigError> {
+use eightball::config::Config;
+
+fn load(text: &str) -> Result<Config, eightball::config::ConfigError> {
     let mut file = tempfile::Builder::new()
         .prefix("8ball-")
         .tempfile()
         .unwrap();
     file.write_all(text.as_bytes()).unwrap();
+
     Config::load(file.path())
 }
 
@@ -14,8 +16,8 @@ const MINIMAL: &str = "default = 'd3'\n[endpoints.d3]\nurl = 'http://h:1/v1/'\n"
 
 #[test]
 fn minimal_ok() {
-    let cfg = load(MINIMAL).unwrap();
-    assert_eq!(cfg.endpoints["d3"].url, "http://h:1");
+    let endpoint_config = load(MINIMAL).unwrap();
+    assert_eq!(endpoint_config.endpoints["d3"].url, "http://h:1");
 }
 
 #[test]
@@ -40,8 +42,11 @@ fn default_must_exist() {
 
 #[test]
 fn spec_parses() {
-    let cfg = load(&format!("{MINIMAL}\n[specs.team]\ntype = 'choice'\ninstructions = 'Which team?'\ncriteria = {{ billing = '', shipping = 'Parcels' }}\n")).unwrap();
-    assert_eq!(cfg.specs["team"].kind.labels(), ["billing", "shipping"]);
+    let endpoint_config = load(&format!("{MINIMAL}\n[specs.team]\ntype = 'choice'\ninstructions = 'Which team?'\ncriteria = {{ billing = '', shipping = 'Parcels' }}\n")).unwrap();
+    assert_eq!(
+        endpoint_config.specs["team"].kind.labels(),
+        ["billing", "shipping"]
+    );
 }
 
 #[test]

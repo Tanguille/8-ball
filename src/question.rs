@@ -1,4 +1,3 @@
-use indexmap::IndexMap;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +20,7 @@ pub enum Kind {
     Choice {
         /// option name -> description ("" = none). Order is kept.
         #[schemars(with = "std::collections::BTreeMap<String, String>")]
-        criteria: IndexMap<String, String>,
+        criteria: indexmap::IndexMap<String, String>,
     },
     Score {
         /// level descriptions, lowest first, 2..=10
@@ -47,7 +46,9 @@ impl Kind {
         match self {
             Self::Noul { .. } => vec!["yes".into(), "no".into()],
             Self::Choice { criteria } => criteria.keys().cloned().collect(),
-            Self::Score { criteria } => (0..criteria.len()).map(|i| i.to_string()).collect(),
+            Self::Score { criteria } => {
+                (0..criteria.len()).map(|index| index.to_string()).collect()
+            }
         }
     }
 
@@ -66,6 +67,7 @@ impl Question {
         if self.instructions.is_empty() {
             return Err(QuestionError("instructions must not be empty".into()));
         }
+
         match &self.kind {
             Kind::Choice { criteria } if criteria.len() < 2 => {
                 Err(QuestionError("choice needs at least 2 options".into()))
@@ -78,16 +80,20 @@ impl Question {
     }
 }
 
-pub fn validate_all(qs: &[Question]) -> Result<(), QuestionError> {
-    if qs.is_empty() {
+pub fn validate_all(questions: &[Question]) -> Result<(), QuestionError> {
+    if questions.is_empty() {
         return Err(QuestionError("no questions".into()));
     }
     let mut ids = std::collections::HashSet::new();
-    for q in qs {
-        q.validate()?;
-        if !ids.insert(&q.id) {
-            return Err(QuestionError(format!("duplicate question id: {}", q.id)));
+    for question in questions {
+        question.validate()?;
+        if !ids.insert(&question.id) {
+            return Err(QuestionError(format!(
+                "duplicate question id: {}",
+                question.id
+            )));
         }
     }
+
     Ok(())
 }

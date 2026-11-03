@@ -1,11 +1,6 @@
-use eightball::{backend::Endpoint, config::Config, http::router, service::Service, store::Store};
 use serde_json::{Value, json};
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use wiremock::{
-    Mock, MockServer, ResponseTemplate,
-    matchers::{method, path},
-};
+use wiremock::{MockServer, matchers};
 
 async fn app(
     key: Option<&str>,
@@ -17,34 +12,38 @@ async fn app(
     CancellationToken,
 ) {
     let mock = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/systemone"))
+    wiremock::Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/systemone"))
         .respond_with(
-            ResponseTemplate::new(200)
+            wiremock::ResponseTemplate::new(200)
                 .set_body_json(json!({"answers":{"q":{"type":"noul","noul":0.97}}})),
         )
         .mount(&mock)
         .await;
-    let cfg: Config = toml::from_str(&format!(
+    let endpoint_config: eightball::config::Config = toml::from_str(&format!(
         "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'",
         mock.uri()
     ))
     .unwrap();
-    let ep = Endpoint::new("d3", &cfg.endpoints["d3"], None).unwrap();
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service = Arc::new(Service::new(
-        cfg,
-        [("d3".into(), ep)].into(),
-        Store::open(&dir.path().join("db.sqlite")).await.unwrap(),
+    let endpoint =
+        eightball::backend::Endpoint::new("d3", &endpoint_config.endpoints["d3"], None).unwrap();
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let service = std::sync::Arc::new(eightball::service::Service::new(
+        endpoint_config,
+        [("d3".into(), endpoint)].into(),
+        eightball::store::Store::open(&directory.path().join("db.sqlite"))
+            .await
+            .unwrap(),
     ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let token = CancellationToken::new();
-    let app = router(service, key, &token);
+    let app = eightball::http::router(service, key, &token);
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    (url, mock, dir, task, token)
+
+    (url, mock, directory, task, token)
 }
 fn ask() -> Value {
     json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]})

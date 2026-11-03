@@ -1,28 +1,23 @@
-use eightball::{
-    backend::{Endpoint, fit},
-    config::EndpointConfig,
-    question::Question,
-};
+use std::time::Duration;
+
 use serde_json::{Value, json};
-use std::time::{Duration, Instant};
-use wiremock::{
-    Mock, MockServer, ResponseTemplate,
-    matchers::{method, path},
-};
+use wiremock::{MockServer, ResponseTemplate, matchers};
+
+use eightball::{backend::Endpoint, question::Question};
 
 fn question() -> Question {
     serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Is this a greeting?"}))
         .unwrap()
 }
-fn cfg(url: &str) -> EndpointConfig {
+fn endpoint_config(url: &str) -> eightball::config::EndpointConfig {
     toml::from_str(&format!("url = '{url}'\nkind = 'systemone'\n")).unwrap()
 }
 fn response() -> Value {
     json!({"answers":{"q":{"type":"noul","noul":0.97}}})
 }
 async fn mount(server: &MockServer, template: ResponseTemplate) {
-    Mock::given(method("POST"))
-        .and(path("/v1/systemone"))
+    wiremock::Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/systemone"))
         .respond_with(template)
         .mount(server)
         .await;
@@ -31,7 +26,7 @@ async fn mount(server: &MockServer, template: ResponseTemplate) {
 #[tokio::test]
 async fn three_questions_one_request() {
     let server = MockServer::start().await;
-    let qs: Vec<Question> = serde_json::from_value(json!([
+    let test_questions: Vec<Question>  =  serde_json::from_value(json!([
         {"id":"q1","type":"noul","instructions":"Is this a greeting?"},
         {"id":"q2","type":"choice","instructions":"Which team?","criteria":{"billing":"","shipping":""}},
         {"id":"q3","type":"score","instructions":"How urgent?","criteria":["can wait","today","now"]}
@@ -41,8 +36,8 @@ async fn three_questions_one_request() {
         "q2":{"type":"choice","choice":"billing","probabilities":{"billing":0.9,"shipping":0.1},"confidence":0.8},
         "q3":{"type":"score","score":1.2,"probabilities":{"0":0.1,"1":0.6,"2":0.3},"confidence":0.5}
     }}))).await;
-    let ep = Endpoint::new("d3", &cfg(&server.uri()), None).unwrap();
-    let got = ep.ask("hello", &qs).await.unwrap();
+    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None).unwrap();
+    let got = endpoint.ask("hello", &test_questions).await.unwrap();
     for (actual, expected) in
         got.iter()
             .zip([vec![0.97, 0.03], vec![0.9, 0.1], vec![0.1, 0.6, 0.3]])
@@ -57,7 +52,7 @@ async fn three_questions_one_request() {
         .await
         .unwrap()
         .into_iter()
-        .filter(|r| r.method == "POST")
+        .filter(|request| request.method == "POST")
         .collect();
     assert_eq!(requests.len(), 1);
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
@@ -79,25 +74,28 @@ async fn long_state_is_fitted() {
         ResponseTemplate::new(200).set_body_json(response()),
     )
     .await;
-    let mut config = cfg(&server.uri());
+    let mut config = endpoint_config(&server.uri());
     config.max_state_chars = Some(10);
-    let ep = Endpoint::new("d3", &config, None).unwrap();
-    let sent = ep.fitted("abcdefghijklmnopqrstuvwxyz0123");
+    let endpoint = Endpoint::new("d3", &config, None).unwrap();
+    let sent = endpoint.fitted("abcdefghijklmnopqrstuvwxyz0123");
     assert_eq!(sent, "abcde\n…\nz0123");
-    ep.ask(&sent, &[question()]).await.unwrap();
+    endpoint.ask(&sent, &[question()]).await.unwrap();
     let requests = server.received_requests().await.unwrap();
-    let request = requests.iter().find(|r| r.method == "POST").unwrap();
+    let request = requests
+        .iter()
+        .find(|request| request.method == "POST")
+        .unwrap();
     let body: Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(body["state"], "abcde\n…\nz0123");
 }
 #[test]
 fn fit_respects_char_boundaries() {
     assert_eq!(
-        fit(&"é".repeat(30), Some(10)),
+        eightball::backend::fit(&"é".repeat(30), Some(10)),
         format!("{}\n…\n{}", "é".repeat(5), "é".repeat(5))
     );
-    assert_eq!(fit("hi", Some(10)), "hi");
-    assert_eq!(fit("hello", None), "hello");
+    assert_eq!(eightball::backend::fit("hi", Some(10)), "hi");
+    assert_eq!(eightball::backend::fit("hello", None), "hello");
 }
 #[tokio::test]
 async fn http_400_is_error_with_body() {
@@ -107,17 +105,22 @@ async fn http_400_is_error_with_body() {
         ResponseTemplate::new(400).set_body_json(json!({"error":"too long"})),
     )
     .await;
-    let ep = Endpoint::new("d3", &cfg(&server.uri()), None).unwrap();
-    let err = ep.ask("hi", &[question()]).await.unwrap_err().to_string();
+    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None).unwrap();
+    let err = endpoint
+        .ask("hi", &[question()])
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("400") && err.contains("too long"), "{err}");
 }
 #[tokio::test]
 async fn http_501_is_not_decision_model() {
     let server = MockServer::start().await;
     mount(&server, ResponseTemplate::new(501)).await;
-    let ep = Endpoint::new("d3", &cfg(&server.uri()), None).unwrap();
+    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None).unwrap();
     assert!(
-        ep.ask("hi", &[question()])
+        endpoint
+            .ask("hi", &[question()])
             .await
             .unwrap_err()
             .to_string()
@@ -133,24 +136,24 @@ async fn bearer_only_when_set() {
             ResponseTemplate::new(200).set_body_json(response()),
         )
         .await;
-        let mut config = cfg(&server.uri());
+        let mut config = endpoint_config(&server.uri());
         if key.is_some() {
             config.api_key_env = Some("EIGHTBALL_TEST_KEY".into());
         }
-        let ep = Endpoint::new("d3", &config, key.clone()).unwrap();
-        ep.ask("hi", &[question()]).await.unwrap();
+        let endpoint = Endpoint::new("d3", &config, key.clone()).unwrap();
+        endpoint.ask("hi", &[question()]).await.unwrap();
         let requests: Vec<_> = server
             .received_requests()
             .await
             .unwrap()
             .into_iter()
-            .filter(|r| r.method == "POST")
+            .filter(|request| request.method == "POST")
             .collect();
         assert_eq!(
             requests[0]
                 .headers
                 .get("authorization")
-                .map(|v| v.to_str().unwrap()),
+                .map(|value| value.to_str().unwrap()),
             key.as_ref().map(|_| "Bearer secret")
         );
     }
@@ -166,12 +169,15 @@ async fn concurrency_one_serializes() {
                 .set_delay(Duration::from_millis(200)),
         )
         .await;
-        let mut config = cfg(&server.uri());
+        let mut config = endpoint_config(&server.uri());
         config.concurrency = Some(concurrency);
-        let ep = Endpoint::new("d3", &config, None).unwrap();
-        let qs = [question()];
-        let start = Instant::now();
-        let (a, b) = tokio::join!(ep.ask("hi", &qs), ep.ask("hi", &qs));
+        let endpoint = Endpoint::new("d3", &config, None).unwrap();
+        let test_questions = [question()];
+        let start = std::time::Instant::now();
+        let (a, b) = tokio::join!(
+            endpoint.ask("hi", &test_questions),
+            endpoint.ask("hi", &test_questions)
+        );
         a.unwrap();
         b.unwrap();
         if concurrency == 1 {
@@ -197,12 +203,15 @@ async fn invalid_backend_probabilities_are_rejected() {
             ResponseTemplate::new(200).set_body_json(json!({"answers":{"q":value}})),
         )
         .await;
-        let q = if value.get("noul").is_some() {
+        let question = if value.get("noul").is_some() {
             question()
         } else {
             serde_json::from_value(json!({"id":"q","type":"choice","instructions":"Which?","criteria":{"a":"","b":""}})).unwrap()
         };
-        let ep = Endpoint::new("d3", &cfg(&server.uri()), None).unwrap();
-        assert!(ep.ask("hi", &[q]).await.is_err(), "accepted {value}");
+        let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None).unwrap();
+        assert!(
+            endpoint.ask("hi", &[question]).await.is_err(),
+            "accepted {value}"
+        );
     }
 }

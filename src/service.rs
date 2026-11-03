@@ -1,16 +1,15 @@
-use crate::{
-    backend::{
-        Endpoint,
-        embed::{Embedder, cosine},
-    },
-    config::{BackendKind, Config},
-    question::{Kind, Question, validate_all},
-    store::{NewDecision, Store, StoreError},
-    verdict::{self, Bands},
-};
 use indexmap::IndexMap;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    backend::{Endpoint, embed::Embedder},
+    config::{BackendKind, Config},
+    question::{Kind, Question},
+    store::{NewDecision, Store, StoreError},
+    verdict::{self, Bands},
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Decision {
     pub id: i64,          // row id in the decisions table
@@ -166,6 +165,7 @@ impl Default for Metrics {
             "Failed endpoint calls",
             backend_errors.clone(),
         );
+
         Self {
             registry,
             decisions,
@@ -192,13 +192,14 @@ pub struct Service {
 impl Service {
     #[must_use]
     pub fn new(config: Config, endpoints: IndexMap<String, Endpoint>, store: Store) -> Self {
-        let embedder = config.embedder.as_ref().map(|cfg| {
-            let key = cfg
+        let embedder = config.embedder.as_ref().map(|configuration| {
+            let key = configuration
                 .api_key_env
                 .as_ref()
                 .and_then(|name| std::env::var(name).ok());
-            Embedder::new(cfg, key)
+            Embedder::new(configuration, key)
         });
+
         Self {
             config,
             endpoints,
@@ -216,6 +217,7 @@ impl Service {
         let mut text = String::new();
         prometheus_client::encoding::text::encode(&mut text, &self.metrics.registry)
             .map_err(|e| ServiceError::Store(format!("metrics encoding: {e}")))?;
+
         Ok(text)
     }
 
@@ -226,6 +228,7 @@ impl Service {
                 endpoint: name.into(),
             })
             .inc();
+
         ServiceError::Backend {
             endpoint: name.into(),
             message: error.0,
@@ -233,7 +236,7 @@ impl Service {
     }
 
     pub async fn label(&self, id: i64, value: String) -> Result<LabelResponse, ServiceError> {
-        let (spec, qh) = self
+        let (spec, question_hash) = self
             .store
             .metadata(id)
             .await?
@@ -245,7 +248,7 @@ impl Service {
         })?;
         let (questions, _) = self.resolve_questions(Some(&spec), &[], None)?;
         let question = &questions[0];
-        if verdict::question_hash(question) != qh {
+        if verdict::question_hash(question) != question_hash {
             return Err(ServiceError::BadRequest(format!(
                 "decision {id} was made for an older version of spec {spec}"
             )));
@@ -265,6 +268,7 @@ impl Service {
         if self.store.set_label(id, &value).await?.is_none() {
             return Err(ServiceError::BadRequest(format!("no decision {id}")));
         }
+
         Ok(LabelResponse { id, label: value })
     }
 
@@ -281,10 +285,10 @@ impl Service {
             .info()
             .await
             .map_err(|e| self.backend_error(&name, e))?;
-        let qh = verdict::question_hash(question);
-        let cid = verdict::calibration_id(&qh, info.kind, &info.fingerprint);
+        let question_hash = verdict::question_hash(question);
+        let calibration_id = verdict::calibration_id(&question_hash, info.kind, &info.fingerprint);
         let mut groups: IndexMap<String, Vec<crate::store::Labelled>> = IndexMap::new();
-        for row in self.store.labelled(spec, &qh).await? {
+        for row in self.store.labelled(spec, &question_hash).await? {
             groups.entry(row.state_hash.clone()).or_default().push(row);
         }
         let mut warnings = Vec::new();
@@ -300,25 +304,28 @@ impl Service {
                 warnings.push(format!("conflicting labels for decision ids {ids}"));
                 continue;
             }
-            let probs =
-                if let Some((_, probs)) = self.store.cached(&cid, &state_hash, Some(spec)).await? {
-                    probs
-                } else {
-                    self.ask(AskRequest {
-                        state: first.state.clone(),
-                        spec: Some(spec.into()),
-                        questions: vec![],
-                        endpoint: Some(name.clone()),
-                    })
-                    .await?
-                    .results
-                    .remove(0)
-                    .probabilities
-                    .into_values()
-                    .collect()
-                };
+            let probabilities = if let Some((_, probabilities)) = self
+                .store
+                .cached(&calibration_id, &state_hash, Some(spec))
+                .await?
+            {
+                probabilities
+            } else {
+                self.ask(AskRequest {
+                    state: first.state.clone(),
+                    spec: Some(spec.into()),
+                    questions: vec![],
+                    endpoint: Some(name.clone()),
+                })
+                .await?
+                .results
+                .remove(0)
+                .probabilities
+                .into_values()
+                .collect()
+            };
             examples.push(verdict::Example {
-                probs,
+                probs: probabilities,
                 label: first.label.clone(),
             });
         }
@@ -328,12 +335,13 @@ impl Service {
         report.warnings.extend(warnings);
         if !dry_run {
             self.store
-                .put_calibration(&cid, spec, &bands, &report)
+                .put_calibration(&calibration_id, spec, &bands, &report)
                 .await?;
         }
+
         Ok(CalibrateResponse {
             spec: spec.into(),
-            calibration_id: cid,
+            calibration_id,
             bands,
             report,
             stored: !dry_run,
@@ -341,44 +349,85 @@ impl Service {
     }
 
     pub async fn doctor(&self) -> DoctorReport {
-        let endpoints=futures::future::join_all(self.endpoints.iter().map(|(name,endpoint)|async move {
-            let mut report=DoctorEndpoint {name:name.clone(),url:self.config.endpoints[name].url.clone(),kind:None,fingerprint:None,concurrency:None,probe:None,error:None};
-            let info=match endpoint.info().await {
-                Ok(info)=>info,
-                Err(e)=> {report.error=Some(self.backend_error(name,e).to_string());return report;},
-            };
-            report.kind=Some(info.kind);report.fingerprint=Some(info.fingerprint.clone());report.concurrency=Some(info.concurrency);
-            if info.kind!=BackendKind::Rerank {
-                let question=Question {id:"probe".into(),instructions:"Is the sky blue on a clear day?".into(),kind:Kind::Noul {criteria:None}};
-                let start=std::time::Instant::now();
-                let result=endpoint.ask("The sky is clear and blue today.",std::slice::from_ref(&question)).await;
-                let ms=start.elapsed().as_millis();
-                report.probe=Some(match result {
-                    Ok(probs)=>serde_json::json!({"verdict":verdict::verdict(&question.kind,&question.kind.labels(),&probs[0],Bands::default_for(&question.kind)),"p_yes":probs[0][0],"ms":ms}),
-                    Err(e)=>serde_json::json!({"error":self.backend_error(name,e).to_string(),"ms":ms}),
-                });
-            }
-            report
-        })).await;
+        let endpoints =
+            futures::future::join_all(self.endpoints.iter().map(|(name, endpoint)| async move {
+                let mut report = DoctorEndpoint {
+                    name: name.clone(),
+                    url: self.config.endpoints[name].url.clone(),
+                    kind: None,
+                    fingerprint: None,
+                    concurrency: None,
+                    probe: None,
+                    error: None,
+                };
+                let info = match endpoint.info().await {
+                    Ok(info) => info,
+                    Err(e) => {
+                        report.error = Some(self.backend_error(name, e).to_string());
+
+                        return report;
+                    }
+                };
+                report.kind = Some(info.kind);
+                report.fingerprint = Some(info.fingerprint.clone());
+                report.concurrency = Some(info.concurrency);
+                if info.kind != BackendKind::Rerank {
+                    let question = Question {
+                        id: "probe".into(),
+                        instructions: "Is the sky blue on a clear day?".into(),
+                        kind: Kind::Noul { criteria: None },
+                    };
+                    let start = std::time::Instant::now();
+                    let result = endpoint
+                        .ask(
+                            "The sky is clear and blue today.",
+                            std::slice::from_ref(&question),
+                        )
+                        .await;
+                    let milliseconds = start.elapsed().as_millis();
+                    report.probe = Some(match result {
+                        Ok(probabilities) => serde_json::json!({
+                            "verdict": verdict::verdict(
+                                &question.kind, &question.kind.labels(),
+                                &probabilities[0], Bands::default_for(&question.kind)
+                            ),
+                            "p_yes": probabilities[0][0],
+                            "ms": milliseconds
+                        }),
+                        Err(e) => serde_json::json!({
+                            "error": self.backend_error(name, e).to_string(), "ms": milliseconds
+                        }),
+                    });
+                }
+
+                report
+            }))
+            .await;
         let mut specs = Vec::new();
         for (name, spec) in &self.config.specs {
             let (questions, endpoint) = self
                 .resolve_questions(Some(name), &[], None)
                 .expect("validated config");
-            let mut status = serde_json::json!({"name":name,"type":spec.kind.type_name(),"instructions":spec.instructions,"calibration_id":null,"calibrated":false,"report":null});
+            let mut status = serde_json::json!({
+                "name": name,
+                "type": spec.kind.type_name(),
+                "instructions": spec.instructions,
+                "calibration_id": null, "calibrated": false, "report": null
+            });
             match self.endpoints[&endpoint].info().await {
                 Ok(info) => {
-                    let cid = verdict::calibration_id(
+                    let calibration_id = verdict::calibration_id(
                         &verdict::question_hash(&questions[0]),
                         info.kind,
                         &info.fingerprint,
                     );
-                    status["calibration_id"] = serde_json::json!(cid);
-                    match self.store.calibration(&cid).await {
+                    status["calibration_id"] = serde_json::json!(calibration_id);
+                    match self.store.calibration(&calibration_id).await {
                         Ok(Some((_, report))) => {
                             status["calibrated"] = serde_json::json!(true);
                             status["report"] = serde_json::json!(report);
                         }
+
                         Ok(None) => {}
                         Err(e) => status["error"] = serde_json::json!(e.to_string()),
                     }
@@ -390,35 +439,40 @@ impl Service {
             }
             specs.push(status);
         }
+
         DoctorReport {
             default: self.config.default.clone(),
             endpoints,
-            embedder: self
-                .config
-                .embedder
-                .as_ref()
-                .map(|cfg| serde_json::json!({"url":cfg.url,"model":cfg.model})),
+            embedder: self.config.embedder.as_ref().map(|configuration| {
+                serde_json::json!({
+                    "url": configuration.url,
+                    "model": configuration.model
+                })
+            }),
             specs,
         }
     }
 
-    pub async fn triage(&self, req: TriageRequest) -> Result<TriageResponse, ServiceError> {
-        if req.items.len() > 64 {
+    pub async fn triage(&self, request: TriageRequest) -> Result<TriageResponse, ServiceError> {
+        if request.items.len() > 64 {
             return Err(ServiceError::BadRequest("at most 64 items".into()));
         }
-        if req.spec.is_some() == req.question.is_some() {
+        if request.spec.is_some() == request.question.is_some() {
             return Err(ServiceError::BadRequest(
                 "use spec or question, exclusively".into(),
             ));
         }
-        let ad_hoc: Vec<_> = req.question.into_iter().collect();
-        let (questions, endpoint) =
-            self.resolve_questions(req.spec.as_deref(), &ad_hoc, req.endpoint.as_deref())?;
+        let ad_hoc: Vec<_> = request.question.into_iter().collect();
+        let (questions, endpoint) = self.resolve_questions(
+            request.spec.as_deref(),
+            &ad_hoc,
+            request.endpoint.as_deref(),
+        )?;
         let question = questions.into_iter().next().expect("one triage question");
         let mut unique = IndexMap::new();
-        for (index, item) in req.items.into_iter().enumerate() {
+        for (index, item) in request.items.into_iter().enumerate() {
             let text = match item {
-                serde_json::Value::String(s) => s,
+                serde_json::Value::String(text) => text,
                 other => other.to_string(),
             };
             unique.entry(text).or_insert(index);
@@ -428,14 +482,14 @@ impl Service {
             .into_iter()
             .map(|(text, index)| (index, text))
             .collect();
-        let warning = if let Some(top_k) = req.top_k {
+        let warning = if let Some(top_k) = request.top_k {
             self.prefilter(&question, &mut items, top_k).await?
         } else {
             None
         };
         let question = &question;
         let endpoint = &endpoint;
-        let spec = &req.spec;
+        let spec = &request.spec;
         let mut decisions =
             futures::future::try_join_all(items.into_iter().map(|(index, state)| async move {
                 let mut response = self
@@ -454,7 +508,7 @@ impl Service {
             }))
             .await?;
         decisions.sort_by_key(|(index, _)| *index);
-        let keep = req.keep.as_deref().unwrap_or("yes");
+        let keep = request.keep.as_deref().unwrap_or("yes");
         let mut kept = Vec::new();
         let mut unsure = Vec::new();
         let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
@@ -466,7 +520,7 @@ impl Service {
                     .parse::<usize>()
                     .ok()
                     .zip(keep.parse::<usize>().ok())
-                    .is_some_and(|(level, min)| level >= min)
+                    .is_some_and(|(level, minimum)| level >= minimum)
             } else {
                 decision.verdict == keep
             };
@@ -477,6 +531,7 @@ impl Service {
                 kept.push(item);
             }
         }
+
         Ok(TriageResponse {
             dropped: unique_count - kept.len() - unsure.len(),
             kept,
@@ -508,19 +563,32 @@ impl Service {
         let mut ranked: Vec<_> = items
             .drain(..)
             .enumerate()
-            .map(|(i, (index, text))| (index, text, cosine(&vectors[0], &vectors[i + 1])))
+            .map(|(i, (index, text))| {
+                (
+                    index,
+                    text,
+                    crate::backend::embed::cosine(&vectors[0], &vectors[i + 1]),
+                )
+            })
             .collect();
-        ranked.sort_by(|a, b| b.2.total_cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        ranked.sort_by(|left, right| {
+            right
+                .2
+                .total_cmp(&left.2)
+                .then_with(|| left.0.cmp(&right.0))
+        });
         ranked.truncate(top_k);
         *items = ranked
             .into_iter()
             .map(|(index, text, _)| (index, text))
             .collect();
+
         Ok(None)
     }
 
-    pub async fn ask(&self, req: AskRequest) -> Result<AskResponse, ServiceError> {
-        let judgments = self.judge(req).await?;
+    pub async fn ask(&self, request: AskRequest) -> Result<AskResponse, ServiceError> {
+        let judgments = self.judge(request).await?;
+
         Ok(AskResponse {
             results: self.persist(judgments).await?,
         })
@@ -554,37 +622,43 @@ impl Service {
         } else {
             (questions.to_vec(), None)
         };
-        validate_all(&questions).map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+        crate::question::validate_all(&questions)
+            .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
         let name = endpoint.or(spec_endpoint).unwrap_or(&self.config.default);
         if !self.endpoints.contains_key(name) {
             return Err(ServiceError::BadRequest(format!("unknown endpoint {name}")));
         }
+
         Ok((questions, name.into()))
     }
 
-    async fn judge(&self, req: AskRequest) -> Result<Vec<Judgment>, ServiceError> {
-        let (questions, name) =
-            self.resolve_questions(req.spec.as_deref(), &req.questions, req.endpoint.as_deref())?;
+    async fn judge(&self, request: AskRequest) -> Result<Vec<Judgment>, ServiceError> {
+        let (questions, name) = self.resolve_questions(
+            request.spec.as_deref(),
+            &request.questions,
+            request.endpoint.as_deref(),
+        )?;
         let endpoint = &self.endpoints[&name];
         let backend_error = |e| self.backend_error(&name, e);
         let info = endpoint.info().await.map_err(backend_error)?;
-        let state = endpoint.fitted(&req.state);
+        let state = endpoint.fitted(&request.state);
         let state_hash = verdict::short_hash(&state);
         let mut cached = Vec::new();
         let mut uncached = Vec::new();
         let mut identities = Vec::new();
-        for q in &questions {
-            let qh = verdict::question_hash(q);
-            let cid = verdict::calibration_id(&qh, info.kind, &info.fingerprint);
+        for question in &questions {
+            let question_hash = verdict::question_hash(question);
+            let calibration_id =
+                verdict::calibration_id(&question_hash, info.kind, &info.fingerprint);
             let answer = self
                 .store
-                .cached(&cid, &state_hash, req.spec.as_deref())
+                .cached(&calibration_id, &state_hash, request.spec.as_deref())
                 .await?;
             if answer.is_none() {
-                uncached.push(q.clone());
+                uncached.push(question.clone());
             }
             cached.push(answer);
-            identities.push((qh, cid));
+            identities.push((question_hash, calibration_id));
         }
         let mut answers = if uncached.is_empty() {
             Vec::new()
@@ -596,8 +670,10 @@ impl Service {
         }
         .into_iter();
         let mut judgments = Vec::with_capacity(questions.len());
-        for ((q, cached_answer), (qh, cid)) in questions.into_iter().zip(cached).zip(identities) {
-            let (id, p, cached) = cached_answer.map_or_else(
+        for ((question, cached_answer), (question_hash, calibration_id)) in
+            questions.into_iter().zip(cached).zip(identities)
+        {
+            let (id, probabilities, cached) = cached_answer.map_or_else(
                 || {
                     (
                         0,
@@ -605,51 +681,54 @@ impl Service {
                         false,
                     )
                 },
-                |(id, p)| (id, p, true),
+                |(id, probabilities)| (id, probabilities, true),
             );
-            let calibration = if req.spec.is_some() {
-                self.store.calibration(&cid).await?
+            let calibration = if request.spec.is_some() {
+                self.store.calibration(&calibration_id).await?
             } else {
                 None
             };
             let calibrated = calibration.is_some();
-            let bands = calibration.map_or_else(|| Bands::default_for(&q.kind), |(bands, _)| bands);
-            let labels = q.kind.labels();
-            let outcome = verdict::verdict(&q.kind, &labels, &p, bands);
+            let bands =
+                calibration.map_or_else(|| Bands::default_for(&question.kind), |(bands, _)| bands);
+            let labels = question.kind.labels();
+            let outcome = verdict::verdict(&question.kind, &labels, &probabilities, bands);
             let fresh = (!cached).then(|| NewDecision {
-                spec: req.spec.clone(),
-                question_hash: qh,
-                calibration_id: cid,
+                spec: request.spec.clone(),
+                question_hash,
+                calibration_id,
                 state_hash: state_hash.clone(),
                 state: state.clone(),
-                answer: p.clone(),
+                answer: probabilities.clone(),
                 verdict: outcome.clone(),
                 endpoint: name.clone(),
             });
             let decision = Decision {
                 id,
-                question: q.id,
+                question: question.id,
                 verdict: outcome,
-                confidence: verdict::confidence(&q.kind, &p),
-                score: matches!(q.kind, Kind::Score { .. }).then(|| verdict::expected_score(&p)),
-                probabilities: labels.into_iter().zip(p).collect(),
+                confidence: verdict::confidence(&question.kind, &probabilities),
+                score: matches!(question.kind, Kind::Score { .. })
+                    .then(|| verdict::expected_score(&probabilities)),
+                probabilities: labels.into_iter().zip(probabilities).collect(),
                 calibrated,
                 cached,
             };
             judgments.push(Judgment {
                 endpoint: name.clone(),
-                spec: req.spec.clone(),
+                spec: request.spec.clone(),
                 decision,
                 fresh,
             });
         }
+
         Ok(judgments)
     }
 
     async fn persist(&self, mut judgments: Vec<Judgment>) -> Result<Vec<Decision>, ServiceError> {
         let fresh = judgments
             .iter_mut()
-            .filter_map(|j| j.fresh.take())
+            .filter_map(|judgment| judgment.fresh.take())
             .collect::<Vec<_>>();
         let ids = if fresh.is_empty() {
             Vec::new()
@@ -657,6 +736,7 @@ impl Service {
             self.store.insert_many(fresh).await?
         };
         let mut ids = ids.into_iter();
+
         Ok(judgments
             .into_iter()
             .map(|mut judgment| {

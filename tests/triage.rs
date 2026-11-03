@@ -1,11 +1,8 @@
-use eightball::{backend::Endpoint, config::Config, http::router, service::Service};
+use std::process::Stdio;
+
 use serde_json::{Value, json};
-use std::{process::Stdio, sync::Arc};
 use tokio::io::AsyncWriteExt;
-use wiremock::{
-    Mock, MockServer, Request, ResponseTemplate,
-    matchers::{method, path},
-};
+use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 async fn app(
     embed: Option<bool>,
@@ -18,53 +15,64 @@ async fn app(
 ) {
     let model = MockServer::start().await;
     let embedding = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/systemone"))
-        .respond_with(|r: &Request| {
-            let body: Value = serde_json::from_slice(&r.body).unwrap();
-            let p = match body["state"].as_str().unwrap() {
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/systemone"))
+        .respond_with(|response: &wiremock::Request| {
+            let body: Value = serde_json::from_slice(&response.body).unwrap();
+            let probabilities = match body["state"].as_str().unwrap() {
                 "bad" => return ResponseTemplate::new(500),
                 "no" => 0.01,
                 "unsure" => 0.5,
                 _ => 0.97,
             };
             ResponseTemplate::new(200)
-                .set_body_json(json!({"answers":{"q":{"type":"noul","noul":p}}}))
+                .set_body_json(json!({"answers":{"q":{"type":"noul","noul":probabilities}}}))
         })
         .mount(&model)
         .await;
     if let Some(healthy) = embed {
-        Mock::given(method("POST")).and(path("/v1/embeddings")).respond_with(if healthy {
-            ResponseTemplate::new(200).set_body_json(json!({"data":[{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[0.0,1.0]},{"index":2,"embedding":[0.0,1.0]},{"index":3,"embedding":[1.0,0.0]},{"index":4,"embedding":[1.0,0.0]}]}))
-        } else {ResponseTemplate::new(500)}).mount(&embedding).await;
+        Mock::given(matchers::method("POST"))
+            .and(matchers::path("/v1/embeddings"))
+            .respond_with(if healthy {
+                ResponseTemplate::new(200).set_body_json(json!({"data":[{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[0.0,1.0]},{"index":2,"embedding":[0.0,1.0]},{"index":3,"embedding":[1.0,0.0]},{"index":4,"embedding":[1.0,0.0]}]}))
+            } else {
+                ResponseTemplate::new(500)
+            })
+            .mount(&embedding)
+            .await;
     }
     let extra = if embed.is_some() {
         format!("\n[embedder]\nurl='{}'\nmodel='embed'", embedding.uri())
     } else {
         String::new()
     };
-    let config: Config = toml::from_str(&format!(
+    let config: eightball::config::Config = toml::from_str(&format!(
         "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n{extra}",
         model.uri()
     ))
     .unwrap();
-    let ep = Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&dir.path().join("db.sqlite"))
+    let endpoint = eightball::backend::Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
-    let service = Arc::new(Service::new(config, [("d3".into(), ep)].into(), store));
+    let service = std::sync::Arc::new(eightball::service::Service::new(
+        config,
+        [("d3".into(), endpoint)].into(),
+        store,
+    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
         axum::serve(
             listener,
-            router(service, None, &tokio_util::sync::CancellationToken::new()),
+            eightball::http::router(service, None, &tokio_util::sync::CancellationToken::new()),
         )
         .await
         .unwrap();
     });
-    (url, model, embedding, task, dir)
+
+    (url, model, embedding, task, directory)
 }
 fn request(items: &Value) -> Value {
     json!({"items":items,"question":{"id":"q","type":"noul","instructions":"Is this relevant?"}})
@@ -80,13 +88,13 @@ async fn triage(url: &str, body: &Value) -> reqwest::Response {
 #[tokio::test]
 async fn dedupes_and_partitions_verdicts() {
     let (url, model, _embedding, task, _dir) = app(None).await;
-    let r = triage(
+    let response = triage(
         &url,
         &request(&json!(["yes1", "yes2", "unsure", "no", "yes1"])),
     )
     .await;
-    assert_eq!(r.status(), 200);
-    let body: Value = r.json().await.unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
     assert_eq!(body["kept"].as_array().unwrap().len(), 2);
     assert_eq!(body["unsure"].as_array().unwrap().len(), 1);
     assert_eq!(body["dropped"], 1);
@@ -98,7 +106,7 @@ async fn dedupes_and_partitions_verdicts() {
             .await
             .unwrap()
             .iter()
-            .filter(|r| r.method == "POST")
+            .filter(|response| response.method == "POST")
             .count(),
         4
     );
@@ -120,9 +128,9 @@ async fn prefilter_judges_only_closest_items() {
     let (url, model, _embedding, task, _dir) = app(Some(true)).await;
     let mut body = request(&json!(["one", "two", "three", "four"]));
     body["top_k"] = json!(2);
-    let r = triage(&url, &body).await;
-    assert_eq!(r.status(), 200);
-    let body: Value = r.json().await.unwrap();
+    let response = triage(&url, &body).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
     assert_eq!(body["kept"][0]["index"], 2);
     assert_eq!(body["kept"][1]["index"], 3);
     assert_eq!(
@@ -131,7 +139,7 @@ async fn prefilter_judges_only_closest_items() {
             .await
             .unwrap()
             .iter()
-            .filter(|r| r.method == "POST")
+            .filter(|response| response.method == "POST")
             .count(),
         2
     );
@@ -142,9 +150,9 @@ async fn failed_embedder_judges_every_item_with_warning() {
     let (url, model, _embedding, task, _dir) = app(Some(false)).await;
     let mut body = request(&json!(["one", "two", "three", "four"]));
     body["top_k"] = json!(2);
-    let r = triage(&url, &body).await;
-    assert_eq!(r.status(), 200);
-    let body: Value = r.json().await.unwrap();
+    let response = triage(&url, &body).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
     assert_eq!(body["kept"].as_array().unwrap().len(), 4);
     assert!(
         body["warning"]
@@ -158,7 +166,7 @@ async fn failed_embedder_judges_every_item_with_warning() {
             .await
             .unwrap()
             .iter()
-            .filter(|r| r.method == "POST")
+            .filter(|response| response.method == "POST")
             .count(),
         4
     );

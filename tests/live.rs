@@ -1,12 +1,26 @@
-use eightball::{backend::Endpoint, config::Config, question::Question, verdict::expected_score};
+use std::{
+    io::{BufRead, BufReader, Read},
+    process::{Command, Stdio},
+};
+
+use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
 use serde_json::json;
 
+use eightball::{
+    backend::{Endpoint, embed},
+    config::Config,
+    question::Question,
+    service::{AskRequest, Service},
+    store::Store,
+    verdict,
+};
+
 async fn require(port: u16) {
-    let ok = reqwest::get(format!("http://127.0.0.1:{port}/health"))
+    let healthy = reqwest::get(format!("http://127.0.0.1:{port}/health"))
         .await
-        .is_ok_and(|r| r.status().is_success());
+        .is_ok_and(|response| response.status().is_success());
     assert!(
-        ok,
+        healthy,
         "model server on :{port} is not up; run dev/models.sh up"
     );
 }
@@ -27,19 +41,23 @@ fn questions() -> Vec<Question> {
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_noul_clear_cases() {
     require(9931).await;
-    let ep = d3();
-    let qs = questions();
+    let endpoint = d3();
+    let test_questions = questions();
     for (state, yes) in [
         ("hi there, how are you?", true),
         ("Good morning everyone!", true),
         ("The disk on node control-2 is 98% full.", false),
         ("Invoice #4411 is attached.", false),
     ] {
-        let p = ep.ask(state, &qs[..1]).await.unwrap();
-        eprintln!("{state:?}: {p:?}");
+        let probabilities = endpoint.ask(state, &test_questions[..1]).await.unwrap();
+        eprintln!("{state:?}: {probabilities:?}");
         assert!(
-            if yes { p[0][0] > 0.8 } else { p[0][0] < 0.2 },
-            "{state:?}: {p:?}"
+            if yes {
+                probabilities[0][0] > 0.8
+            } else {
+                probabilities[0][0] < 0.2
+            },
+            "{state:?}: {probabilities:?}"
         );
     }
 }
@@ -47,58 +65,66 @@ async fn live_systemone_noul_clear_cases() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_choice() {
     require(9931).await;
-    let ep = d3();
-    let qs = questions();
+    let endpoint = d3();
+    let test_questions = questions();
     for (state, index) in [
         ("I was charged twice for my order", 0),
         ("My parcel never arrived", 1),
         ("The app crashes when I log in", 2),
     ] {
-        let p = ep.ask(state, &qs[1..2]).await.unwrap();
-        eprintln!("{state:?}: {p:?}");
-        assert!(p[0].iter().all(|v| *v <= p[0][index]), "{state:?}: {p:?}");
+        let probabilities = endpoint.ask(state, &test_questions[1..2]).await.unwrap();
+        eprintln!("{state:?}: {probabilities:?}");
+        assert!(
+            probabilities[0]
+                .iter()
+                .all(|value| *value <= probabilities[0][index]),
+            "{state:?}: {probabilities:?}"
+        );
     }
 }
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_score() {
     require(9931).await;
-    let ep = d3();
-    let qs = questions();
-    let high = ep
+    let endpoint = d3();
+    let test_questions = questions();
+    let high = endpoint
         .ask(
             "Production database is down, all customers affected",
-            &qs[2..],
+            &test_questions[2..],
         )
         .await
         .unwrap();
-    let low = ep
-        .ask("Typo in the footer of an internal wiki page", &qs[2..])
+    let low = endpoint
+        .ask(
+            "Typo in the footer of an internal wiki page",
+            &test_questions[2..],
+        )
         .await
         .unwrap();
     eprintln!(
         "urgent: {high:?}, score {}; typo: {low:?}, score {}",
-        expected_score(&high[0]),
-        expected_score(&low[0])
+        verdict::expected_score(&high[0]),
+        verdict::expected_score(&low[0])
     );
-    assert!(expected_score(&high[0]) > 2.0);
-    assert!(expected_score(&low[0]) < 1.5);
+    assert!(verdict::expected_score(&high[0]) > 2.0);
+    assert!(verdict::expected_score(&low[0]) < 1.5);
 }
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_three_questions_one_call() {
     require(9931).await;
-    let p = d3()
+    let probabilities = d3()
         .ask(
             "I was charged twice and I'm furious, fix it today",
             &questions(),
         )
         .await
         .unwrap();
-    eprintln!("multi: {p:?}");
-    assert_eq!(p.len(), 3);
-    for probs in p {
-        assert!((probs.iter().sum::<f64>() - 1.0).abs() < 1e-6);
+    eprintln!("multi: {probabilities:?}");
+    assert_eq!(probabilities.len(), 3);
+    for probabilities in probabilities {
+        assert!((probabilities.iter().sum::<f64>() - 1.0).abs() < 1e-6);
     }
 }
 #[tokio::test]
@@ -108,12 +134,12 @@ async fn live_systemone_long_state_fits() {
     let mut state = String::from("hi there, how are you?\n");
     state.push_str(&"log line\n".repeat(2500));
     state.truncate(20_000);
-    let ep = d3();
-    ep.info().await.unwrap();
-    let sent = ep.fitted(&state);
-    let p = ep.ask(&sent, &questions()[..1]).await.unwrap();
+    let endpoint = d3();
+    endpoint.info().await.unwrap();
+    let sent = endpoint.fitted(&state);
+    let probabilities = endpoint.ask(&sent, &questions()[..1]).await.unwrap();
     eprintln!(
-        "long state: {p:?}; fitted characters {}",
+        "long state: {probabilities:?}; fitted characters {}",
         sent.chars().count()
     );
     assert_eq!(sent.chars().count(), 2003);
@@ -122,10 +148,6 @@ async fn live_systemone_long_state_fits() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_cli_ask() {
-    use std::{
-        io::{BufRead, BufReader},
-        process::{Command, Stdio},
-    };
     struct ChildGuard(std::process::Child);
     impl Drop for ChildGuard {
         fn drop(&mut self) {
@@ -134,14 +156,14 @@ async fn live_cli_ask() {
         }
     }
     require(9931).await;
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let db = dir.path().join("db.sqlite");
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let database_path = directory.path().join("db.sqlite");
     let mut child = ChildGuard(
         Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args([
                 "serve",
                 "--db",
-                db.to_str().unwrap(),
+                database_path.to_str().unwrap(),
                 "--config",
                 "dev/config.toml",
                 "--listen",
@@ -156,8 +178,8 @@ async fn live_cli_ask() {
     let mut url = None;
     for line in BufReader::new(stderr).lines() {
         let line = line.unwrap();
-        if let Some((_, addr)) = line.split_once("listening on ") {
-            url = Some(format!("http://{}", addr.trim()));
+        if let Some((_, address)) = line.split_once("listening on ") {
+            url = Some(format!("http://{}", address.trim()));
             break;
         }
     }
@@ -186,8 +208,8 @@ async fn live_cli_ask() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_detect_d3() {
     require(9931).await;
-    let ep = d3();
-    let info = ep.info().await.unwrap();
+    let endpoint = d3();
+    let info = endpoint.info().await.unwrap();
     eprintln!("d3 info: {info:?}");
     assert_eq!(info.kind, eightball::config::BackendKind::Systemone);
     assert_eq!(info.concurrency, 2);
@@ -197,8 +219,8 @@ async fn live_detect_d3() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_detect_chat() {
     require(9934).await;
-    let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
-    let info = ep.info().await.unwrap();
+    let endpoint = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let info = endpoint.info().await.unwrap();
     eprintln!("chat info: {info:?}");
     assert_eq!(info.kind, eightball::config::BackendKind::Logprob);
 }
@@ -207,8 +229,8 @@ async fn live_detect_chat() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_noul() {
     require(9934).await;
-    let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
-    let qs = questions();
+    let endpoint = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let test_questions = questions();
     let mut greetings = Vec::new();
     let mut non_greetings = Vec::new();
     for (state, yes) in [
@@ -217,16 +239,20 @@ async fn live_logprob_noul() {
         ("The disk on node control-2 is 98% full.", false),
         ("Invoice #4411 is attached.", false),
     ] {
-        let p = ep.ask(state, &qs[..1]).await.unwrap();
-        eprintln!("chat {state:?}: {p:?}");
+        let probabilities = endpoint.ask(state, &test_questions[..1]).await.unwrap();
+        eprintln!("chat {state:?}: {probabilities:?}");
         assert!(
-            if yes { p[0][0] > 0.5 } else { p[0][0] < 0.5 },
-            "{state:?}: {p:?}"
+            if yes {
+                probabilities[0][0] > 0.5
+            } else {
+                probabilities[0][0] < 0.5
+            },
+            "{state:?}: {probabilities:?}"
         );
         if yes {
-            greetings.push(p[0][0]);
+            greetings.push(probabilities[0][0]);
         } else {
-            non_greetings.push(p[0][0]);
+            non_greetings.push(probabilities[0][0]);
         }
     }
     for greeting in greetings {
@@ -242,17 +268,20 @@ async fn live_logprob_noul() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_choice() {
     require(9934).await;
-    let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
-    let qs = questions();
+    let endpoint = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let test_questions = questions();
     let mut correct = 0;
     for (state, index) in [
         ("I was charged twice for my order", 0),
         ("My parcel never arrived", 1),
         ("The app crashes when I log in", 2),
     ] {
-        let p = ep.ask(state, &qs[1..2]).await.unwrap();
-        eprintln!("chat {state:?}: {p:?}");
-        if p[0].iter().all(|v| *v <= p[0][index]) {
+        let probabilities = endpoint.ask(state, &test_questions[1..2]).await.unwrap();
+        eprintln!("chat {state:?}: {probabilities:?}");
+        if probabilities[0]
+            .iter()
+            .all(|value| *value <= probabilities[0][index])
+        {
             correct += 1;
         }
     }
@@ -263,8 +292,10 @@ async fn live_logprob_choice() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_mass() {
     require(9934).await;
-    let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
-    let result = ep.ask("hi there, how are you?", &questions()[..1]).await;
+    let endpoint = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let result = endpoint
+        .ask("hi there, how are you?", &questions()[..1])
+        .await;
     eprintln!("mass validation: {result:?}");
     assert!(result.is_ok());
 }
@@ -273,16 +304,19 @@ async fn live_logprob_mass() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_rerank_relevance() {
     require(9933).await;
-    let ep = Endpoint::new("rerank", &dev_config().endpoints["rerank"], None).unwrap();
-    let q: Question =
+    let endpoint = Endpoint::new("rerank", &dev_config().endpoints["rerank"], None).unwrap();
+    let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"disk full"})).unwrap();
     for (state, relevant) in [("the disk is 98% full", true), ("a recipe for soup", false)] {
-        let p = ep.ask(state, std::slice::from_ref(&q)).await.unwrap();
-        eprintln!("rerank {state:?}: {p:?}");
+        let probabilities = endpoint
+            .ask(state, std::slice::from_ref(&question))
+            .await
+            .unwrap();
+        eprintln!("rerank {state:?}: {probabilities:?}");
         assert!(if relevant {
-            p[0][0] > 0.5
+            probabilities[0][0] > 0.5
         } else {
-            p[0][0] < 0.5
+            probabilities[0][0] < 0.5
         });
     }
 }
@@ -290,10 +324,9 @@ async fn live_rerank_relevance() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_embed() {
-    use eightball::backend::embed::{Embedder, cosine};
     require(9932).await;
     let config = dev_config();
-    let embedder = Embedder::new(config.embedder.as_ref().unwrap(), None);
+    let embedder = embed::Embedder::new(config.embedder.as_ref().unwrap(), None);
     let vectors = embedder
         .embed(&[
             "disk is full".into(),
@@ -306,8 +339,8 @@ async fn live_embed() {
     for vector in &vectors {
         assert_eq!(vector.len(), 768);
     }
-    let storage = cosine(&vectors[0], &vectors[1]);
-    let soup = cosine(&vectors[0], &vectors[2]);
+    let storage = embed::cosine(&vectors[0], &vectors[1]);
+    let soup = embed::cosine(&vectors[0], &vectors[2]);
     eprintln!(
         "embedding dimensions: {}; disk/storage cosine: {storage}, disk/soup: {soup}",
         vectors[0].len()
@@ -318,25 +351,29 @@ async fn live_embed() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_triage_with_prefilter() {
-    use eightball::service::{Service, TriageRequest};
     require(9931).await;
     require(9932).await;
     let config = dev_config();
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .map(|(name, endpoint_config)| {
+            (
+                name.clone(),
+                Endpoint::new(name, endpoint_config, None).unwrap(),
+            )
+        })
         .collect();
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&dir.path().join("db.sqlite"))
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
     let service = Service::new(config, endpoints, store);
-    let req: TriageRequest=serde_json::from_value(json!({"items":[
+    let request: eightball::service::TriageRequest = serde_json::from_value(json!({"items":[
         "The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.",
         "A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."
     ],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5})).unwrap();
-    let result = service.triage(req).await.unwrap();
+    let result = service.triage(request).await.unwrap();
     eprintln!("prefilter triage: {result:?}");
     assert_eq!(
         result
@@ -352,7 +389,6 @@ async fn live_triage_with_prefilter() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_doctor() {
-    use eightball::service::Service;
     for port in [9931, 9932, 9933, 9934] {
         require(port).await;
     }
@@ -360,10 +396,15 @@ async fn live_doctor() {
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .map(|(name, endpoint_config)| {
+            (
+                name.clone(),
+                Endpoint::new(name, endpoint_config, None).unwrap(),
+            )
+        })
         .collect();
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&dir.path().join("db.sqlite"))
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
     let report = Service::new(config, endpoints, store).doctor().await;
@@ -374,17 +415,17 @@ async fn live_doctor() {
             assert!(probe["error"].is_null());
         }
     }
-    let d3 = report.endpoints.iter().find(|ep| ep.name == "d3").unwrap();
+    let d3 = report
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.name == "d3")
+        .unwrap();
     assert_eq!(d3.probe.as_ref().unwrap()["verdict"], "yes");
 }
 
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_cache_skips_model() {
-    use eightball::{
-        service::{AskRequest, Service},
-        store::Store,
-    };
     require(9931).await;
     let mut config = dev_config();
     config.specs.insert(
@@ -394,20 +435,27 @@ async fn live_cache_skips_model() {
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .map(|(name, endpoint_config)| {
+            (
+                name.clone(),
+                Endpoint::new(name, endpoint_config, None).unwrap(),
+            )
+        })
         .collect();
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&dir.path().join("db.sqlite")).await.unwrap();
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = Store::open(&directory.path().join("db.sqlite"))
+        .await
+        .unwrap();
     let service = Service::new(config, endpoints, store);
-    let req = AskRequest {
+    let request = AskRequest {
         state: "hi there, how are you?".into(),
         spec: Some("greeting".into()),
         questions: vec![],
         endpoint: None,
     };
-    let first = service.ask(req.clone()).await.unwrap();
+    let first = service.ask(request.clone()).await.unwrap();
     let start = std::time::Instant::now();
-    let second = service.ask(req).await.unwrap();
+    let second = service.ask(request).await.unwrap();
     let elapsed = start.elapsed();
     eprintln!("live cache: {second:?}, elapsed {elapsed:?}");
     assert!(second.results[0].cached);
@@ -415,20 +463,18 @@ async fn live_cache_skips_model() {
     assert!(elapsed < std::time::Duration::from_millis(50));
 }
 
-async fn calibration_service(
-    config: Config,
-    path: &std::path::Path,
-) -> eightball::service::Service {
+async fn calibration_service(config: Config, path: &std::path::Path) -> Service {
     let endpoints = config
         .endpoints
         .iter()
-        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .map(|(name, endpoint_config)| {
+            (
+                name.clone(),
+                Endpoint::new(name, endpoint_config, None).unwrap(),
+            )
+        })
         .collect();
-    eightball::service::Service::new(
-        config,
-        endpoints,
-        eightball::store::Store::open(path).await.unwrap(),
-    )
+    Service::new(config, endpoints, Store::open(path).await.unwrap())
 }
 fn fixture_rows(spec: &str) -> Vec<(String, String)> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -454,13 +500,10 @@ fn fixture_rows(spec: &str) -> Vec<(String, String)> {
             .len(),
         60
     );
+
     rows
 }
-async fn fit_fixture(
-    service: &eightball::service::Service,
-    spec: &str,
-) -> eightball::service::CalibrateResponse {
-    use eightball::service::AskRequest;
+async fn fit_fixture(service: &Service, spec: &str) -> eightball::service::CalibrateResponse {
     for (index, (state, label)) in fixture_rows(spec).into_iter().enumerate() {
         if index % 3 == 0 {
             continue;
@@ -489,22 +532,22 @@ async fn fit_fixture(
     assert!(result.stored);
     if result.report.precision < 0.95 {
         assert!(
-            matches!(result.bands,eightball::verdict::Bands::Noul {yes_at,no_at} if yes_at>1.0 && no_at<0.0)
+            matches!(result.bands,verdict::Bands::Noul {yes_at,no_at} if yes_at>1.0 && no_at<0.0)
         );
         assert!(!result.report.warnings.is_empty());
         eprintln!("{spec}: never-deciding bands with warning");
     } else {
         eprintln!("{spec}: fitted precision target achieved");
     }
+
     result
 }
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_calibrate_holdout() {
-    use eightball::service::AskRequest;
     require(9931).await;
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service = calibration_service(dev_config(), &dir.path().join("db.sqlite")).await;
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let service = calibration_service(dev_config(), &directory.path().join("db.sqlite")).await;
     for spec in ["greeting", "storage-risk"] {
         fit_fixture(&service, spec).await;
         let mut decided = 0_u32;
@@ -549,11 +592,10 @@ async fn live_calibrate_holdout() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_question_edit_invalidates() {
-    use eightball::service::AskRequest;
     require(9931).await;
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let db = dir.path().join("db.sqlite");
-    let service = calibration_service(dev_config(), &db).await;
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let database_path = directory.path().join("db.sqlite");
+    let service = calibration_service(dev_config(), &database_path).await;
     fit_fixture(&service, "greeting").await;
     let original = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml"),
@@ -563,9 +605,9 @@ async fn live_question_edit_invalidates() {
         "Is this message a greeting?",
         "Is this message a greeting exactly?",
     );
-    let path = dir.path().join("edited.toml");
+    let path = directory.path().join("edited.toml");
     std::fs::write(&path, edited).unwrap();
-    let changed = calibration_service(Config::load(&path).unwrap(), &db).await;
+    let changed = calibration_service(Config::load(&path).unwrap(), &database_path).await;
     let result = changed
         .ask(AskRequest {
             state: "hi there".into(),
@@ -584,15 +626,19 @@ async fn live_question_edit_invalidates() {
     assert_eq!(calibration.report.examples, 0);
 }
 
-fn mcp_command(config: &std::path::Path, db: &std::path::Path) -> tokio::process::Command {
+fn mcp_command(
+    config: &std::path::Path,
+    database_path: &std::path::Path,
+) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"));
     command
         .arg("mcp")
         .arg("--config")
         .arg(config)
         .arg("--db")
-        .arg(db)
+        .arg(database_path)
         .kill_on_drop(true);
+
     command
 }
 struct LiveServer {
@@ -609,18 +655,18 @@ impl Drop for LiveServer {
         }
     }
 }
-fn live_server(config: &std::path::Path, db: &std::path::Path, key: Option<&str>) -> LiveServer {
-    use std::{
-        io::{BufRead, BufReader, Read},
-        process::{Command, Stdio},
-    };
+fn live_server(
+    config: &std::path::Path,
+    database_path: &std::path::Path,
+    key: Option<&str>,
+) -> LiveServer {
     let mut command = Command::new(env!("CARGO_BIN_EXE_8ball"));
     command
         .arg("serve")
         .arg("--config")
         .arg(config)
         .arg("--db")
-        .arg(db)
+        .arg(database_path)
         .args(["--listen", "127.0.0.1:0"])
         .stderr(Stdio::piped());
     if let Some(key) = key {
@@ -638,13 +684,14 @@ fn live_server(config: &std::path::Path, db: &std::path::Path, key: Option<&str>
         if reader.read_line(&mut line).unwrap() == 0 {
             break;
         }
-        if let Some((_, addr)) = line.split_once("listening on ") {
-            server.url = format!("http://{}", addr.trim());
+        if let Some((_, address)) = line.split_once("listening on ") {
+            server.url = format!("http://{}", address.trim());
             server.stderr = Some(std::thread::spawn(move || {
                 let mut logs = String::new();
                 let _ = reader.read_to_string(&mut logs);
                 logs
             }));
+
             return server;
         }
         errors.push_str(&line);
@@ -654,11 +701,11 @@ fn live_server(config: &std::path::Path, db: &std::path::Path, key: Option<&str>
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_handler_ask() {
-    use rmcp::{ServiceExt, model::CallToolRequestParams};
     require(9931).await;
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service =
-        std::sync::Arc::new(calibration_service(dev_config(), &dir.path().join("db.sqlite")).await);
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let service = std::sync::Arc::new(
+        calibration_service(dev_config(), &directory.path().join("db.sqlite")).await,
+    );
     let (server_io, client_io) = tokio::io::duplex(16_384);
     let task = tokio::spawn(async move {
         eightball::mcp::Mcp::new(service)
@@ -692,13 +739,13 @@ async fn live_mcp_handler_ask() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_stdio_ask() {
-    use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
     require(9931).await;
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml");
-    let client =
-        ().serve(
-            TokioChildProcess::new(mcp_command(&config, &dir.path().join("db.sqlite"))).unwrap(),
+    let client = ()
+        .serve(
+            TokioChildProcess::new(mcp_command(&config, &directory.path().join("db.sqlite")))
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -728,29 +775,23 @@ async fn live_mcp_stdio_ask() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_http_triage() {
-    use rmcp::{
-        ServiceExt,
-        model::CallToolRequestParams,
-        transport::{
-            StreamableHttpClientTransport,
-            streamable_http_client::StreamableHttpClientTransportConfig,
-        },
-    };
     require(9931).await;
     require(9932).await;
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml");
-    let server = live_server(&config, &dir.path().join("db.sqlite"), Some("k"));
-    let transport = StreamableHttpClientTransport::from_config(
-        StreamableHttpClientTransportConfig::with_uri(format!("{}/mcp", server.url))
-            .auth_header("k"),
+    let server = live_server(&config, &directory.path().join("db.sqlite"), Some("k"));
+    let transport = rmcp::transport::StreamableHttpClientTransport::from_config(
+        rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
+            format!("{}/mcp", server.url),
+        )
+        .auth_header("k"),
     );
     let client = ().serve(transport).await.unwrap();
-    let args = json!({"items":["The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.","A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5});
+    let arguments = json!({"items":["The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.","A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5});
     let result = client
         .call_tool(
             CallToolRequestParams::new("decision_triage")
-                .with_arguments(args.as_object().unwrap().clone()),
+                .with_arguments(arguments.as_object().unwrap().clone()),
         )
         .await
         .unwrap();
@@ -770,29 +811,39 @@ async fn live_mcp_http_triage() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_failure_is_fail_open() {
-    use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
-    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let config = dir.path().join("dead.toml");
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let config = directory.path().join("dead.toml");
     std::fs::write(
         &config,
         "default='d3'\n[endpoints.d3]\nurl='http://127.0.0.1:9'\nkind='systemone'",
     )
     .unwrap();
-    let client =
-        ().serve(
-            TokioChildProcess::new(mcp_command(&config, &dir.path().join("db.sqlite"))).unwrap(),
+    let client = ()
+        .serve(
+            TokioChildProcess::new(mcp_command(&config, &directory.path().join("db.sqlite")))
+                .unwrap(),
         )
         .await
         .unwrap();
-    let result=client.call_tool(CallToolRequestParams::new("decision_ask").with_arguments(json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}).as_object().unwrap().clone())).await.unwrap();
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("decision_ask").with_arguments(
+                json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]})
+                .as_object()
+                .unwrap()
+                .clone(),
+            ),
+        )
+        .await
+        .unwrap();
     eprintln!("MCP real transport fail-open: {result:?}");
     assert_eq!(result.is_error, Some(true));
     assert!(
         result
             .content
             .iter()
-            .filter_map(|c| c.as_text())
-            .any(|t| t.text.contains("Fail open"))
+            .filter_map(|content| content.as_text())
+            .any(|text| text.text.contains("Fail open"))
     );
     client.cancel().await.unwrap();
 }

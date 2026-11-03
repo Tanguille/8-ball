@@ -1,14 +1,17 @@
-use crate::{
-    backend::{BackendError, Endpoint, Probs},
-    question::{Kind, Question},
-};
 use serde_json::{Value, json};
 
-pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Probs>, BackendError> {
+use crate::{backend::BackendError, question::Kind};
+
+pub async fn ask(
+    endpoint: &crate::backend::Endpoint,
+    state: &str,
+    requested_questions: &[crate::question::Question],
+) -> Result<Vec<crate::backend::Probs>, BackendError> {
     let mut questions = serde_json::Map::new();
-    for q in qs {
-        let mut wire = json!({"type":q.kind.type_name(),"instructions":q.instructions});
-        match &q.kind {
+    for question in requested_questions {
+        let mut wire =
+            json!({"type":question.kind.type_name(),"instructions":question.instructions});
+        match &question.kind {
             Kind::Noul {
                 criteria: Some(criteria),
             } => wire["criteria"] = serde_json::to_value(criteria).expect("criteria serializes"),
@@ -17,13 +20,13 @@ pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Prob
                 wire["criteria"] = Value::Object(
                     criteria
                         .iter()
-                        .map(|(name, desc)| {
+                        .map(|(name, description)| {
                             (
                                 name.clone(),
-                                if desc.is_empty() {
+                                if description.is_empty() {
                                     Value::Null
                                 } else {
-                                    json!(desc)
+                                    json!(description)
                                 },
                             )
                         })
@@ -32,26 +35,29 @@ pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Prob
             }
             Kind::Score { criteria } => wire["criteria"] = json!(criteria),
         }
-        questions.insert(q.id.clone(), wire);
+        questions.insert(question.id.clone(), wire);
     }
     let mut body = json!({"state":state,"questions":questions});
-    if let Some(model) = &ep.model {
+    if let Some(model) = &endpoint.model {
         body["model"] = json!(model);
     }
-    let response = ep.post_json("/v1/systemone", &body).await?;
-    qs.iter()
-        .map(|q| {
+    let response = endpoint.post_json("/v1/systemone", &body).await?;
+
+    requested_questions
+        .iter()
+        .map(|question| {
             let answer = response["answers"]
-                .get(&q.id)
-                .ok_or_else(|| BackendError(format!("no answer for question {}", q.id)))?;
-            let mut probs = match &q.kind {
+                .get(&question.id)
+                .ok_or_else(|| BackendError(format!("no answer for question {}", question.id)))?;
+            let mut probabilities = match &question.kind {
                 Kind::Noul { .. } => {
-                    let p = answer["noul"].as_f64().ok_or_else(|| {
-                        BackendError(format!("no noul probability for question {}", q.id))
+                    let probability = answer["noul"].as_f64().ok_or_else(|| {
+                        BackendError(format!("no noul probability for question {}", question.id))
                     })?;
-                    vec![p, 1.0 - p]
+
+                    vec![probability, 1.0 - probability]
                 }
-                _ => q
+                _ => question
                     .kind
                     .labels()
                     .iter()
@@ -62,24 +68,25 @@ pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Prob
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             };
-            if probs
+            if probabilities
                 .iter()
-                .any(|p| !p.is_finite() || !(0.0..=1.0).contains(p))
+                .any(|probability| !probability.is_finite() || !(0.0..=1.0).contains(probability))
             {
                 return Err(BackendError(
                     "probability must be finite and within [0,1]".into(),
                 ));
             }
-            let sum: f64 = probs.iter().sum();
+            let sum: f64 = probabilities.iter().sum();
             if sum == 0.0 {
                 return Err(BackendError("probabilities sum to zero".into()));
             }
             if (sum - 1.0).abs() > 1e-6 {
-                for p in &mut probs {
-                    *p /= sum;
+                for probability in &mut probabilities {
+                    *probability /= sum;
                 }
             }
-            Ok(probs)
+
+            Ok(probabilities)
         })
         .collect()
 }
