@@ -195,3 +195,54 @@ async fn live_detect_chat() {
     eprintln!("chat info: {info:?}");
     assert_eq!(info.kind, eightball::config::BackendKind::Logprob);
 }
+
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_logprob_noul() {
+    require(9934).await;
+    let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let qs = questions();
+    for (state, yes) in [
+        ("hi there, how are you?", true),
+        ("Good morning everyone!", true),
+        ("The disk on node control-2 is 98% full.", false),
+        ("Invoice #4411 is attached.", false),
+    ] {
+        let (p, _) = ep.ask(state, &qs[..1]).await.unwrap();
+        eprintln!("chat {state:?}: {p:?}");
+        assert!(
+            if yes { p[0][0] > 0.7 } else { p[0][0] < 0.3 },
+            "{state:?}: {p:?}"
+        );
+    }
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_logprob_choice() {
+    require(9934).await;
+    let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let qs = questions();
+    let mut correct = 0;
+    for (state, index) in [
+        ("I was charged twice for my order", 0),
+        ("My parcel never arrived", 1),
+        ("The app crashes when I log in", 2),
+    ] {
+        let (p, _) = ep.ask(state, &qs[1..2]).await.unwrap();
+        eprintln!("chat {state:?}: {p:?}");
+        if p[0].iter().all(|v| *v <= p[0][index]) {
+            correct += 1;
+        }
+    }
+    eprintln!("chat choice correct: {correct}/3");
+    assert!(correct >= 2);
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_logprob_mass() {
+    require(9934).await;
+    let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
+    let result = ep.ask("hi there, how are you?", &questions()[..1]).await;
+    eprintln!("mass validation: {result:?}");
+    assert!(result.is_ok());
+}

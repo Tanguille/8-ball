@@ -4,6 +4,7 @@ use crate::{
 };
 use std::time::Duration;
 
+pub mod logprob;
 pub mod systemone;
 
 /// One probability per label of the question, in `Kind::labels()` order, summing to 1.
@@ -15,6 +16,7 @@ pub struct Endpoint {
     kind: Option<BackendKind>,
     model: Option<String>,
     api_key: Option<String>,
+    extra_body: Option<toml::Table>,
     max_state_chars: Option<usize>,
     client: reqwest::Client,
     concurrency: Option<usize>,
@@ -51,6 +53,7 @@ impl Endpoint {
             kind: cfg.kind,
             model: cfg.model.clone(),
             api_key,
+            extra_body: cfg.extra_body.clone(),
             max_state_chars: cfg.max_state_chars,
             client: reqwest::Client::new(),
             concurrency: cfg.concurrency,
@@ -79,6 +82,40 @@ impl Endpoint {
             request = request.bearer_auth(key);
         }
         Ok(request.send().await?.error_for_status()?.json().await?)
+    }
+
+    async fn post_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, BackendError> {
+        self.info().await?;
+        let permit = self
+            .info
+            .get()
+            .expect("info initialized")
+            .1
+            .acquire()
+            .await
+            .map_err(|e| BackendError(e.to_string()))?;
+        let mut request = self.client.post(format!("{}{path}", self.url)).json(body);
+        if let Some(key) = &self.api_key {
+            request = request.bearer_auth(key);
+        }
+        let response = request.send().await?;
+        let status = response.status();
+        let text = response.text().await?;
+        drop(permit);
+        if !status.is_success() {
+            let text: String = text.chars().take(500).collect();
+            let hint = if status == reqwest::StatusCode::NOT_IMPLEMENTED {
+                "; not a decision model"
+            } else {
+                ""
+            };
+            return Err(BackendError(format!("HTTP {status}: {text}{hint}")));
+        }
+        serde_json::from_str(&text).map_err(|e| BackendError(e.to_string()))
     }
 
     async fn detect(&self) -> Result<Info, BackendError> {
@@ -161,7 +198,8 @@ impl Endpoint {
             let state = fit(state, max);
             let probs = match info.kind {
                 BackendKind::Systemone => systemone::ask(self, &state, qs).await?,
-                _ => {
+                BackendKind::Logprob => logprob::ask(self, &state, qs).await?,
+                BackendKind::Rerank => {
                     return Err(BackendError(
                         "backend implementation arrives in subsequent steps".into(),
                     ));

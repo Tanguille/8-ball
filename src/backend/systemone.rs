@@ -38,36 +38,7 @@ pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Prob
     if let Some(model) = &ep.model {
         body["model"] = json!(model);
     }
-    ep.info().await?;
-    let permit = ep
-        .info
-        .get()
-        .expect("info initialized")
-        .1
-        .acquire()
-        .await
-        .map_err(|e| BackendError(e.to_string()))?;
-    let mut request = ep
-        .client
-        .post(format!("{}/v1/systemone", ep.url))
-        .json(&body);
-    if let Some(key) = &ep.api_key {
-        request = request.bearer_auth(key);
-    }
-    let response = request.send().await?;
-    let status = response.status();
-    let text = response.text().await?;
-    drop(permit);
-    if !status.is_success() {
-        let text: String = text.chars().take(500).collect();
-        let hint = if status == reqwest::StatusCode::NOT_IMPLEMENTED {
-            "; not a decision model"
-        } else {
-            ""
-        };
-        return Err(BackendError(format!("HTTP {status}: {text}{hint}")));
-    }
-    let response: Value = serde_json::from_str(&text).map_err(|e| BackendError(e.to_string()))?;
+    let response = ep.post_json("/v1/systemone", &body).await?;
     qs.iter()
         .map(|q| {
             let answer = response["answers"]
