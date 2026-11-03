@@ -108,7 +108,9 @@ async fn live_systemone_long_state_fits() {
     let mut state = String::from("hi there, how are you?\n");
     state.push_str(&"log line\n".repeat(2500));
     state.truncate(20_000);
-    let (p, sent) = d3().ask(&state, &questions()[..1]).await.unwrap();
+    let ep = d3();
+    ep.info().await.unwrap();
+    let (p, sent) = ep.ask(&ep.fitted(&state), &questions()[..1]).await.unwrap();
     eprintln!(
         "long state: {p:?}; fitted characters {}",
         sent.chars().count()
@@ -131,10 +133,14 @@ async fn live_cli_ask() {
         }
     }
     require(9931).await;
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let db = dir.path().join("db.sqlite");
     let mut child = ChildGuard(
         Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args([
                 "serve",
+                "--db",
+                db.to_str().unwrap(),
                 "--config",
                 "dev/config.toml",
                 "--listen",
@@ -320,7 +326,9 @@ async fn live_triage_with_prefilter() {
         .iter()
         .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
         .collect();
-    let service = Service::new(config, endpoints);
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = eightball::store::Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let service = Service::new(config, endpoints, store);
     let req: TriageRequest=serde_json::from_value(json!({"items":[
         "The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.",
         "A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."
@@ -351,7 +359,9 @@ async fn live_doctor() {
         .iter()
         .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
         .collect();
-    let report = Service::new(config, endpoints).doctor().await;
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = eightball::store::Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let report = Service::new(config, endpoints, store).doctor().await;
     eprintln!("doctor: {report:?}");
     for endpoint in &report.endpoints {
         assert!(endpoint.error.is_none());
@@ -361,4 +371,41 @@ async fn live_doctor() {
     }
     let d3 = report.endpoints.iter().find(|ep| ep.name == "d3").unwrap();
     assert_eq!(d3.probe.as_ref().unwrap()["verdict"], "yes");
+}
+
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_cache_skips_model() {
+    use eightball::{
+        service::{AskRequest, Service},
+        store::Store,
+    };
+    require(9931).await;
+    let mut config = dev_config();
+    config.specs.insert(
+        "greeting".into(),
+        toml::from_str("type='noul'\ninstructions='Is this message a greeting?'").unwrap(),
+    );
+    let endpoints = config
+        .endpoints
+        .iter()
+        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .collect();
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let service = Service::new(config, endpoints, store);
+    let req = AskRequest {
+        state: "hi there, how are you?".into(),
+        spec: Some("greeting".into()),
+        questions: vec![],
+        endpoint: None,
+    };
+    let first = service.ask(req.clone()).await.unwrap();
+    let start = std::time::Instant::now();
+    let second = service.ask(req).await.unwrap();
+    let elapsed = start.elapsed();
+    eprintln!("live cache: {second:?}, elapsed {elapsed:?}");
+    assert!(second.results[0].cached);
+    assert_eq!(second.results[0].id, first.results[0].id);
+    assert!(elapsed < std::time::Duration::from_millis(50));
 }

@@ -11,6 +11,7 @@ use wiremock::{
 struct Server {
     child: Child,
     _config: tempfile::NamedTempFile,
+    _db: tempfile::TempDir,
     url: String,
 }
 impl Drop for Server {
@@ -30,9 +31,13 @@ fn serve(mock: &MockServer) -> Server {
         mock.uri()
     )
     .unwrap();
+    let db = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let db_path = db.path().join("db.sqlite");
     let child = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "serve",
+            "--db",
+            db_path.to_str().unwrap(),
             "--config",
             config.path().to_str().unwrap(),
             "--listen",
@@ -44,6 +49,7 @@ fn serve(mock: &MockServer) -> Server {
     let mut server = Server {
         child,
         _config: config,
+        _db: db,
         url: String::new(),
     };
     let stderr = server.child.stderr.take().unwrap();

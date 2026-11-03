@@ -185,7 +185,21 @@ impl Endpoint {
         })
     }
 
-    /// Trim the state, then ask all questions. Returns (probs per question, state actually sent).
+    /// Fit only after `info()` when the endpoint kind is auto-detected.
+    #[must_use]
+    pub fn fitted(&self, state: &str) -> String {
+        let kind = self
+            .info
+            .get()
+            .map_or(self.kind, |(info, _)| Some(info.kind));
+        let max = self.max_state_chars.or(match kind {
+            Some(BackendKind::Systemone | BackendKind::Rerank) => Some(2000),
+            _ => None,
+        });
+        fit(state, max)
+    }
+
+    /// Ask all questions about an already-fitted state. Returns (probs, state actually sent).
     pub async fn ask(
         &self,
         state: &str,
@@ -193,17 +207,12 @@ impl Endpoint {
     ) -> Result<(Vec<Probs>, String), BackendError> {
         tokio::time::timeout(DECISION_TIMEOUT, async {
             let info = self.info().await?;
-            let max = self.max_state_chars.or(match info.kind {
-                BackendKind::Systemone | BackendKind::Rerank => Some(2000),
-                BackendKind::Logprob => None,
-            });
-            let state = fit(state, max);
             let probs = match info.kind {
-                BackendKind::Systemone => systemone::ask(self, &state, qs).await?,
-                BackendKind::Logprob => logprob::ask(self, &state, qs).await?,
-                BackendKind::Rerank => rerank::ask(self, &state, qs).await?,
+                BackendKind::Systemone => systemone::ask(self, state, qs).await?,
+                BackendKind::Logprob => logprob::ask(self, state, qs).await?,
+                BackendKind::Rerank => rerank::ask(self, state, qs).await?,
             };
-            Ok((probs, state))
+            Ok((probs, state.to_owned()))
         })
         .await
         .map_err(|_| BackendError("timed out after 20s".into()))?

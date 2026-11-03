@@ -6,7 +6,7 @@ use wiremock::{
     matchers::{method, path},
 };
 
-async fn service(default: &str) -> (Service, MockServer) {
+async fn service(default: &str) -> (Service, MockServer, tempfile::TempDir) {
     let mock = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/systemone"))
@@ -25,11 +25,13 @@ async fn service(default: &str) -> (Service, MockServer) {
         .iter()
         .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
         .collect();
-    (Service::new(config, endpoints), mock)
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = eightball::store::Store::open(&dir.path().join("db.sqlite")).unwrap();
+    (Service::new(config, endpoints, store), mock, dir)
 }
 #[tokio::test]
 async fn reports_healthy_probe_and_dead_error() {
-    let (service, _mock) = service("healthy").await;
+    let (service, _mock, _dir) = service("healthy").await;
     let report = service.doctor().await;
     let healthy = report
         .endpoints
@@ -50,7 +52,7 @@ async fn reports_healthy_probe_and_dead_error() {
 #[tokio::test]
 async fn cli_exit_depends_on_default_endpoint() {
     for (default, want) in [("healthy", 0), ("dead", 4)] {
-        let (service, _mock) = service(default).await;
+        let (service, _mock, _dir) = service(default).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move {

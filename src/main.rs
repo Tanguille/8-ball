@@ -5,6 +5,7 @@ use eightball::{
     http::router,
     question::{Kind, Question},
     service::Service,
+    store::Store,
 };
 use indexmap::IndexMap;
 use serde_json::{Value, json};
@@ -29,6 +30,8 @@ enum Command {
         config: Option<PathBuf>,
         #[arg(long, env = "EIGHTBALL_LISTEN", default_value = "127.0.0.1:8080")]
         listen: String,
+        #[arg(long, env = "EIGHTBALL_DB")]
+        db: Option<PathBuf>,
     },
     /// Ask an ad-hoc question (state from --state or stdin).
     Ask {
@@ -105,8 +108,8 @@ async fn main() {
 
 async fn run() -> anyhow::Result<i32> {
     match Cli::parse().command {
-        Command::Serve { config, listen } => {
-            serve(config, listen).await?;
+        Command::Serve { config, listen, db } => {
+            serve(config, listen, db).await?;
             Ok(0)
         }
         Command::Ask {
@@ -203,7 +206,7 @@ async fn shutdown() {
     tokio::select! { _=tokio::signal::ctrl_c()=>{},_=terminate.recv()=>{} }
 }
 
-async fn serve(config: Option<PathBuf>, listen: String) -> anyhow::Result<()> {
+async fn serve(config: Option<PathBuf>, listen: String, db: Option<PathBuf>) -> anyhow::Result<()> {
     let config = Config::load(&config.unwrap_or_else(default_config_path))?;
     let endpoints = config
         .endpoints
@@ -216,7 +219,10 @@ async fn serve(config: Option<PathBuf>, listen: String) -> anyhow::Result<()> {
             Ok((name.clone(), Endpoint::new(name, cfg, key)?))
         })
         .collect::<Result<IndexMap<_, _>, eightball::backend::BackendError>>()?;
-    let service = Arc::new(Service::new(config, endpoints));
+    let store = Store::open(&db.unwrap_or_else(default_db_path))?;
+    let n = store.prune(config.retention_days).await?;
+    tracing::info!("pruned {n} old decisions");
+    let service = Arc::new(Service::new(config, endpoints, store));
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     let addr = listener.local_addr()?;
     tracing::info!("listening on {addr}");
@@ -265,4 +271,14 @@ async fn post_json(url: &str, path: &str, body: &Value) -> anyhow::Result<Value>
         anyhow::bail!("{}", body["error"].as_str().unwrap_or("request failed"));
     }
     Ok(body)
+}
+
+fn default_db_path() -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .filter(|v| !v.is_empty())
+        .map_or_else(
+            || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"),
+            PathBuf::from,
+        )
+        .join("8ball/8ball.db")
 }

@@ -7,7 +7,15 @@ use wiremock::{
     matchers::{method, path},
 };
 
-async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tokio::task::JoinHandle<()>) {
+async fn app(
+    embed: Option<bool>,
+) -> (
+    String,
+    MockServer,
+    MockServer,
+    tokio::task::JoinHandle<()>,
+    tempfile::TempDir,
+) {
     let model = MockServer::start().await;
     let embedding = MockServer::start().await;
     Mock::given(method("POST"))
@@ -41,13 +49,15 @@ async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tokio::tas
     ))
     .unwrap();
     let ep = Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
-    let service = Arc::new(Service::new(config, [("d3".into(), ep)].into()));
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = eightball::store::Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let service = Arc::new(Service::new(config, [("d3".into(), ep)].into(), store));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
         axum::serve(listener, router(service)).await.unwrap();
     });
-    (url, model, embedding, task)
+    (url, model, embedding, task, dir)
 }
 fn request(items: &Value) -> Value {
     json!({"items":items,"question":{"id":"q","type":"noul","instructions":"Is this relevant?"}})
@@ -62,7 +72,7 @@ async fn triage(url: &str, body: &Value) -> reqwest::Response {
 }
 #[tokio::test]
 async fn dedupes_and_partitions_verdicts() {
-    let (url, model, _embedding, task) = app(None).await;
+    let (url, model, _embedding, task, _dir) = app(None).await;
     let r = triage(
         &url,
         &request(&json!(["yes1", "yes2", "unsure", "no", "yes1"])),
@@ -89,7 +99,7 @@ async fn dedupes_and_partitions_verdicts() {
 }
 #[tokio::test]
 async fn sixty_five_items_rejected() {
-    let (url, _model, _embedding, task) = app(None).await;
+    let (url, _model, _embedding, task, _dir) = app(None).await;
     assert_eq!(
         triage(&url, &request(&json!(vec!["item"; 65])))
             .await
@@ -100,7 +110,7 @@ async fn sixty_five_items_rejected() {
 }
 #[tokio::test]
 async fn prefilter_judges_only_closest_items() {
-    let (url, model, _embedding, task) = app(Some(true)).await;
+    let (url, model, _embedding, task, _dir) = app(Some(true)).await;
     let mut body = request(&json!(["one", "two", "three", "four"]));
     body["top_k"] = json!(2);
     let r = triage(&url, &body).await;
@@ -122,7 +132,7 @@ async fn prefilter_judges_only_closest_items() {
 }
 #[tokio::test]
 async fn failed_embedder_judges_every_item_with_warning() {
-    let (url, model, _embedding, task) = app(Some(false)).await;
+    let (url, model, _embedding, task, _dir) = app(Some(false)).await;
     let mut body = request(&json!(["one", "two", "three", "four"]));
     body["top_k"] = json!(2);
     let r = triage(&url, &body).await;
@@ -149,7 +159,7 @@ async fn failed_embedder_judges_every_item_with_warning() {
 }
 #[tokio::test]
 async fn top_k_requires_embedder() {
-    let (url, _model, _embedding, task) = app(None).await;
+    let (url, _model, _embedding, task, _dir) = app(None).await;
     let mut body = request(&json!(["one", "two"]));
     body["top_k"] = json!(1);
     assert_eq!(triage(&url, &body).await.status(), 400);
@@ -157,7 +167,7 @@ async fn top_k_requires_embedder() {
 }
 #[tokio::test]
 async fn one_failed_judgment_fails_whole_triage() {
-    let (url, _model, _embedding, task) = app(None).await;
+    let (url, _model, _embedding, task, _dir) = app(None).await;
     assert_eq!(
         triage(&url, &request(&json!(["yes1", "bad"])))
             .await
@@ -168,7 +178,7 @@ async fn one_failed_judgment_fails_whole_triage() {
 }
 #[tokio::test]
 async fn cli_reads_json_items_from_stdin() {
-    let (url, _model, _embedding, task) = app(None).await;
+    let (url, _model, _embedding, task, _dir) = app(None).await;
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args(["triage", "Is this relevant?", "--url", &url])
         .stdin(Stdio::piped())

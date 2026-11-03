@@ -83,7 +83,7 @@ async fn long_state_is_fitted() {
     config.max_state_chars = Some(10);
     let ep = Endpoint::new("d3", &config, None).unwrap();
     let (_, sent) = ep
-        .ask("abcdefghijklmnopqrstuvwxyz0123", &[question()])
+        .ask(&ep.fitted("abcdefghijklmnopqrstuvwxyz0123"), &[question()])
         .await
         .unwrap();
     assert_eq!(sent, "abcde\n…\nz0123");

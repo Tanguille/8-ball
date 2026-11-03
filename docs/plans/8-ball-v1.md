@@ -1706,6 +1706,8 @@ Tests in `tests/store.rs` (`tempfile::tempdir()`):
 - `put_calibration` twice for the same id keeps one row with the latest bands.
 
 #### Step 4: Wire the store, cache and specs into the service
+
+**Execution status:** Complete; cache/spec/storage and all earlier mock/live tests pass; evidence in report.
 **Service fields.** `Service` gains:
 - `store: Store`;
 - `embedder: Option<Embedder>` (if it isn't already there);
