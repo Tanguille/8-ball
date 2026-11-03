@@ -1926,3 +1926,16 @@ The binding stop condition is: “A live test fails, and the sanity curl shows t
 **Remaining work:** Chunk 2 step 3 completion and steps 4–8, then Chunks 3, 4 and 6. No calibration bands, coverage or holdout precision exist yet. No application image build or harness checks have run. Chunks 5 and 7 remain intentionally excluded. The external Aikido scan remains unperformed due to the local-only approval rejection. No push, remote addition, infrastructure command, tool installation or harness config edit was performed. The four authorized local model containers are left running.
 
 WIP is committed on `feat/v1`; the final Git verification is recorded below. This report does not claim the Outcome is achieved.
+
+### Git verification after WIP commit
+
+```text
+$ git log --oneline -3
+9dc8360 wip: logprob backend blocked by pinned chat model confidence
+cbabd42 feat(backend): detect endpoint kind fingerprint and concurrency
+309d3e2 chore(dev): configure chat rerank and embedder endpoints
+$ git status --short
+(no output)
+```
+
+Temporary execution logs, downloaded reference source snippets and the curl request/response under `/tmp/8ball-run` were removed after their required evidence was incorporated here. Model downloads remain in the authorized persistent cache.
