@@ -780,7 +780,7 @@ The CLI prints `8ball: <message>` to stderr and exits 4 for any error. That incl
 - [x] Chunk 1: crate, config, question, systemone backend, confidence and default verdict, `serve` with `POST /v1/ask` and `/healthz`, CLI `ask`
 
 #### Wave 2 (sequential): Any endpoint
-- [ ] Chunk 2: detection, logprob, rerank, embedder, triage, doctor (depends on 1)
+- [x] Chunk 2: detection, logprob, rerank, embedder, triage, doctor (depends on 1)
 
 #### Wave 3 (sequential): Trust
 - [ ] Chunk 3: SQLite store, answer cache, specs in ask, label, calibrate, metrics, retention (depends on 2)
@@ -1287,7 +1287,7 @@ Only if the raw curl gives the same "wrong" answer is it the model. In that case
 ---
 
 ### Chunk 2: Any endpoint
-**Status:** In Progress (owner revised step 3 live requirement; evidence in report) · **Wave:** 2 · **Estimated Context:** ~80k tokens · **Complexity:** High
+**Status:** Complete · **Wave:** 2 · **Estimated Context:** ~80k tokens · **Complexity:** High
 
 #### Goal
 - `kind` can be omitted for systemone and logprob endpoints, which are then auto-detected.
@@ -1502,6 +1502,8 @@ The report also has `embedder` (url and model, or null) and `specs` (an empty li
 Test in `tests/doctor.rs`: one healthy mock endpoint and one dead endpoint (an unused port). The report shows a probe verdict for the first and an `error` for the second. The CLI exits 0 when the default is the healthy one, and 4 when the default is the dead one.
 
 #### Step 8: Live tests (add each one to `tests/live.rs` in the step it belongs to, before that step's code)
+
+**Execution status:** Complete; all 15 live tests passed after step 7; raw output in report.
 1. **`live_detect_d3`** (step 2): `info()` on d3 from `dev/config.toml`, with no `kind`, gives:
    - `kind == Systemone`;
    - `concurrency == 2` (from `/props`);
@@ -1521,15 +1523,15 @@ Test in `tests/doctor.rs`: one healthy mock endpoint and one dead endpoint (an u
 Run `cargo nextest run --test live --run-ignored only --no-capture`. Every test from Chunks 1 and 2 must pass.
 
 #### Verification (E2E)
-- [ ] `8ball config check dev/config.toml` prints `ok` (the d3 entry now has no `kind`).
-- [ ] With `8ball serve --config dev/config.toml &` running, `8ball doctor` shows:
+- [x] `8ball config check dev/config.toml` prints `ok` (the d3 entry now has no `kind`).
+- [x] With `8ball serve --config dev/config.toml &` running, `8ball doctor` shows:
   - d3: kind `systemone`, a fingerprint ending in the build number, concurrency 2 and probe verdict `yes`;
   - chat: kind `logprob`;
   - rerank: kind `rerank`;
   - the embedder line.
-- [ ] `8ball ask noul "Is this a greeting?" --state "hi there" --endpoint chat` gives `yes`.
-- [ ] `echo '["Ceph OSD down, PGs degraded","Weekly newsletter"]' | 8ball triage "Is storage or data at risk?"` keeps only `index: 0`.
-- [ ] Mock tests, live tests and clippy are all green.
+- [x] `8ball ask noul "Is this a greeting?" --state "hi there" --endpoint chat` gives `yes`.
+- [x] `echo '["Ceph OSD down, PGs degraded","Weekly newsletter"]' | 8ball triage "Is storage or data at risk?"` keeps only `index: 0`.
+- [x] Mock tests, live tests and clippy are all green.
 
 #### Continuation Prompt
 > Continue the 8-ball v1 plan at `/home/tanguille/Documents/PriveProjecten/8-ball/docs/plans/8-ball-v1.md`. Read "READ THIS FIRST", run its pre-work checks, mark Chunk 2 complete, then do Chunk 3 step by step.

@@ -3447,3 +3447,39 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; fin
 ```
 
 `cargo fmt --all` passed. Full suite: 60 mock tests and 15 live tests pass. Doctor reports detection failures separately from probe failures, skips rerank probes and reports embedder configuration. Shape clarification: its report includes `default` so the HTTP-only CLI can implement the specified default-endpoint exit rule without loading a local server config. The plan specified the report contents but supplied no complete struct; this field is necessary for its required CLI behavior.
+
+### Chunk 2 step 8 and E2E verification
+
+All nine Chunk 2 live cases were added with their implementation steps; the complete live suite above passes all 15 tests. Real CLI verification:
+
+```text
+$ 8ball config check dev/config.toml
+ok
+
+$ 8ball serve --config dev/config.toml --listen 127.0.0.1:0
+2026-11-03T16:25:33.621523Z  INFO 8ball: listening on 127.0.0.1:42613
+$ 8ball doctor --url http://127.0.0.1:42613
+{"default":"d3","endpoints":[{"name":"d3","url":"http://127.0.0.1:9931","kind":"systemone","fingerprint":"/cache/vllm-d3-nano-Q8_0.gguf@b12033-785322d17","concurrency":2,"probe":{"verdict":"yes","p_yes":0.998925410724238,"ms":134},"error":null},{"name":"chat","url":"http://127.0.0.1:9934","kind":"logprob","fingerprint":"/cache/Qwen3.5-0.8B-Q8_0.gguf@b12033-785322d17","concurrency":2,"probe":{"verdict":"yes","p_yes":0.9985265338885576,"ms":215},"error":null},{"name":"rerank","url":"http://127.0.0.1:9933","kind":"rerank","fingerprint":"/cache/bge-reranker-v2-m3-Q8_0.gguf@b12033-785322d17","concurrency":1,"probe":null,"error":null}],"embedder":{"url":"http://127.0.0.1:9932","model":"embeddinggemma-2"},"specs":[]}
+exit 0
+$ 8ball ask noul Is this a greeting? --state hi there --endpoint chat --url http://127.0.0.1:42613
+{"results":[{"id":0,"question":"q","verdict":"yes","confidence":0.995498707886216,"probabilities":{"yes":0.997749353943108,"no":0.002250646056891921},"calibrated":false,"cached":false}]}
+exit 0
+$ 8ball triage Is storage or data at risk? --url http://127.0.0.1:42613
+{"kept":[{"index":0,"decision":{"id":0,"question":"q","verdict":"yes","confidence":0.9172361615852463,"probabilities":{"yes":0.9586180807926232,"no":0.04138191920737677},"calibrated":false,"cached":false}}],"unsure":[],"dropped":1}
+exit 0
+```
+
+```text
+$ dev/models.sh status
+NAME           IMAGE                                                                                                              COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+dev-chat-1     ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   chat      45 minutes ago   Up 45 minutes (healthy)   127.0.0.1:9934->9934/tcp
+dev-d3-1       ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   d3        45 minutes ago   Up 45 minutes (healthy)   127.0.0.1:9931->9931/tcp
+dev-embed-1    ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   embed     45 minutes ago   Up 45 minutes (healthy)   127.0.0.1:9932->9932/tcp
+dev-rerank-1   ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   rerank    45 minutes ago   Up 45 minutes (healthy)   127.0.0.1:9933->9933/tcp
+9931 {"status":"ok"}
+9932 {"status":"ok"}
+9933 {"status":"ok"}
+9934 {"status":"ok"}
+```
+
+Chunk 2 complete. As in Chunk 1, E2E used an ephemeral loopback port because 8080 belongs to an existing listener. No service was disturbed. Final counts for this chunk: 60 mock tests, 15 live tests, all passing; clippy and formatting clean.
