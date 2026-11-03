@@ -114,6 +114,21 @@ impl Store {
         self.call(move |conn|conn.query_row("SELECT id,answer FROM decisions WHERE calibration_id=?1 AND state_hash=?2 ORDER BY id DESC LIMIT 1",params![cid,state_hash],|row|Ok((row.get(0)?,json_column(row,1)?))).optional()).await
     }
 
+    pub(crate) async fn metadata(
+        &self,
+        id: i64,
+    ) -> Result<Option<(Option<String>, String)>, StoreError> {
+        self.call(move |conn| {
+            conn.query_row(
+                "SELECT spec,question_hash FROM decisions WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+        })
+        .await
+    }
+
     /// Returns (spec, `question_hash`) of the row, None if no row.
     pub async fn set_label(
         &self,

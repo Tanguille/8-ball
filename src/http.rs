@@ -16,6 +16,8 @@ pub fn router(service: Arc<Service>) -> Router {
         .route("/v1/ask", post(ask))
         .route("/v1/triage", post(triage))
         .route("/v1/doctor", get(doctor))
+        .route("/v1/label", post(label))
+        .route("/v1/calibrate", post(calibrate))
         .route("/healthz", get(|| async { "ok" }))
         .with_state(service)
 }
@@ -32,6 +34,35 @@ async fn triage(
     Json(req): Json<TriageRequest>,
 ) -> Result<Json<TriageResponse>, ServiceError> {
     service.triage(req).await.map(Json)
+}
+
+#[derive(serde::Deserialize)]
+struct LabelRequest {
+    id: i64,
+    value: String,
+}
+#[derive(serde::Deserialize)]
+struct CalibrateRequest {
+    spec: String,
+    precision: Option<f64>,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+async fn label(
+    State(service): State<Arc<Service>>,
+    Json(req): Json<LabelRequest>,
+) -> Result<Json<crate::service::LabelResponse>, ServiceError> {
+    service.label(req.id, req.value).await.map(Json)
+}
+async fn calibrate(
+    State(service): State<Arc<Service>>,
+    Json(req): Json<CalibrateRequest>,
+) -> Result<Json<crate::service::CalibrateResponse>, ServiceError> {
+    service
+        .calibrate(&req.spec, req.precision, req.dry_run)
+        .await
+        .map(Json)
 }
 
 async fn doctor(State(service): State<Arc<Service>>) -> Json<DoctorReport> {

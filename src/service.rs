@@ -88,11 +88,26 @@ pub enum ServiceError {
 }
 
 #[derive(Debug, Serialize)]
+pub struct LabelResponse {
+    pub id: i64,
+    pub label: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CalibrateResponse {
+    pub spec: String,
+    pub calibration_id: String,
+    pub bands: Bands,
+    pub report: verdict::Report,
+    pub stored: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DoctorReport {
     pub default: String,
     pub endpoints: Vec<DoctorEndpoint>,
     pub embedder: Option<serde_json::Value>,
-    pub specs: Vec<String>,
+    pub specs: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -142,6 +157,113 @@ impl Service {
         }
     }
 
+    pub async fn label(&self, id: i64, value: String) -> Result<LabelResponse, ServiceError> {
+        let (spec, qh) = self
+            .store
+            .metadata(id)
+            .await?
+            .ok_or_else(|| ServiceError::BadRequest(format!("no decision {id}")))?;
+        let spec = spec.ok_or_else(|| {
+            ServiceError::BadRequest(
+                "ad-hoc question: save it as a spec in the config first".into(),
+            )
+        })?;
+        let (questions, _) = self.resolve_questions(Some(&spec), &[], None)?;
+        let question = &questions[0];
+        if verdict::question_hash(question) != qh {
+            return Err(ServiceError::BadRequest(format!(
+                "decision {id} was made for an older version of spec {spec}"
+            )));
+        }
+        let value = if matches!(question.kind, Kind::Noul { .. }) {
+            match value.as_str() {
+                "yes" | "true" => "yes".into(),
+                "no" | "false" => "no".into(),
+                _ => return Err(ServiceError::BadRequest("label must be yes or no".into())),
+            }
+        } else {
+            if !question.kind.labels().contains(&value) {
+                return Err(ServiceError::BadRequest(format!("invalid label {value}")));
+            }
+            value
+        };
+        if self.store.set_label(id, &value).await?.is_none() {
+            return Err(ServiceError::BadRequest(format!("no decision {id}")));
+        }
+        Ok(LabelResponse { id, label: value })
+    }
+
+    pub async fn calibrate(
+        &self,
+        spec: &str,
+        precision: Option<f64>,
+        dry_run: bool,
+    ) -> Result<CalibrateResponse, ServiceError> {
+        let (questions, name) = self.resolve_questions(Some(spec), &[], None)?;
+        let question = &questions[0];
+        let endpoint = &self.endpoints[&name];
+        let info = endpoint.info().await.map_err(|e| ServiceError::Backend {
+            endpoint: name.clone(),
+            message: e.to_string(),
+        })?;
+        let qh = verdict::question_hash(question);
+        let cid = verdict::calibration_id(&qh, info.kind, &info.fingerprint);
+        let mut groups: IndexMap<String, Vec<crate::store::Labelled>> = IndexMap::new();
+        for row in self.store.labelled(spec, &qh).await? {
+            groups.entry(row.state_hash.clone()).or_default().push(row);
+        }
+        let mut warnings = Vec::new();
+        let mut examples = Vec::new();
+        for (state_hash, rows) in groups {
+            let first = &rows[0];
+            if rows.iter().any(|row| row.label != first.label) {
+                let ids = rows
+                    .iter()
+                    .map(|row| row.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                warnings.push(format!("conflicting labels for decision ids {ids}"));
+                continue;
+            }
+            let probs = if let Some((_, probs)) = self.store.cached(&cid, &state_hash).await? {
+                probs
+            } else {
+                self.ask(AskRequest {
+                    state: first.state.clone(),
+                    spec: Some(spec.into()),
+                    questions: vec![],
+                    endpoint: Some(name.clone()),
+                })
+                .await?
+                .results
+                .remove(0)
+                .probabilities
+                .into_values()
+                .collect()
+            };
+            examples.push(verdict::Example {
+                probs,
+                label: first.label.clone(),
+            });
+        }
+        let (bands, mut report) =
+            verdict::calibrate(&question.kind, &examples, precision.unwrap_or(0.95))
+                .map_err(ServiceError::BadRequest)?;
+        report.warnings.extend(warnings);
+        if !dry_run {
+            self.store
+                .put_calibration(&cid, spec, &bands, &report)
+                .await?;
+        }
+        Ok(CalibrateResponse {
+            spec: spec.into(),
+            calibration_id: cid,
+            bands,
+            report,
+            stored: !dry_run,
+        })
+    }
+
     pub async fn doctor(&self) -> DoctorReport {
         let endpoints=futures::future::join_all(self.endpoints.iter().map(|(name,endpoint)|async move {
             let mut report=DoctorEndpoint {name:name.clone(),url:self.config.endpoints[name].url.clone(),kind:None,fingerprint:None,concurrency:None,probe:None,error:None};
@@ -162,6 +284,33 @@ impl Service {
             }
             report
         })).await;
+        let mut specs = Vec::new();
+        for (name, spec) in &self.config.specs {
+            let (questions, endpoint) = self
+                .resolve_questions(Some(name), &[], None)
+                .expect("validated config");
+            let mut status = serde_json::json!({"name":name,"type":spec.kind.type_name(),"instructions":spec.instructions,"calibration_id":null,"calibrated":false,"report":null});
+            match self.endpoints[&endpoint].info().await {
+                Ok(info) => {
+                    let cid = verdict::calibration_id(
+                        &verdict::question_hash(&questions[0]),
+                        info.kind,
+                        &info.fingerprint,
+                    );
+                    status["calibration_id"] = serde_json::json!(cid);
+                    match self.store.calibration(&cid).await {
+                        Ok(Some((_, report))) => {
+                            status["calibrated"] = serde_json::json!(true);
+                            status["report"] = serde_json::json!(report);
+                        }
+                        Ok(None) => {}
+                        Err(e) => status["error"] = serde_json::json!(e.to_string()),
+                    }
+                }
+                Err(e) => status["error"] = serde_json::json!(e.to_string()),
+            }
+            specs.push(status);
+        }
         DoctorReport {
             default: self.config.default.clone(),
             endpoints,
@@ -170,7 +319,7 @@ impl Service {
                 .embedder
                 .as_ref()
                 .map(|cfg| serde_json::json!({"url":cfg.url,"model":cfg.model})),
-            specs: Vec::new(),
+            specs,
         }
     }
 

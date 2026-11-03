@@ -17,3 +17,10 @@ kind = "rerank"
 url = "http://127.0.0.1:9932"
 model = "embeddinggemma-2"
 
+[specs.greeting]
+type = "noul"
+instructions = "Is this message a greeting?"
+
+[specs.storage-risk]
+type = "noul"
+instructions = "Is storage or data at risk according to this message?"

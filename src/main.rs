@@ -22,6 +22,30 @@ struct Cli {
     command: Command,
 }
 
+#[derive(clap::Args)]
+struct AskArgs {
+    #[arg(value_parser = ["noul", "choice", "score"])]
+    kind: Option<String>,
+    instructions: Option<String>,
+    #[arg(long)]
+    spec: Option<String>,
+    /// choice option, repeatable: name or name=description
+    #[arg(long = "option")]
+    options: Vec<String>,
+    /// score level, repeatable, lowest first
+    #[arg(long = "level")]
+    levels: Vec<String>,
+    #[arg(long)]
+    state: Option<String>,
+    #[arg(long)]
+    endpoint: Option<String>,
+    /// exit 0 yes / 1 no / 3 unsure (noul); 0 decided / 3 unsure (choice, score)
+    #[arg(long)]
+    exit_code: bool,
+    #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
+    url: String,
+}
+
 #[derive(clap::Subcommand)]
 enum Command {
     /// Run the HTTP server (REST + MCP).
@@ -34,26 +58,7 @@ enum Command {
         db: Option<PathBuf>,
     },
     /// Ask an ad-hoc question (state from --state or stdin).
-    Ask {
-        #[arg(value_parser = ["noul", "choice", "score"])]
-        kind: String,
-        instructions: String,
-        /// choice option, repeatable: name or name=description
-        #[arg(long = "option")]
-        options: Vec<String>,
-        /// score level, repeatable, lowest first
-        #[arg(long = "level")]
-        levels: Vec<String>,
-        #[arg(long)]
-        state: Option<String>,
-        #[arg(long)]
-        endpoint: Option<String>,
-        /// exit 0 yes / 1 no / 3 unsure (noul); 0 decided / 3 unsure (choice, score)
-        #[arg(long)]
-        exit_code: bool,
-        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
-        url: String,
-    },
+    Ask(AskArgs),
     /// Judge a JSON array from stdin.
     Triage {
         instructions: String,
@@ -74,6 +79,23 @@ enum Command {
     },
     /// Inspect endpoint detection and health.
     Doctor {
+        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
+        url: String,
+    },
+    /// Label a saved spec decision.
+    Label {
+        id: i64,
+        value: String,
+        #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
+        url: String,
+    },
+    /// Fit decision bands from labelled states.
+    Calibrate {
+        spec: String,
+        #[arg(long)]
+        precision: Option<f64>,
+        #[arg(long)]
+        dry_run: bool,
         #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
         url: String,
     },
@@ -112,41 +134,7 @@ async fn run() -> anyhow::Result<i32> {
             serve(config, listen, db).await?;
             Ok(0)
         }
-        Command::Ask {
-            kind,
-            instructions,
-            options,
-            levels,
-            state,
-            endpoint,
-            exit_code,
-            url,
-        } => {
-            let q = make_question(&kind, instructions, options, levels);
-            let noul = matches!(q.kind, Kind::Noul { .. });
-            let state = if let Some(state) = state {
-                state
-            } else {
-                let mut s = String::new();
-                std::io::stdin().read_to_string(&mut s)?;
-                s
-            };
-            let body = post_json(
-                &url,
-                "/v1/ask",
-                &json!({"state":state,"questions":[q],"endpoint":endpoint}),
-            )
-            .await?;
-            println!("{body}");
-            let verdict = body["results"][0]["verdict"].as_str().unwrap_or("unsure");
-            Ok(if !exit_code {
-                0
-            } else if verdict == "unsure" {
-                3
-            } else {
-                i32::from(noul && verdict == "no")
-            })
-        }
+        Command::Ask(args) => ask(args).await,
         Command::Triage {
             instructions,
             kind,
@@ -171,11 +159,7 @@ async fn run() -> anyhow::Result<i32> {
             Ok(0)
         }
         Command::Doctor { url } => {
-            let report: Value = reqwest::get(format!("{}/v1/doctor", url.trim_end_matches('/')))
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
+            let report = doctor_report(&url).await?;
             println!("{report}");
             let default = report["endpoints"]
                 .as_array()
@@ -189,6 +173,30 @@ async fn run() -> anyhow::Result<i32> {
                     0
                 },
             )
+        }
+        Command::Label { id, value, url } => {
+            println!(
+                "{}",
+                post_json(&url, "/v1/label", &json!({"id":id,"value":value})).await?
+            );
+            Ok(0)
+        }
+        Command::Calibrate {
+            spec,
+            precision,
+            dry_run,
+            url,
+        } => {
+            println!(
+                "{}",
+                post_json(
+                    &url,
+                    "/v1/calibrate",
+                    &json!({"spec":spec,"precision":precision,"dry_run":dry_run})
+                )
+                .await?
+            );
+            Ok(0)
         }
         Command::Config {
             action: ConfigAction::Check { path },
@@ -281,4 +289,76 @@ fn default_db_path() -> PathBuf {
             PathBuf::from,
         )
         .join("8ball/8ball.db")
+}
+
+async fn doctor_report(url: &str) -> anyhow::Result<Value> {
+    Ok(
+        reqwest::get(format!("{}/v1/doctor", url.trim_end_matches('/')))
+            .await?
+            .error_for_status()?
+            .json()
+            .await?,
+    )
+}
+
+async fn ask(
+    AskArgs {
+        kind,
+        instructions,
+        spec,
+        options,
+        levels,
+        state,
+        endpoint,
+        exit_code,
+        url,
+    }: AskArgs,
+) -> anyhow::Result<i32> {
+    let (questions, noul) = if spec.is_some() {
+        (Vec::new(), None)
+    } else {
+        let (Some(kind), Some(instructions)) = (kind, instructions) else {
+            anyhow::bail!("give --spec or <kind> <instructions>");
+        };
+        let q = make_question(&kind, instructions, options, levels);
+        let noul = matches!(q.kind, Kind::Noul { .. });
+        (vec![q], Some(noul))
+    };
+    let state = if let Some(state) = state {
+        state
+    } else {
+        let mut s = String::new();
+        std::io::stdin().read_to_string(&mut s)?;
+        s
+    };
+    let body = post_json(
+        &url,
+        "/v1/ask",
+        &json!({"state":state,"questions":questions,"spec":spec,"endpoint":endpoint}),
+    )
+    .await?;
+    println!("{body}");
+    let verdict = body["results"][0]["verdict"].as_str().unwrap_or("unsure");
+    Ok(if !exit_code {
+        0
+    } else if verdict == "unsure" {
+        3
+    } else {
+        let noul = if verdict != "no" {
+            false
+        } else if let Some(noul) = noul {
+            noul
+        } else {
+            let report = doctor_report(&url).await?;
+            report["specs"]
+                .as_array()
+                .and_then(|specs| {
+                    specs
+                        .iter()
+                        .find(|item| item["name"] == spec.as_deref().unwrap_or_default())
+                })
+                .is_some_and(|item| item["type"] == "noul")
+        };
+        i32::from(noul && verdict == "no")
+    })
 }

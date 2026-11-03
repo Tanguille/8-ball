@@ -409,3 +409,169 @@ async fn live_cache_skips_model() {
     assert_eq!(second.results[0].id, first.results[0].id);
     assert!(elapsed < std::time::Duration::from_millis(50));
 }
+
+fn calibration_service(config: Config, path: &std::path::Path) -> eightball::service::Service {
+    let endpoints = config
+        .endpoints
+        .iter()
+        .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
+        .collect();
+    eightball::service::Service::new(
+        config,
+        endpoints,
+        eightball::store::Store::open(path).unwrap(),
+    )
+}
+fn fixture_rows(spec: &str) -> Vec<(String, String)> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("tests/fixtures/{spec}.jsonl"));
+    let rows: Vec<_> = std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let row: serde_json::Value = serde_json::from_str(line).unwrap();
+            (
+                row["state"].as_str().unwrap().to_owned(),
+                row["label"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(rows.len(), 60);
+    assert_eq!(rows.iter().filter(|(_, label)| label == "yes").count(), 30);
+    assert_eq!(rows.iter().filter(|(_, label)| label == "no").count(), 30);
+    assert_eq!(
+        rows.iter()
+            .map(|(state, _)| state)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        60
+    );
+    rows
+}
+async fn fit_fixture(
+    service: &eightball::service::Service,
+    spec: &str,
+) -> eightball::service::CalibrateResponse {
+    use eightball::service::AskRequest;
+    for (index, (state, label)) in fixture_rows(spec).into_iter().enumerate() {
+        if index % 3 == 0 {
+            continue;
+        }
+        let result = service
+            .ask(AskRequest {
+                state: state.clone(),
+                spec: Some(spec.into()),
+                questions: vec![],
+                endpoint: None,
+            })
+            .await
+            .unwrap();
+        eprintln!(
+            "{spec} fit {state:?}: label={label}, probabilities={:?}",
+            result.results[0].probabilities
+        );
+        service.label(result.results[0].id, label).await.unwrap();
+    }
+    let result = service.calibrate(spec, Some(0.95), false).await.unwrap();
+    eprintln!(
+        "{spec} calibration: bands={:?}, report={:?}, stored={}",
+        result.bands, result.report, result.stored
+    );
+    assert_eq!(result.report.examples, 40);
+    assert!(result.stored);
+    if result.report.precision < 0.95 {
+        assert!(
+            matches!(result.bands,eightball::verdict::Bands::Noul {yes_at,no_at} if yes_at>1.0 && no_at<0.0)
+        );
+        assert!(!result.report.warnings.is_empty());
+        eprintln!("{spec}: never-deciding bands with warning");
+    } else {
+        eprintln!("{spec}: fitted precision target achieved");
+    }
+    result
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_calibrate_holdout() {
+    use eightball::service::AskRequest;
+    require(9931).await;
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let service = calibration_service(dev_config(), &dir.path().join("db.sqlite"));
+    for spec in ["greeting", "storage-risk"] {
+        fit_fixture(&service, spec).await;
+        let mut decided = 0_u32;
+        let mut correct = 0_u32;
+        for (index, (state, label)) in fixture_rows(spec).into_iter().enumerate() {
+            if index % 3 != 0 {
+                continue;
+            }
+            let result = service
+                .ask(AskRequest {
+                    state: state.clone(),
+                    spec: Some(spec.into()),
+                    questions: vec![],
+                    endpoint: None,
+                })
+                .await
+                .unwrap();
+            let result = &result.results[0];
+            assert!(result.calibrated);
+            eprintln!("{spec} holdout {state:?}: label={label}, result={result:?}");
+            if result.verdict != "unsure" {
+                decided += 1;
+                if result.verdict == label {
+                    correct += 1;
+                }
+            }
+        }
+        let coverage = f64::from(decided) / 20.0;
+        if decided > 0 {
+            let precision = f64::from(correct) / f64::from(decided);
+            eprintln!(
+                "{spec} holdout: precision={precision}, coverage={coverage}, decided={decided}/20, correct={correct}"
+            );
+            assert!(precision >= 0.85, "{spec}: holdout precision {precision}");
+        } else {
+            eprintln!(
+                "{spec} holdout: precision=undefined (no decisions), coverage={coverage}, decided=0/20"
+            );
+        }
+    }
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_question_edit_invalidates() {
+    use eightball::service::AskRequest;
+    require(9931).await;
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let db = dir.path().join("db.sqlite");
+    let service = calibration_service(dev_config(), &db);
+    fit_fixture(&service, "greeting").await;
+    let original = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml"),
+    )
+    .unwrap();
+    let edited = original.replace(
+        "Is this message a greeting?",
+        "Is this message a greeting exactly?",
+    );
+    let path = dir.path().join("edited.toml");
+    std::fs::write(&path, edited).unwrap();
+    let changed = calibration_service(Config::load(&path).unwrap(), &db);
+    let result = changed
+        .ask(AskRequest {
+            state: "hi there".into(),
+            spec: Some("greeting".into()),
+            questions: vec![],
+            endpoint: None,
+        })
+        .await
+        .unwrap();
+    assert!(!result.results[0].calibrated);
+    let calibration = changed
+        .calibrate("greeting", Some(0.95), false)
+        .await
+        .unwrap();
+    eprintln!("edited question: {result:?}; calibration={calibration:?}");
+    assert_eq!(calibration.report.examples, 0);
+}

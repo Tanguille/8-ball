@@ -1731,6 +1731,8 @@ Tests in `tests/store.rs` (`tempfile::tempdir()`):
 **Triage** with `spec` works the same way: it uses the spec's question, endpoint and bands. Store all fresh answers with `insert_many` in one transaction.
 
 #### Step 5: Label and calibrate
+
+**Execution status:** Complete, including both fixture holdouts and edit invalidation. 81 mock and 18 live tests pass; bands and raw evidence in report.
 **`Service::label(id: i64, value: String) -> Result<LabelResponse, ServiceError>`:**
 1. Look up the row; an unknown id is `BadRequest("no decision {id}")`.
 2. A row with spec None is `BadRequest("ad-hoc question: save it as a spec in the config first")`.

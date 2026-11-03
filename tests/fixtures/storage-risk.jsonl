@@ -1,0 +1,60 @@
+{"state":"The /var disk is 98% full and writes are failing.","label":"yes"}
+{"state":"CPU usage reached 95% during the benchmark.","label":"no"}
+{"state":"Ceph OSD 4 is down and placement groups are degraded.","label":"yes"}
+{"state":"The new application deployment succeeded.","label":"no"}
+{"state":"Last night's database backup failed; no recent recovery copy exists.","label":"yes"}
+{"state":"The TLS certificate renewed successfully.","label":"no"}
+{"state":"The RAID array is rebuilding after a drive failure and has lost redundancy.","label":"yes"}
+{"state":"Good morning, team!","label":"no"}
+{"state":"SMART reports pending sectors and uncorrectable read errors on the data drive.","label":"yes"}
+{"state":"The nightly backup completed successfully and was verified.","label":"no"}
+{"state":"The customer archive file is corrupted and cannot be opened.","label":"yes"}
+{"state":"Disk usage is 40% with ample free space.","label":"no"}
+{"state":"An operator accidentally deleted the production backup bucket.","label":"yes"}
+{"state":"Add tomatoes and onions to the soup.","label":"no"}
+{"state":"The filesystem remounted read-only after detecting metadata corruption.","label":"yes"}
+{"state":"Memory usage rose during the load test; storage is healthy.","label":"no"}
+{"state":"The database volume has no free space left.","label":"yes"}
+{"state":"All storage health checks passed.","label":"no"}
+{"state":"Two disks in the storage array failed simultaneously.","label":"yes"}
+{"state":"The web server returned a 404 for a missing documentation page.","label":"no"}
+{"state":"Ceph reports inconsistent placement groups and scrub errors.","label":"yes"}
+{"state":"The scheduler moved a stateless frontend pod to another node.","label":"no"}
+{"state":"The only backup copy cannot be restored because its checksum is invalid.","label":"yes"}
+{"state":"The off-site backup passed its restore test.","label":"no"}
+{"state":"A database datafile was overwritten by mistake.","label":"yes"}
+{"state":"The football team won by two goals.","label":"no"}
+{"state":"The storage pool is degraded and one more disk failure would lose data.","label":"yes"}
+{"state":"Disk capacity was expanded successfully and usage is now 25%.","label":"no"}
+{"state":"The file server is returning I/O errors when users read documents.","label":"yes"}
+{"state":"A developer fixed a typo in the login page.","label":"no"}
+{"state":"The backup job has failed every night this week.","label":"yes"}
+{"state":"The database query took three seconds; disks report no errors.","label":"no"}
+{"state":"The root filesystem has exhausted all inodes and cannot create files.","label":"yes"}
+{"state":"The monitoring dashboard changed its color theme.","label":"no"}
+{"state":"The NAS reports a failed drive and an unprotected data pool.","label":"yes"}
+{"state":"The firewall certificate was updated.","label":"no"}
+{"state":"An application accidentally deleted a directory of irreplaceable photos.","label":"yes"}
+{"state":"The image download completed and its checksum matches.","label":"no"}
+{"state":"Storage replication stopped and the only remaining replica is unhealthy.","label":"yes"}
+{"state":"The test runner used all available CPU cores.","label":"no"}
+{"state":"A ransomware process is encrypting files on the shared data volume.","label":"yes"}
+{"state":"The storage pool scrub completed with zero errors.","label":"no"}
+{"state":"The archive disk cannot be read because its partition table is damaged.","label":"yes"}
+{"state":"The meeting has been moved to Thursday.","label":"no"}
+{"state":"Database checksums show corrupted pages in the main data directory.","label":"yes"}
+{"state":"The system reports low CPU frequency while idle.","label":"no"}
+{"state":"Object storage lost three replicas of a critical customer document.","label":"yes"}
+{"state":"The media volume is healthy with 70% free space.","label":"no"}
+{"state":"The snapshot retention job deleted the last recovery point by mistake.","label":"yes"}
+{"state":"A recipe recommends simmering for twenty minutes.","label":"no"}
+{"state":"The NVMe drive reports critical media errors and is disconnecting.","label":"yes"}
+{"state":"The DNS record was updated to the new load balancer address.","label":"no"}
+{"state":"The backup destination is full, so new backups are being skipped.","label":"yes"}
+{"state":"The file copy finished and both source and destination hashes match.","label":"no"}
+{"state":"A power failure interrupted writes and the filesystem now fails consistency checks.","label":"yes"}
+{"state":"The laptop fan is running loudly during video playback.","label":"no"}
+{"state":"The distributed storage cluster reports data unavailable and missing replicas.","label":"yes"}
+{"state":"The new database index was created successfully.","label":"no"}
+{"state":"The external backup disk was dropped and now makes clicking noises without mounting.","label":"yes"}
+{"state":"A scheduled restore drill recovered all files without errors.","label":"no"}
