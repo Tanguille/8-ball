@@ -1,0 +1,6 @@
+default = "d3"
+
+[endpoints.d3]
+url = "http://127.0.0.1:9931"
+# chunk 2 removes this line: the kind is auto-detected from /v1/models
+kind = "systemone"

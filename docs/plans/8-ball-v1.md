@@ -465,6 +465,8 @@ curl -s localhost:9932/v1/embeddings -H 'content-type: application/json' \
 
 ### Notes (the executor appends problems hit while setting up the stack)
 
+- 2026-11-03: The pinned b12033 image starts as an empty router with `-mu` alone (`/health` misleadingly says ok). Its `server_role_detect` checks model path, HF repo and Docker repo, but not URL. Added explicit `-m /cache/<filename>` alongside each unchanged pinned URL; verified against `common/arg.cpp` and the download implementation at commit `785322d17`.
+
 ---
 
 ## File layout (single crate; a module `foo` lives in `src/foo.rs`, its children in `src/foo/bar.rs`; never `mod.rs`)
@@ -922,6 +924,8 @@ git switch -c feat/v1
    ```
 
 #### Step 1b: Local model stack
+
+**Execution status:** Complete; all four models loaded; sanity evidence in `8-ball-v1-report.md`.
 1. Create `dev/compose.yaml` and `dev/models.sh` exactly as in "Local model stack", and run `chmod +x dev/models.sh`.
 2. Create `dev/config.toml` in its Chunk 1 form:
    ```toml

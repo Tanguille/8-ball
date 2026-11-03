@@ -93,3 +93,170 @@ $ cargo nextest run --no-tests pass
 ```
 
 `cargo fmt --all` passed with no output. Scaffold-only deviation: bare nextest exits 4 on zero tests; `--no-tests pass` verifies the empty scaffold. Subsequent steps use the prescribed bare command. No behavior exists to test yet.
+
+### Step 1b: local stack setup (in progress)
+
+The compose and shell files were copied from the plan. `shellcheck dev/models.sh` and `yayamlls validate dev/compose.yaml` both passed (no output).
+
+Initial `dev/models.sh up` exited 0 and all health endpoints returned `{"status":"ok"}`, but the sanity calls exposed empty router instances:
+
+```text
+$ curl localhost:9931/v1/systemone ...
+{"error":{"code":400,"message":"model name is missing from the request","type":"invalid_request_error"}}
+$ curl localhost:9931/v1/models
+{"data":[],"object":"list"}
+$ curl localhost:9931/props
+{"role":"router","max_instances":4,"models_autoload":true,"model_alias":"llama-server","model_path":"none","default_generation_settings":{"params":null,"n_ctx":0},"ui_settings":{},"build_info":"b12033-785322d17","cors_proxy_enabled":false}
+$ curl localhost:9934/v1/chat/completions ...
+{"error":{"code":400,"message":"model 'qwen3.5-0.8b' not found","type":"invalid_request_error"}}
+$ curl localhost:9933/v1/rerank ...
+{"error":{"code":400,"message":"model name is missing from the request","type":"invalid_request_error"}}
+$ curl localhost:9932/v1/embeddings ...
+{"error":{"code":400,"message":"model 'embeddinggemma-2' not found","type":"invalid_request_error"}}
+```
+
+An assert-based self-check against `/v1/models` failed before the fix:
+
+```text
+9931 {'data': [], 'object': 'list'}
+Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+AssertionError: port 9931 is healthy but has no model
+```
+
+Read the pinned image's `--help` and upstream `tools/server/server.cpp` and `common/arg.cpp` at `785322d17`. Root cause: `server_role_detect` tests `params.model.path`, `hf_repo` and `docker_repo`, omitting `url`; URL resolution occurs later for instances. `common_models_handler_apply` uses explicit `-m` as the URL download destination. Minimal correction: added `-m /cache/<filename>` alongside all four unchanged pinned URLs. This is a launcher correction; no model, assertion or application behavior was changed. Restart initiated downloads into the authorized cache.
+
+### Step 1b green evidence
+
+```text
+$ dev/models.sh status
+NAME           IMAGE                                                                                                              COMMAND                  SERVICE   CREATED              STATUS                        PORTS
+dev-chat-1     ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   chat      About a minute ago   Up About a minute (healthy)   127.0.0.1:9934->9934/tcp
+dev-d3-1       ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   d3        About a minute ago   Up About a minute (healthy)   127.0.0.1:9931->9931/tcp
+dev-embed-1    ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   embed     About a minute ago   Up About a minute (healthy)   127.0.0.1:9932->9932/tcp
+dev-rerank-1   ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8   "/app/llama-server -…"   rerank    About a minute ago   Up About a minute (healthy)   127.0.0.1:9933->9933/tcp
+9931 {"status":"ok"}
+9932 {"status":"ok"}
+9933 {"status":"ok"}
+9934 {"status":"ok"}
+```
+
+Sanity curl systemone:
+```json
+{
+  "model": "/cache/vllm-d3-nano-Q8_0.gguf",
+  "answers": {
+    "q": {
+      "type": "noul",
+      "noul": 0.9977173076246607
+    }
+  },
+  "usage": {
+    "input_tokens": 97,
+    "output_tokens": 0
+  }
+}
+```
+
+Sanity curl models:
+```json
+{
+  "input_modalities": [
+    "text"
+  ],
+  "output_modalities": [
+    "decisions"
+  ]
+}
+```
+
+Sanity curl props:
+```json
+{
+  "total_slots": 2,
+  "model_path": "/cache/vllm-d3-nano-Q8_0.gguf",
+  "build_info": "b12033-785322d17"
+}
+```
+
+Sanity curl chat:
+```json
+[
+  {
+    "id": 9175,
+    "token": "Yes",
+    "bytes": [
+      89,
+      101,
+      115
+    ],
+    "logprob": -0.0857168659567833
+  },
+  {
+    "id": 9405,
+    "token": "yes",
+    "bytes": [
+      121,
+      101,
+      115
+    ],
+    "logprob": -3.13651704788208
+  },
+  {
+    "id": 2665,
+    "token": "No",
+    "bytes": [
+      78,
+      111
+    ],
+    "logprob": -3.393833637237549
+  },
+  {
+    "id": 248068,
+    "token": "<think>",
+    "bytes": [
+      60,
+      116,
+      104,
+      105,
+      110,
+      107,
+      62
+    ],
+    "logprob": -6.307493686676025
+  },
+  {
+    "id": 2083,
+    "token": "no",
+    "bytes": [
+      110,
+      111
+    ],
+    "logprob": -6.84080171585083
+  }
+]
+```
+
+Sanity curl rerank:
+```json
+{
+  "model": "bge-reranker-v2-m3",
+  "object": "list",
+  "usage": {
+    "prompt_tokens": 19,
+    "total_tokens": 19
+  },
+  "results": [
+    {
+      "index": 0,
+      "relevance_score": 2.2409818172454834
+    },
+    {
+      "index": 1,
+      "relevance_score": -10.912446975708008
+    }
+  ]
+}
+```
+
+Sanity embedding curl: `768` dimensions. Loaded-model self-check passed on ports 9931–9934. Reranker returns logits (2.2409818172454834, -10.912446975708008); Chunk 2 must use sigmoid. `shellcheck`, `yayamlls validate`, `cargo fmt --all --check`, and `cargo clippy --all-targets -- -D warnings` passed. Nextest empty-scaffold check: 0 tests, 0 failures (`--no-tests pass`).
