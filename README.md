@@ -269,7 +269,7 @@ Remove only `mcp.servers.8ball` from the config and the skill symlink you create
 
 ## Hermes
 
-Untested and deferred: deployment, shared MCP registration and Hermes gates belong to Chunks 5 and 7, outside this local run. No Hermes configuration was changed.
+Untested and deferred: deployment, shared MCP registration and Hermes gates are outside this local build. No Hermes configuration was changed.
 
 The directory-publication check for a hosted privacy-policy URL is deferred by the owner for this local build. Strict plugin validation passes; no public marketplace submission is claimed.
 
@@ -288,4 +288,4 @@ docker run --rm 8ball:dev --version
 claude plugin validate plugin --strict
 ```
 
-Build with current stable Rust; `Cargo.lock` records tested dependency versions. Latest versions reduce upgrade backlog but do not guarantee freedom from breaking changes. Real-model probabilities, holdout results, deviations and local-only deferrals are recorded in [the execution report](docs/plans/8-ball-v1-report.md).
+Build with current stable Rust; `Cargo.lock` records tested dependency versions. Latest versions reduce upgrade backlog but do not guarantee freedom from breaking changes.
