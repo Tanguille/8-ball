@@ -1539,7 +1539,7 @@ Run `cargo nextest run --test live --run-ignored only --no-capture`. Every test 
 ---
 
 ### Chunk 3: Trust
-**Status:** Not Started · **Wave:** 3 · **Estimated Context:** ~80k tokens · **Complexity:** High
+**Status:** In Progress · **Wave:** 3 · **Estimated Context:** ~80k tokens · **Complexity:** High
 
 #### Goal
 - Every decision is stored.
@@ -1549,6 +1549,8 @@ Run `cargo nextest run --test live --run-ignored only --no-capture`. Every test 
 - `/metrics` exists.
 
 #### Step 1: Add dependencies
+
+**Execution status:** Complete; dependency-only checks pass; evidence in report.
 ```bash
 cargo add rusqlite --features bundled
 cargo add sha2

@@ -3483,3 +3483,160 @@ dev-rerank-1   ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a
 ```
 
 Chunk 2 complete. As in Chunk 1, E2E used an ephemeral loopback port because 8080 belongs to an existing listener. No service was disturbed. Final counts for this chunk: 60 mock tests, 15 live tests, all passing; clippy and formatting clean.
+
+## Chunk 3
+
+### Step 1: dependencies
+
+Added `rusqlite --features bundled` (0.41.1), `sha2` (0.11.1), `prometheus-client` (0.25.2) using the three prescribed cargo commands, and declared the empty store module.
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+ Downloading crates ...
+  Downloaded fallible-streaming-iterator v0.1.9
+  Downloaded hashlink v0.12.2
+  Downloaded prometheus-client v0.25.2
+  Downloaded rusqlite v0.41.1
+  Downloaded libsqlite3-sys v0.39.1
+    Checking hashbrown v0.17.1
+    Checking typenum v1.20.1
+   Compiling vcpkg v0.2.15
+   Compiling parking_lot_core v0.9.12
+    Checking scopeguard v1.2.0
+   Compiling prometheus-client v0.25.2
+    Checking const-oid v0.10.2
+   Compiling prometheus-client-derive-encode v0.5.1
+    Checking fallible-streaming-iterator v0.1.9
+    Checking dtoa v1.0.11
+    Checking fallible-iterator v0.3.0
+    Checking lock_api v0.4.14
+    Checking parking_lot v0.12.5
+   Compiling libsqlite3-sys v0.39.1
+    Checking indexmap v2.14.2
+    Checking hashlink v0.12.2
+    Checking hybrid-array v0.4.15
+    Checking serde_json v1.0.154
+    Checking h2 v0.4.20
+    Checking toml v1.1.8+spec-1.1.0
+    Checking crypto-common v0.2.2
+    Checking block-buffer v0.12.1
+    Checking digest v0.11.3
+    Checking schemars v1.2.3
+    Checking assert-json-diff v2.0.2
+    Checking sha2 v0.11.1
+    Checking rmcp v3.8.0
+    Checking hyper v1.12.0
+    Checking hyper-util v0.1.21
+    Checking hyper-rustls v0.27.10
+    Checking axum v0.8.9
+    Checking wiremock v0.6.5
+    Checking reqwest v0.13.5
+    Checking rusqlite v0.41.1
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.78s
+```
+
+```text
+$ cargo nextest run
+   Compiling hashbrown v0.17.1
+   Compiling typenum v1.20.1
+   Compiling libsqlite3-sys v0.39.1
+   Compiling scopeguard v1.2.0
+   Compiling parking_lot_core v0.9.12
+   Compiling const-oid v0.10.2
+   Compiling fallible-iterator v0.3.0
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling dtoa v1.0.11
+   Compiling lock_api v0.4.14
+   Compiling parking_lot v0.12.5
+   Compiling indexmap v2.14.2
+   Compiling hashlink v0.12.2
+   Compiling hybrid-array v0.4.15
+   Compiling prometheus-client v0.25.2
+   Compiling rusqlite v0.41.1
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling serde_json v1.0.154
+   Compiling h2 v0.4.20
+   Compiling toml v1.1.8+spec-1.1.0
+   Compiling digest v0.11.3
+   Compiling sha2 v0.11.1
+   Compiling schemars v1.2.3
+   Compiling assert-json-diff v2.0.2
+   Compiling rmcp v3.8.0
+   Compiling hyper v1.12.0
+   Compiling hyper-util v0.1.21
+   Compiling hyper-rustls v0.27.10
+   Compiling axum v0.8.9
+   Compiling wiremock v0.6.5
+   Compiling reqwest v0.13.5
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.70s
+────────────
+ Nextest run ID bebe06b2-5a8f-472c-8689-78dc0c947a3e with nextest profile: default
+    Starting 60 tests across 15 binaries (15 tests skipped)
+        PASS [   0.004s] ( 1/60) eightball::config minimal_ok
+        PASS [   0.004s] ( 2/60) eightball::embed cosine_similarity
+        PASS [   0.005s] ( 3/60) eightball::config spec_parses
+        PASS [   0.006s] ( 4/60) eightball::config default_must_exist
+        PASS [   0.006s] ( 5/60) eightball::config retention_default
+        PASS [   0.007s] ( 6/60) eightball::config bad_spec_name
+        PASS [   0.007s] ( 7/60) eightball::config zero_concurrency
+        PASS [   0.008s] ( 8/60) eightball::config logprob_needs_model
+        PASS [   0.010s] ( 9/60) eightball::config unknown_key_rejected
+        PASS [   0.004s] (10/60) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.006s] (11/60) eightball::question noul_without_criteria_parses
+        PASS [   0.005s] (12/60) eightball::question validate_rejects
+        PASS [   0.011s] (13/60) eightball::question score_labels
+        PASS [   0.027s] (14/60) eightball::embed mixed_dimensions_rejected
+        PASS [   0.027s] (15/60) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.028s] (16/60) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.030s] (17/60) eightball::embed shuffled_indices_restore_order
+        PASS [   0.035s] (18/60) eightball::detect detection_gets_send_bearer
+        PASS [   0.035s] (19/60) eightball::detect explicit_kind_skips_models
+        PASS [   0.032s] (20/60) eightball::logprob extra_body_is_merged
+        PASS [   0.032s] (21/60) eightball::logprob case_and_space_variants_add_mass
+        PASS [   0.039s] (22/60) eightball::embed ten_texts_use_two_ordered_batches
+        PASS [   0.033s] (23/60) eightball::logprob lowercase_choice_does_not_match_and_low_mass_errors
+        PASS [   0.024s] (24/60) eightball::rerank choice_is_rejected
+        PASS [   0.033s] (25/60) eightball::logprob twenty_seven_options_rejected
+        PASS [   0.040s] (26/60) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.040s] (27/60) eightball::detect failed_detection_is_not_cached
+        PASS [   0.007s] (28/60) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.038s] (29/60) eightball::logprob state_closing_delimiter_is_escaped
+        PASS [   0.036s] (30/60) eightball::rerank score_is_mapped_from_logit
+        PASS [   0.050s] (31/60) eightball::logprob letters_map_in_option_order
+        PASS [   0.055s] (32/60) eightball::embed missing_or_duplicate_indices_are_errors
+        PASS [   0.025s] (33/60) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.009s] (34/60) eightball::verdict choice_confidence_readme
+        PASS [   0.025s] (35/60) eightball::systemone three_questions_one_request
+        PASS [   0.009s] (36/60) eightball::verdict choice_default_bands
+        PASS [   0.066s] (37/60) eightball::doctor reports_healthy_probe_and_dead_error
+        PASS [   0.027s] (38/60) eightball::systemone long_state_is_fitted
+        PASS [   0.031s] (39/60) eightball::systemone http_400_is_error_with_body
+        PASS [   0.005s] (40/60) eightball::verdict noul_default_bands
+        PASS [   0.004s] (41/60) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.004s] (42/60) eightball::verdict score_confidence_readme
+        PASS [   0.070s] (43/60) eightball::cli_ask choice_prints_billing
+        PASS [   0.007s] (44/60) eightball::verdict uniform_is_zero
+        PASS [   0.053s] (45/60) eightball::rest_ask backend_failure_is_502
+        PASS [   0.048s] (46/60) eightball::rest_ask healthz_is_ok
+        PASS [   0.078s] (47/60) eightball::cli_ask dead_server_exits_four
+        PASS [   0.034s] (48/60) eightball::triage sixty_five_items_rejected
+        PASS [   0.056s] (49/60) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.055s] (50/60) eightball::systemone bearer_only_when_set
+        PASS [   0.050s] (51/60) eightball::triage dedupes_and_partitions_verdicts
+        PASS [   0.064s] (52/60) eightball::rest_ask empty_questions_is_400
+        PASS [   0.050s] (53/60) eightball::triage one_failed_judgment_fails_whole_triage
+        PASS [   0.052s] (54/60) eightball::triage cli_reads_json_items_from_stdin
+        PASS [   0.041s] (55/60) eightball::triage top_k_requires_embedder
+        PASS [   0.066s] (56/60) eightball::triage failed_embedder_judges_every_item_with_warning
+        PASS [   0.068s] (57/60) eightball::triage prefilter_judges_only_closest_items
+        PASS [   0.131s] (58/60) eightball::cli_ask noul_exit_codes
+        PASS [   0.131s] (59/60) eightball::doctor cli_exit_depends_on_default_endpoint
+        PASS [   0.640s] (60/60) eightball::systemone concurrency_one_serializes
+────────────
+     Summary [   0.677s] 60 tests run: 60 passed, 15 skipped
+```
+
+`cargo fmt --all` passed. 60 tests passed; 15 live tests intentionally ignored by this dependency-only check. No new behavior or tools installed.
