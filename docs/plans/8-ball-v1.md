@@ -825,6 +825,8 @@ git switch -c feat/v1
 ```
 
 #### Step 1: Scaffold the crate
+
+**Execution status:** Complete; evidence in `8-ball-v1-report.md`.
 1. Run `cargo init --name eightball --vcs none`. This creates `Cargo.toml` and `src/main.rs`.
 2. Edit `Cargo.toml` so it contains this, keeping the `[dependencies]` that `cargo add` writes below:
    ```toml
