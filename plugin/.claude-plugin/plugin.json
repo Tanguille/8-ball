@@ -1,0 +1,16 @@
+{
+  "name": "8-ball",
+  "version": "0.1.0",
+  "description": "Cheap typed judgments from small decision models",
+  "author": {
+    "name": "Tanguille"
+  },
+  "license": "MIT",
+  "keywords": [
+    "decision-model",
+    "triage",
+    "mcp",
+    "claude"
+  ],
+  "skills": "./skills/"
+}

@@ -2070,7 +2070,7 @@ docs
 ---
 
 ### Chunk 5: Cluster deployment
-**Status:** Not Started · **Wave:** 5 · **Estimated Context:** ~60k tokens · **Complexity:** Medium
+**Status:** In progress · **Wave:** 5 · **Estimated Context:** ~60k tokens · **Complexity:** Medium
 
 #### Goal
 8-ball runs in namespace `ai`. It is reachable inside the cluster at `http://8ball.ai.svc.cluster.local:8080` and from the LAN at `https://8ball.<domain>`, and it is registered in ToolHive.
@@ -2194,7 +2194,7 @@ git commit -m "feat(ai): add 8ball decision service"
 ---
 
 ### Chunk 6: Harness integrations
-**Status:** Not Started · **Wave:** 5 · **Estimated Context:** ~60k tokens · **Complexity:** Medium
+**Status:** In progress · **Wave:** 5 · **Estimated Context:** ~60k tokens · **Complexity:** Medium
 
 #### Goal
 Claude Code, Codex, Cursor and qwen-code install 8-ball from `plugin/`, and OpenCode v2 uses a README recipe. Every harness talks HTTP MCP to a running 8-ball server.
@@ -2206,6 +2206,8 @@ Claude Code, Codex, Cursor and qwen-code install 8-ball from `plugin/`, and Open
 Skip a harness the user says no to, and note it in the README as "untested".
 
 #### Step 1: Copy memini's templates
+
+**Execution status:** Complete; read all nine reference files, copied the six metadata/marketplace shapes, removed hooks/commands and upstream branding. MCP entries follow in step 2. All six JSON files parse.
 Read these files before writing anything:
 - `/tmp/claude-1000/-home-tanguille-Documents-PriveProjecten-cluster/200952d1-4b7d-4270-bf9d-8b91ea70d0d2/scratchpad/ref/memini/plugin/.claude-plugin/plugin.json`
 - the same directory's `.codex-plugin/plugin.json` and `.cursor-plugin/plugin.json`
