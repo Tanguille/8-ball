@@ -2289,6 +2289,8 @@ except Exception:
 Keep it under 80 lines.
 
 #### Step 4: README.md
+
+**Execution status:** Complete; all requested local/shared/commands/config/env/calibration/privacy/harness sections written. Config examples parse. Claude and Codex HTTP tool calls pass; Cursor needs user authentication; qwen-code/OpenCode v2 need installs and are explicitly untested. Current CLI help and official documentation determine commands.
 Write these sections in this order:
 1. What it is: 3 sentences.
 2. Quickstart, local:

@@ -8519,3 +8519,66 @@ eightball_decisions_total{endpoint="d3",spec="",verdict="decided"} 1
 # EOF
 
 ```
+
+
+## Chunk 6 steps 3–4: skill and README
+
+The exact supplied 35-line skill template is present. The Python example was exercised against the real greeting spec (yes) and an unreachable address (error/fail open). README includes every required section and the full config reference. Both TOML blocks parse; Markdown fences balance. Actual source uses 8ball/8ball.db for the default state path; README matches it.
+
+Codex CLI 0.166.0 initially refused MCP with its default never approval policy. The documented per-tool approval override was applied only to this pre-approved synthetic local call, in a temporary CODEX_HOME with --ephemeral and --ignore-user-config. It completed, reported unsure, and increased the counter. Source: https://learn.chatgpt.com/docs/config-file/config-reference .
+
+The first Claude plugin run suggested an id/schema bug. That claim is dismissed: the cited Caller-chosen description belongs to the input Question.id; output Decision.id is the saved SQLite id, and Decision.question carries Question.id. Existing service output and tests are consistent. README makes the distinction explicit.
+
+Cursor Agent 2026.07.23-e383d2b supports --plugin-dir. Its config/data/XDG paths and a plugin copy were isolated under /tmp/8ball-harness-cursor, with read-only copied credentials; it exited before MCP authentication with the output below. It requires an owner login, which would modify persistent credentials, so runtime verification is deferred under the contract. No persistent configs were edited.
+
+Pending user:
+- Cursor: `cursor-agent login`, then `cursor-agent --print --plugin-dir ./plugin --approve-mcps "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."`
+- qwen-code (not installed): `npm install -g @qwen-code/qwen-code@latest`, `qwen extensions install /home/tanguille/Documents/PriveProjecten/8-ball/plugin`, then `qwen -p "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."`
+- OpenCode v2 (installed v1 is 1.18.34): `npm install -g @opencode/cli@latest`, add README's v2 MCP entry and skill link, then `opencode mcp list` and `opencode run "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."`
+- Hermes and cluster Chunks 5/7 remain excluded.
+
+Official v2 docs confirm mcp.servers, oauth:false for bearer authentication and the default Code Mode. No attempt to install or replace tools was made:
+https://opencode.ai/v2/docs/
+https://opencode.ai/v2/docs/mcp-servers
+
+### codex-approved output
+
+```text
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/8ball-harness-codex"))
+Reading additional input from stdin...
+{"type":"thread.started","thread_id":"01a1a282-f62b-7690-beae-859b708cca9b"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll call the 8ball tool with the exact JSON and report its verdict."}}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"8ball","tool":"decision_ask","arguments":{"state":"disk 98% full on /var","questions":[{"id":"urgent","type":"noul","instructions":"Is this alert urgent?"}]},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"8ball","tool":"decision_ask","arguments":{"state":"disk 98% full on /var","questions":[{"id":"urgent","type":"noul","instructions":"Is this alert urgent?"}]},"result":{"content":[{"type":"text","text":"{\"results\":[{\"id\":3,\"question\":\"urgent\",\"verdict\":\"unsure\",\"confidence\":0.6011413555476997,\"probabilities\":{\"yes\":0.8005706777738498,\"no\":0.19942932222615017},\"calibrated\":false,\"cached\":false}]}"}],"structured_content":{"results":[{"id":3,"question":"urgent","verdict":"unsure","confidence":0.6011413555476997,"probabilities":{"yes":0.8005706777738498,"no":0.19942932222615017},"calibrated":false,"cached":false}]}},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Verdict: **unsure** (confidence: 60.1%)."}}
+{"type":"turn.completed","usage":{"input_tokens":37858,"cached_input_tokens":30976,"cache_write_input_tokens":0,"output_tokens":146,"reasoning_output_tokens":0}}
+
+```
+### cursor output
+
+```text
+Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.
+
+```
+### codex-before metrics
+
+```text
+# HELP eightball_decisions Decision results.
+# TYPE eightball_decisions counter
+eightball_decisions_total{endpoint="d3",spec="greeting",verdict="yes"} 2
+eightball_decisions_total{endpoint="d3",spec="",verdict="decided"} 1
+# EOF
+
+```
+### codex-after metrics
+
+```text
+# HELP eightball_decisions Decision results.
+# TYPE eightball_decisions counter
+eightball_decisions_total{endpoint="d3",spec="greeting",verdict="yes"} 2
+eightball_decisions_total{endpoint="d3",spec="",verdict="decided"} 1
+eightball_decisions_total{endpoint="d3",spec="",verdict="unsure"} 1
+# EOF
+
+```
