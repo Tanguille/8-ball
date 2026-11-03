@@ -618,3 +618,269 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; fini
 ```
 
 `cargo fmt --all` passed. Mock suite: 25 passed, 5 ignored live tests. Explicit live run: 5 passed. The fitted state contains 2000 input characters plus the three-character delimiter (2003 total), matching the specified fit rule. Deviation: the unused private `extra_body` endpoint field is deferred to Chunk 2, where the logprob backend consumes it, to keep the required clippy check clean.
+
+### Step 6: Service, REST and CLI
+
+```text
+$ cargo nextest run --test rest_ask (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0432]: unresolved imports `eightball::http::router`, `eightball::service::Service`
+ --> tests/rest_ask.rs:2:52
+  |
+2 | use eightball::{backend::Endpoint, config::Config, http::router, service::Service};
+  |                                                    ^^^^^^------  ^^^^^^^^^-------
+  |                                                          |                |
+  |                                                          |                no `Service` in `service`
+  |                                                          no `router` in `http`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `eightball` (test "rest_ask") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=rest_ask'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test cli_ask (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.35s
+────────────
+ Nextest run ID ed66094b-d904-4aed-9470-f2b345c51564 with nextest profile: default
+    Starting 3 tests across 1 binary
+        FAIL [   0.007s] (1/3) eightball::cli_ask choice_prints_billing
+  stdout ───
+
+    running 1 test
+    Hello, world!
+    test choice_prints_billing ... FAILED
+
+    failures:
+
+    failures:
+        choice_prints_billing
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'choice_prints_billing' (439) panicked at tests/cli_ask.rs:19:5:
+    server exited before logging listening address
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  Cancelling due to test failure: 2 tests still running
+        FAIL [   0.007s] (2/3) eightball::cli_ask noul_exit_codes
+  stdout ───
+
+    running 1 test
+    Hello, world!
+    test noul_exit_codes ... FAILED
+
+    failures:
+
+    failures:
+        noul_exit_codes
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'noul_exit_codes' (437) panicked at tests/cli_ask.rs:19:5:
+    server exited before logging listening address
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.007s] (3/3) eightball::cli_ask dead_server_exits_four
+  stdout ───
+
+    running 1 test
+    Hello, world!
+    test dead_server_exits_four ... FAILED
+
+    failures:
+
+    failures:
+        dead_server_exits_four
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'dead_server_exits_four' (438) panicked at tests/cli_ask.rs:19:5:
+    server exited before logging listening address
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+────────────
+     Summary [   0.008s] 3 tests run: 0 passed, 3 failed, 0 skipped
+        FAIL [   0.007s] (1/3) eightball::cli_ask choice_prints_billing
+        FAIL [   0.007s] (2/3) eightball::cli_ask noul_exit_codes
+        FAIL [   0.007s] (3/3) eightball::cli_ask dead_server_exits_four
+error: test run failed
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only -E test(live_cli_ask) (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+────────────
+ Nextest run ID 5dadec52-84c5-4387-8b08-3b07c8e616ea with nextest profile: default
+    Starting 1 test across 1 binary (5 tests skipped)
+       START [         ] (1/1) eightball::live live_cli_ask
+
+running 1 test
+Hello, world!
+
+thread 'live_cli_ask' (686) panicked at tests/live.rs:133:156:
+listening address
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test live_cli_ask ... FAILED
+
+failures:
+
+failures:
+    live_cli_ask
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.02s
+
+        FAIL [   0.019s] (1/1) eightball::live live_cli_ask
+  Cancelling due to test failure
+────────────
+     Summary [   0.019s] 1 test run: 0 passed, 1 failed, 5 skipped
+        FAIL [   0.019s] (1/1) eightball::live live_cli_ask
+error: test run failed
+```
+
+```text
+$ cargo nextest run --test rest_ask --test cli_ask (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.68s
+────────────
+ Nextest run ID 3972537f-3991-4c44-9743-f5825de5bf1d with nextest profile: default
+    Starting 7 tests across 2 binaries
+        PASS [   0.058s] (1/7) eightball::rest_ask healthz_is_ok
+        PASS [   0.064s] (2/7) eightball::rest_ask backend_failure_is_502
+        PASS [   0.069s] (3/7) eightball::rest_ask empty_questions_is_400
+        PASS [   0.076s] (4/7) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.089s] (5/7) eightball::cli_ask choice_prints_billing
+        PASS [   0.093s] (6/7) eightball::cli_ask dead_server_exits_four
+        PASS [   0.206s] (7/7) eightball::cli_ask noul_exit_codes
+────────────
+     Summary [   0.208s] 7 tests run: 7 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.06s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.37s
+────────────
+ Nextest run ID b19fcf0d-42cc-4a34-8388-8562643b66a7 with nextest profile: default
+    Starting 32 tests across 9 binaries (6 tests skipped)
+        PASS [   0.016s] ( 1/32) eightball::question validate_rejects
+        PASS [   0.021s] ( 2/32) eightball::config bad_spec_name
+        PASS [   0.021s] ( 3/32) eightball::config spec_parses
+        PASS [   0.021s] ( 4/32) eightball::question noul_without_criteria_parses
+        PASS [   0.023s] ( 5/32) eightball::config zero_concurrency
+        PASS [   0.024s] ( 6/32) eightball::config unknown_key_rejected
+        PASS [   0.028s] ( 7/32) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.030s] ( 8/32) eightball::question score_labels
+        PASS [   0.031s] ( 9/32) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.030s] (10/32) eightball::config minimal_ok
+        PASS [   0.031s] (11/32) eightball::config logprob_needs_model
+        PASS [   0.033s] (12/32) eightball::config default_must_exist
+        PASS [   0.035s] (13/32) eightball::config retention_default
+        PASS [   0.011s] (14/32) eightball::verdict noul_default_bands
+        PASS [   0.010s] (15/32) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.014s] (16/32) eightball::verdict score_confidence_readme
+        PASS [   0.015s] (17/32) eightball::verdict choice_confidence_readme
+        PASS [   0.014s] (18/32) eightball::verdict choice_default_bands
+        PASS [   0.016s] (19/32) eightball::verdict uniform_is_zero
+        PASS [   0.052s] (20/32) eightball::systemone long_state_is_fitted
+        PASS [   0.073s] (21/32) eightball::systemone http_400_is_error_with_body
+        PASS [   0.073s] (22/32) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.081s] (23/32) eightball::systemone bearer_only_when_set
+        PASS [   0.088s] (24/32) eightball::rest_ask healthz_is_ok
+        PASS [   0.069s] (25/32) eightball::systemone three_questions_one_request
+        PASS [   0.091s] (26/32) eightball::rest_ask backend_failure_is_502
+        PASS [   0.103s] (27/32) eightball::rest_ask empty_questions_is_400
+        PASS [   0.107s] (28/32) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.127s] (29/32) eightball::cli_ask dead_server_exits_four
+        PASS [   0.161s] (30/32) eightball::cli_ask choice_prints_billing
+        PASS [   0.270s] (31/32) eightball::cli_ask noul_exit_codes
+        PASS [   0.738s] (32/32) eightball::systemone concurrency_one_serializes
+────────────
+     Summary [   0.744s] 32 tests run: 32 passed, 6 skipped
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only --no-capture
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+────────────
+ Nextest run ID b2b14339-21bf-43aa-9119-5feb2d969344 with nextest profile: default
+    Starting 6 tests across 1 binary
+       START [         ] (1/6) eightball::live live_cli_ask
+
+running 1 test
+cli: {"results":[{"id":0,"question":"q","verdict":"yes","confidence":0.9928223977168203,"probabilities":{"yes":0.9964111988584102,"no":0.0035888011415897703},"calibrated":false,"cached":false}]}
+
+test live_cli_ask ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.53s
+
+        PASS [   0.547s] (1/6) eightball::live live_cli_ask
+       START [         ] (2/6) eightball::live live_systemone_choice
+
+running 1 test
+"I was charged twice for my order": [[0.9947940023511472, 0.002052840041547463, 0.0031531576073055736]]
+"My parcel never arrived": [[0.03348390306046388, 0.9576809061787368, 0.008835190760799286]]
+"The app crashes when I log in": [[0.00010016085974423134, 8.911070125869211e-5, 0.999810728438997]]
+test live_systemone_choice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.60s
+
+        PASS [   0.613s] (2/6) eightball::live live_systemone_choice
+       START [         ] (3/6) eightball::live live_systemone_long_state_fits
+
+running 1 test
+long state: [[0.8418858296564597, 0.15811417034354025]]; fitted characters 2003
+test live_systemone_long_state_fits ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.80s
+
+        PASS [   0.819s] (3/6) eightball::live live_systemone_long_state_fits
+       START [         ] (4/6) eightball::live live_systemone_noul_clear_cases
+
+running 1 test
+"hi there, how are you?": [[0.9977792984110628, 0.0022207015889371684]]
+"Good morning everyone!": [[0.9973104968558432, 0.002689503144156835]]
+"The disk on node control-2 is 98% full.": [[0.0006734414207704911, 0.9993265585792295]]
+"Invoice #4411 is attached.": [[0.0005724723698325666, 0.9994275276301674]]
+test live_systemone_noul_clear_cases ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.64s
+
+        PASS [   0.649s] (4/6) eightball::live live_systemone_noul_clear_cases
+       START [         ] (5/6) eightball::live live_systemone_score
+
+running 1 test
+urgent: [[0.0035533644092976225, 0.0024632714944271077, 0.09199483747399864, 0.9019885266222766]], score 2.892418526309254; typo: [[0.8658067956293518, 0.016835738079480713, 0.0534055786459527, 0.06395188764521488]], score 0.3155025583070308
+test live_systemone_score ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.43s
+
+        PASS [   0.442s] (5/6) eightball::live live_systemone_score
+       START [         ] (6/6) eightball::live live_systemone_three_questions_one_call
+
+running 1 test
+multi: [[0.001626082216226916, 0.998373917783773], [0.9930987578168688, 0.00038615523376224806, 0.006515086949368796], [0.05358819608051216, 0.013706931575184388, 0.47920685379576855, 0.4534980185485349]]
+test live_systemone_three_questions_one_call ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.49s
+
+        PASS [   0.499s] (6/6) eightball::live live_systemone_three_questions_one_call
+────────────
+     Summary [   3.575s] 6 tests run: 6 passed, 0 skipped
+```
+
+`cargo fmt --all` passed. 32 mock tests passed; 6 ignored live tests all passed explicitly. `assert_cmd::Command::cargo_bin` is deprecated in the resolved crate; used its documented `cargo_bin_cmd!` macro instead. Schema annotation for ordered probabilities follows the question criteria annotation, preserving the JSON shape.

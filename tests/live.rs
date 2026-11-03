@@ -115,3 +115,62 @@ async fn live_systemone_long_state_fits() {
     );
     assert_eq!(sent.chars().count(), 2003);
 }
+
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_cli_ask() {
+    use std::{
+        io::{BufRead, BufReader},
+        process::{Command, Stdio},
+    };
+    struct ChildGuard(std::process::Child);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    require(9931).await;
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_8ball"))
+            .args([
+                "serve",
+                "--config",
+                "dev/config.toml",
+                "--listen",
+                "127.0.0.1:0",
+            ])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let stderr = child.0.stderr.take().unwrap();
+    let mut url = None;
+    for line in BufReader::new(stderr).lines() {
+        let line = line.unwrap();
+        if let Some((_, addr)) = line.split_once("listening on ") {
+            url = Some(format!("http://{}", addr.trim()));
+            break;
+        }
+    }
+    let output = assert_cmd::cargo::cargo_bin_cmd!("8ball")
+        .args([
+            "ask",
+            "noul",
+            "Is this message a greeting?",
+            "--state",
+            "hi there",
+            "--exit-code",
+            "--url",
+            &url.expect("listening address"),
+        ])
+        .output()
+        .unwrap();
+    eprintln!("cli: {}", String::from_utf8_lossy(&output.stdout));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

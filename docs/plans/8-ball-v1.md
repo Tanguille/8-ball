@@ -1129,6 +1129,8 @@ If the user says no to the download, skip the live steps in every chunk and repo
 4. Run the checks, then commit with `feat(backend): system one client with fit and concurrency`.
 
 #### Step 6: Service, HTTP server and CLI
+
+**Execution status:** Complete; red/green, full checks and live CLI evidence in `8-ball-v1-report.md`.
 1. In `service.rs`, put the request and response types from "Shared data shapes" and this:
    ```rust
    pub struct Service {
