@@ -1,0 +1,155 @@
+use eightball::{backend::Endpoint, config::Config, http::router, service::Service, store::Store};
+use serde_json::{Value, json};
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
+};
+
+async fn app(
+    key: Option<&str>,
+) -> (
+    String,
+    MockServer,
+    tempfile::TempDir,
+    tokio::task::JoinHandle<()>,
+    CancellationToken,
+) {
+    let mock = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/systemone"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"answers":{"q":{"type":"noul","noul":0.97}}})),
+        )
+        .mount(&mock)
+        .await;
+    let cfg: Config = toml::from_str(&format!(
+        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'",
+        mock.uri()
+    ))
+    .unwrap();
+    let ep = Endpoint::new("d3", &cfg.endpoints["d3"], None).unwrap();
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let service = Arc::new(Service::new(
+        cfg,
+        [("d3".into(), ep)].into(),
+        Store::open(&dir.path().join("db.sqlite")).unwrap(),
+    ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let token = CancellationToken::new();
+    let app = router(service, key, &token);
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (url, mock, dir, task, token)
+}
+fn ask() -> Value {
+    json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]})
+}
+#[tokio::test]
+async fn bearer_required_for_rest_and_mcp() {
+    let (url, _mock, _dir, task, token) = app(Some("k")).await;
+    for key in [None, Some("wrong"), Some("k")] {
+        let mut request = reqwest::Client::new()
+            .post(format!("{url}/v1/ask"))
+            .json(&ask());
+        if let Some(key) = key {
+            request = request.bearer_auth(key);
+        }
+        assert_eq!(
+            request.send().await.unwrap().status(),
+            if key == Some("k") { 200 } else { 401 }
+        );
+    }
+    for path in ["/v1/triage", "/v1/label", "/v1/calibrate", "/mcp"] {
+        assert_eq!(
+            reqwest::Client::new()
+                .post(format!("{url}{path}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+    }
+    assert_eq!(
+        reqwest::get(format!("{url}/v1/doctor"))
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    token.cancel();
+    task.abort();
+}
+#[tokio::test]
+async fn health_metrics_and_oauth_probes_are_public() {
+    let (url, _mock, _dir, task, token) = app(Some("k")).await;
+    for path in ["/healthz", "/metrics"] {
+        assert_eq!(
+            reqwest::get(format!("{url}{path}")).await.unwrap().status(),
+            200
+        );
+    }
+    let response = reqwest::get(format!("{url}/.well-known/oauth-protected-resource"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    assert!(
+        response.json::<Value>().await.unwrap()["error"]
+            .as_str()
+            .unwrap()
+            .contains("OAuth")
+    );
+    let response = reqwest::Client::new()
+        .post(format!("{url}/register"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    assert!(response.json::<Value>().await.unwrap()["error"].is_string());
+    token.cancel();
+    task.abort();
+}
+#[tokio::test]
+async fn cli_passes_key_and_reports_unauthorized_status() {
+    let (url, _mock, _dir, task, token) = app(Some("k")).await;
+    for key in [None, Some("k")] {
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"));
+        command
+            .args(["ask", "noul", "Greeting?", "--state", "hi", "--url", &url])
+            .env_remove("EIGHTBALL_API_KEY");
+        if let Some(key) = key {
+            command.args(["--api-key", key]);
+        }
+        let output = command.output().await.unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(if key.is_some() { 0 } else { 4 }),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if key.is_none() {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("401"));
+        }
+    }
+    token.cancel();
+    task.abort();
+}
+#[tokio::test]
+async fn keyless_server_accepts_empty_bearer_header() {
+    let (url, _mock, _dir, task, token) = app(None).await;
+    let response = reqwest::Client::new()
+        .post(format!("{url}/v1/ask"))
+        .header("authorization", "Bearer ")
+        .json(&ask())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    token.cancel();
+    task.abort();
+}

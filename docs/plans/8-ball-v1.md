@@ -1938,6 +1938,8 @@ let mcp_service = StreamableHttpService::new(move || Ok(mcp_handler.clone()), Ar
 ```
 
 #### Step 4: Auth and OAuth probes in `http.rs`
+
+**Execution status:** Complete; 92 mock and all 22 live tests pass, including auth, CLI 401 handling and keyless empty bearer; evidence in report.
 Router shape:
 ```rust
 let protected = Router::new()

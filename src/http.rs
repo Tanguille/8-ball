@@ -4,8 +4,9 @@ use crate::service::{
 };
 use axum::{
     Json, Router,
-    extract::State,
-    http::StatusCode,
+    extract::{Request, State},
+    http::{StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -30,15 +31,23 @@ pub fn router(service: Arc<Service>, api_key: Option<&str>, ct: &CancellationTok
         Arc::new(LocalSessionManager::default()),
         cfg,
     );
-    Router::new()
+    let protected = Router::new()
         .nest_service("/mcp", mcp)
         .route("/v1/ask", post(ask))
         .route("/v1/triage", post(triage))
         .route("/v1/doctor", get(doctor))
         .route("/v1/label", post(label))
         .route("/v1/calibrate", post(calibrate))
-        .route("/metrics", get(metrics))
+        .layer(middleware::from_fn_with_state(
+            api_key.map(Arc::<str>::from),
+            require_bearer,
+        ));
+    Router::new()
+        .merge(protected)
         .route("/healthz", get(|| async { "ok" }))
+        .route("/metrics", get(metrics))
+        .route("/register", post(no_oauth))
+        .route("/.well-known/{*rest}", get(no_oauth))
         .with_state(service)
 }
 
@@ -104,10 +113,39 @@ async fn metrics(State(service): State<Arc<Service>>) -> Result<impl IntoRespons
     service.metrics().map(|body| {
         (
             [(
-                axum::http::header::CONTENT_TYPE,
+                header::CONTENT_TYPE,
                 "application/openmetrics-text; version=1.0.0; charset=utf-8",
             )],
             body,
         )
     })
+}
+
+async fn require_bearer(State(key): State<Option<Arc<str>>>, req: Request, next: Next) -> Response {
+    let Some(key) = key else {
+        return next.run(req).await;
+    };
+    let given = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let ok = given.is_some_and(|token| {
+        bool::from(subtle::ConstantTimeEq::ct_eq(
+            token.as_bytes(),
+            key.as_bytes(),
+        ))
+    });
+    if ok {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"missing or wrong bearer token"})),
+        )
+            .into_response()
+    }
+}
+async fn no_oauth() -> Response {
+    (StatusCode::NOT_FOUND,Json(json!({"error":"8ball does not use OAuth; send Authorization: Bearer <EIGHTBALL_API_KEY>"}))).into_response()
 }

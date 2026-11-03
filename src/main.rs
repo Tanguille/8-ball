@@ -47,6 +47,8 @@ struct AskArgs {
     exit_code: bool,
     #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
     url: String,
+    #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
+    api_key: Option<String>,
 }
 
 #[derive(clap::Subcommand)]
@@ -88,11 +90,15 @@ enum Command {
         endpoint: Option<String>,
         #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
         url: String,
+        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
+        api_key: Option<String>,
     },
     /// Inspect endpoint detection and health.
     Doctor {
         #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
         url: String,
+        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
+        api_key: Option<String>,
     },
     /// Label a saved spec decision.
     Label {
@@ -100,6 +106,8 @@ enum Command {
         value: String,
         #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
         url: String,
+        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
+        api_key: Option<String>,
     },
     /// Fit decision bands from labelled states.
     Calibrate {
@@ -110,6 +118,8 @@ enum Command {
         dry_run: bool,
         #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
         url: String,
+        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
+        api_key: Option<String>,
     },
     /// Validate a config file.
     Config {
@@ -168,6 +178,7 @@ async fn run() -> anyhow::Result<i32> {
             top_k,
             endpoint,
             url,
+            api_key,
         } => {
             let q = make_question(&kind, instructions, options, levels);
             let mut input = String::new();
@@ -177,31 +188,28 @@ async fn run() -> anyhow::Result<i32> {
                 &url,
                 "/v1/triage",
                 &json!({"items":items,"question":q,"keep":keep,"top_k":top_k,"endpoint":endpoint}),
+                api_key.as_deref(),
             )
             .await?;
             println!("{body}");
             Ok(0)
         }
-        Command::Doctor { url } => {
-            let report = doctor_report(&url).await?;
-            println!("{report}");
-            let default = report["endpoints"]
-                .as_array()
-                .and_then(|eps| eps.iter().find(|ep| ep["name"] == report["default"]));
-            Ok(
-                if default
-                    .is_none_or(|ep| !ep["error"].is_null() || !ep["probe"]["error"].is_null())
-                {
-                    4
-                } else {
-                    0
-                },
-            )
-        }
-        Command::Label { id, value, url } => {
+        Command::Doctor { url, api_key } => doctor(&url, api_key.as_deref()).await,
+        Command::Label {
+            id,
+            value,
+            url,
+            api_key,
+        } => {
             println!(
                 "{}",
-                post_json(&url, "/v1/label", &json!({"id":id,"value":value})).await?
+                post_json(
+                    &url,
+                    "/v1/label",
+                    &json!({"id":id,"value":value}),
+                    api_key.as_deref()
+                )
+                .await?
             );
             Ok(0)
         }
@@ -210,13 +218,15 @@ async fn run() -> anyhow::Result<i32> {
             precision,
             dry_run,
             url,
+            api_key,
         } => {
             println!(
                 "{}",
                 post_json(
                     &url,
                     "/v1/calibrate",
-                    &json!({"spec":spec,"precision":precision,"dry_run":dry_run})
+                    &json!({"spec":spec,"precision":precision,"dry_run":dry_run}),
+                    api_key.as_deref()
                 )
                 .await?
             );
@@ -248,6 +258,11 @@ async fn serve(
     let ct = CancellationToken::new();
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     let addr = listener.local_addr()?;
+    if api_key.is_none() && !addr.ip().is_loopback() {
+        tracing::warn!(
+            "no EIGHTBALL_API_KEY set and listening on {addr}: anyone on the network can use this server"
+        );
+    }
     tracing::info!("listening on {addr}");
     axum::serve(listener, router(service, api_key.as_deref(), &ct))
         .with_graceful_shutdown(async move {
@@ -285,16 +300,29 @@ fn make_question(
     }
 }
 
-async fn post_json(url: &str, path: &str, body: &Value) -> anyhow::Result<Value> {
-    let response = reqwest::Client::new()
+async fn post_json(
+    url: &str,
+    path: &str,
+    body: &Value,
+    api_key: Option<&str>,
+) -> anyhow::Result<Value> {
+    let mut request = reqwest::Client::new()
         .post(format!("{}{path}", url.trim_end_matches('/')))
-        .json(body)
-        .send()
-        .await?;
+        .json(body);
+    if let Some(key) = api_key {
+        request = request.bearer_auth(key);
+    }
+    response_json(request.send().await?).await
+}
+
+async fn response_json(response: reqwest::Response) -> anyhow::Result<Value> {
     let status = response.status();
     let body: Value = response.json().await?;
     if !status.is_success() {
-        anyhow::bail!("{}", body["error"].as_str().unwrap_or("request failed"));
+        anyhow::bail!(
+            "HTTP {status}: {}",
+            body["error"].as_str().unwrap_or("request failed")
+        );
     }
     Ok(body)
 }
@@ -309,14 +337,13 @@ fn default_db_path() -> PathBuf {
         .join("8ball/8ball.db")
 }
 
-async fn doctor_report(url: &str) -> anyhow::Result<Value> {
-    Ok(
-        reqwest::get(format!("{}/v1/doctor", url.trim_end_matches('/')))
-            .await?
-            .error_for_status()?
-            .json()
-            .await?,
-    )
+async fn doctor_report(url: &str, api_key: Option<&str>) -> anyhow::Result<Value> {
+    let mut request =
+        reqwest::Client::new().get(format!("{}/v1/doctor", url.trim_end_matches('/')));
+    if let Some(key) = api_key {
+        request = request.bearer_auth(key);
+    }
+    response_json(request.send().await?).await
 }
 
 async fn ask(
@@ -330,6 +357,7 @@ async fn ask(
         endpoint,
         exit_code,
         url,
+        api_key,
     }: AskArgs,
 ) -> anyhow::Result<i32> {
     let (questions, noul) = if spec.is_some() {
@@ -353,6 +381,7 @@ async fn ask(
         &url,
         "/v1/ask",
         &json!({"state":state,"questions":questions,"spec":spec,"endpoint":endpoint}),
+        api_key.as_deref(),
     )
     .await?;
     println!("{body}");
@@ -367,7 +396,7 @@ async fn ask(
         } else if let Some(noul) = noul {
             noul
         } else {
-            let report = doctor_report(&url).await?;
+            let report = doctor_report(&url, api_key.as_deref()).await?;
             report["specs"]
                 .as_array()
                 .and_then(|specs| {
@@ -401,4 +430,19 @@ async fn build_service(
     let n = store.prune(config.retention_days).await?;
     tracing::info!("pruned {n} old decisions");
     Ok(Arc::new(Service::new(config, endpoints, store)))
+}
+
+async fn doctor(url: &str, api_key: Option<&str>) -> anyhow::Result<i32> {
+    let report = doctor_report(url, api_key).await?;
+    println!("{report}");
+    let default = report["endpoints"]
+        .as_array()
+        .and_then(|eps| eps.iter().find(|ep| ep["name"] == report["default"]));
+    Ok(
+        if default.is_none_or(|ep| !ep["error"].is_null() || !ep["probe"]["error"].is_null()) {
+            4
+        } else {
+            0
+        },
+    )
 }
