@@ -1,0 +1,117 @@
+use eightball::{backend::Endpoint, config::Config, question::Question, verdict::expected_score};
+use serde_json::json;
+
+async fn require(port: u16) {
+    let ok = reqwest::get(format!("http://127.0.0.1:{port}/health"))
+        .await
+        .is_ok_and(|r| r.status().is_success());
+    assert!(
+        ok,
+        "model server on :{port} is not up; run dev/models.sh up"
+    );
+}
+fn dev_config() -> Config {
+    Config::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml")).unwrap()
+}
+fn d3() -> Endpoint {
+    Endpoint::new("d3", &dev_config().endpoints["d3"], None).unwrap()
+}
+fn questions() -> Vec<Question> {
+    serde_json::from_value(json!([
+        {"id":"greeting","type":"noul","instructions":"Is this message a greeting?"},
+        {"id":"team","type":"choice","instructions":"Which team should handle this?","criteria":{"billing":"","shipping":"","technical":""}},
+        {"id":"urgency","type":"score","instructions":"How urgent is this?","criteria":["can wait","this week","today","right now"]}
+    ])).unwrap()
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_systemone_noul_clear_cases() {
+    require(9931).await;
+    let ep = d3();
+    let qs = questions();
+    for (state, yes) in [
+        ("hi there, how are you?", true),
+        ("Good morning everyone!", true),
+        ("The disk on node control-2 is 98% full.", false),
+        ("Invoice #4411 is attached.", false),
+    ] {
+        let (p, _) = ep.ask(state, &qs[..1]).await.unwrap();
+        eprintln!("{state:?}: {p:?}");
+        assert!(
+            if yes { p[0][0] > 0.8 } else { p[0][0] < 0.2 },
+            "{state:?}: {p:?}"
+        );
+    }
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_systemone_choice() {
+    require(9931).await;
+    let ep = d3();
+    let qs = questions();
+    for (state, index) in [
+        ("I was charged twice for my order", 0),
+        ("My parcel never arrived", 1),
+        ("The app crashes when I log in", 2),
+    ] {
+        let (p, _) = ep.ask(state, &qs[1..2]).await.unwrap();
+        eprintln!("{state:?}: {p:?}");
+        assert!(p[0].iter().all(|v| *v <= p[0][index]), "{state:?}: {p:?}");
+    }
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_systemone_score() {
+    require(9931).await;
+    let ep = d3();
+    let qs = questions();
+    let (high, _) = ep
+        .ask(
+            "Production database is down, all customers affected",
+            &qs[2..],
+        )
+        .await
+        .unwrap();
+    let (low, _) = ep
+        .ask("Typo in the footer of an internal wiki page", &qs[2..])
+        .await
+        .unwrap();
+    eprintln!(
+        "urgent: {high:?}, score {}; typo: {low:?}, score {}",
+        expected_score(&high[0]),
+        expected_score(&low[0])
+    );
+    assert!(expected_score(&high[0]) > 2.0);
+    assert!(expected_score(&low[0]) < 1.5);
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_systemone_three_questions_one_call() {
+    require(9931).await;
+    let (p, _) = d3()
+        .ask(
+            "I was charged twice and I'm furious, fix it today",
+            &questions(),
+        )
+        .await
+        .unwrap();
+    eprintln!("multi: {p:?}");
+    assert_eq!(p.len(), 3);
+    for probs in p {
+        assert!((probs.iter().sum::<f64>() - 1.0).abs() < 1e-6);
+    }
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_systemone_long_state_fits() {
+    require(9931).await;
+    let mut state = String::from("hi there, how are you?\n");
+    state.push_str(&"log line\n".repeat(2500));
+    state.truncate(20_000);
+    let (p, sent) = d3().ask(&state, &questions()[..1]).await.unwrap();
+    eprintln!(
+        "long state: {p:?}; fitted characters {}",
+        sent.chars().count()
+    );
+    assert_eq!(sent.chars().count(), 2003);
+}

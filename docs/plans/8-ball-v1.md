@@ -1062,6 +1062,8 @@ If the user says no to the download, skip the live steps in every chunk and repo
 3. Run the checks, then commit with `feat(verdict): confidence formulas and default bands`.
 
 #### Step 5: The System One backend (tests first)
+
+**Execution status:** Complete, including five live backend tests; evidence in `8-ball-v1-report.md`.
 `backend.rs` holds the `Endpoint`. In Chunk 1 only `kind = "systemone"` is supported: if the config omits `kind` or sets another value, `Endpoint::new` returns the error `"endpoint {name}: set kind = \"systemone\" (auto-detect arrives in chunk 2)"`.
 
 1. Create `tests/systemone.rs`. Start a mock server in each test with `wiremock::MockServer::start().await`, and build an `Endpoint` from an `EndpointConfig` whose url is `server.uri()`.
