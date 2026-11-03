@@ -1620,6 +1620,8 @@ Tests in `tests/calibrate_math.rs`:
 - `calibration_id_changes_with_fingerprint`: changing the fingerprint changes the id.
 
 #### Step 3: `store.rs` (tests first)
+
+**Execution status:** Complete; store and full checks pass; evidence in report.
 ```rust
 pub struct Store { conn: std::sync::Arc<std::sync::Mutex<rusqlite::Connection>> }
 
