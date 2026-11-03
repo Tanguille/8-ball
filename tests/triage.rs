@@ -55,7 +55,12 @@ async fn app(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
-        axum::serve(listener, router(service)).await.unwrap();
+        axum::serve(
+            listener,
+            router(service, None, &tokio_util::sync::CancellationToken::new()),
+        )
+        .await
+        .unwrap();
     });
     (url, model, embedding, task, dir)
 }

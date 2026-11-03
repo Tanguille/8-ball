@@ -1,3 +1,4 @@
+use crate::mcp::Mcp;
 use crate::service::{
     AskRequest, AskResponse, DoctorReport, Service, ServiceError, TriageRequest, TriageResponse,
 };
@@ -8,11 +9,29 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+};
 use serde_json::json;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-pub fn router(service: Arc<Service>) -> Router {
+pub fn router(service: Arc<Service>, api_key: Option<&str>, ct: &CancellationToken) -> Router {
+    let mut cfg = StreamableHttpServerConfig::default()
+        .with_legacy_session_mode(false)
+        .with_sse_keep_alive(None)
+        .with_cancellation_token(ct.child_token());
+    if api_key.is_some() {
+        cfg = cfg.disable_allowed_hosts();
+    }
+    let handler = Mcp::new(service.clone());
+    let mcp = StreamableHttpService::new(
+        move || Ok(handler.clone()),
+        Arc::new(LocalSessionManager::default()),
+        cfg,
+    );
     Router::new()
+        .nest_service("/mcp", mcp)
         .route("/v1/ask", post(ask))
         .route("/v1/triage", post(triage))
         .route("/v1/doctor", get(doctor))

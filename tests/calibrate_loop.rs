@@ -72,7 +72,12 @@ async fn app() -> App {
     let url = format!("http://{}", listener.local_addr().unwrap());
     let served = service.clone();
     let task = tokio::spawn(async move {
-        axum::serve(listener, router(served)).await.unwrap();
+        axum::serve(
+            listener,
+            router(served, None, &tokio_util::sync::CancellationToken::new()),
+        )
+        .await
+        .unwrap();
     });
     App {
         service,

@@ -1914,6 +1914,8 @@ Named specs (use with `spec`, they can be calibrated):
 Both tools are always registered, so an unknown spec is just an error result.
 
 #### Step 3: Transports
+
+**Execution status:** Complete; 88 mock and all 22 live tests pass, including actual stdio, HTTP triage and fail-open; evidence in report.
 **stdio** is a new CLI command, `Mcp { #[arg(long, env = "EIGHTBALL_CONFIG")] config: Option<PathBuf>, #[arg(long, env = "EIGHTBALL_DB")] db: Option<PathBuf> }`. It builds the `Service` exactly like `serve` (move that code into one `fn build_service(config, db) -> anyhow::Result<Arc<Service>>` that both use), then:
 ```rust
 use rmcp::ServiceExt;

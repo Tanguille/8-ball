@@ -56,9 +56,16 @@ async fn cli_exit_depends_on_default_endpoint() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move {
-            axum::serve(listener, router(Arc::new(service)))
-                .await
-                .unwrap();
+            axum::serve(
+                listener,
+                router(
+                    Arc::new(service),
+                    None,
+                    &tokio_util::sync::CancellationToken::new(),
+                ),
+            )
+            .await
+            .unwrap();
         });
         let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args(["doctor", "--url", &url])

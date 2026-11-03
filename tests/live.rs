@@ -590,16 +590,20 @@ fn mcp_command(config: &std::path::Path, db: &std::path::Path) -> tokio::process
 struct LiveServer {
     child: std::process::Child,
     url: String,
+    stderr: Option<std::thread::JoinHandle<String>>,
 }
 impl Drop for LiveServer {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(stderr) = self.stderr.take() {
+            eprintln!("HTTP server stderr: {}", stderr.join().unwrap());
+        }
     }
 }
 fn live_server(config: &std::path::Path, db: &std::path::Path, key: Option<&str>) -> LiveServer {
     use std::{
-        io::{BufRead, BufReader},
+        io::{BufRead, BufReader, Read},
         process::{Command, Stdio},
     };
     let mut command = Command::new(env!("CARGO_BIN_EXE_8ball"));
@@ -617,16 +621,25 @@ fn live_server(config: &std::path::Path, db: &std::path::Path, key: Option<&str>
     let mut server = LiveServer {
         child: command.spawn().unwrap(),
         url: String::new(),
+        stderr: None,
     };
     let mut errors = String::new();
-    for line in BufReader::new(server.child.stderr.take().unwrap()).lines() {
-        let line = line.unwrap();
+    let mut reader = BufReader::new(server.child.stderr.take().unwrap());
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).unwrap() == 0 {
+            break;
+        }
         if let Some((_, addr)) = line.split_once("listening on ") {
             server.url = format!("http://{}", addr.trim());
+            server.stderr = Some(std::thread::spawn(move || {
+                let mut logs = String::new();
+                let _ = reader.read_to_string(&mut logs);
+                logs
+            }));
             return server;
         }
         errors.push_str(&line);
-        errors.push('\n');
     }
     panic!("HTTP server did not start: {errors}");
 }

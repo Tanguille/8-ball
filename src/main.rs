@@ -3,13 +3,16 @@ use eightball::{
     backend::Endpoint,
     config::{Config, default_config_path},
     http::router,
+    mcp::Mcp,
     question::{Kind, Question},
     service::Service,
     store::Store,
 };
 use indexmap::IndexMap;
+use rmcp::ServiceExt;
 use serde_json::{Value, json};
 use std::{io::Read, path::PathBuf, sync::Arc};
+use tokio_util::sync::CancellationToken;
 
 #[derive(clap::Parser)]
 #[command(
@@ -54,6 +57,15 @@ enum Command {
         config: Option<PathBuf>,
         #[arg(long, env = "EIGHTBALL_LISTEN", default_value = "127.0.0.1:8080")]
         listen: String,
+        #[arg(long, env = "EIGHTBALL_DB")]
+        db: Option<PathBuf>,
+        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
+        api_key: Option<String>,
+    },
+    /// Run MCP over stdin and stdout.
+    Mcp {
+        #[arg(long, env = "EIGHTBALL_CONFIG")]
+        config: Option<PathBuf>,
         #[arg(long, env = "EIGHTBALL_DB")]
         db: Option<PathBuf>,
     },
@@ -130,8 +142,20 @@ async fn main() {
 
 async fn run() -> anyhow::Result<i32> {
     match Cli::parse().command {
-        Command::Serve { config, listen, db } => {
-            serve(config, listen, db).await?;
+        Command::Serve {
+            config,
+            listen,
+            db,
+            api_key,
+        } => {
+            serve(config, listen, db, api_key).await?;
+            Ok(0)
+        }
+        Command::Mcp { config, db } => {
+            let server = Mcp::new(build_service(config, db).await?)
+                .serve(rmcp::transport::stdio())
+                .await?;
+            server.waiting().await?;
             Ok(0)
         }
         Command::Ask(args) => ask(args).await,
@@ -214,28 +238,22 @@ async fn shutdown() {
     tokio::select! { _=tokio::signal::ctrl_c()=>{},_=terminate.recv()=>{} }
 }
 
-async fn serve(config: Option<PathBuf>, listen: String, db: Option<PathBuf>) -> anyhow::Result<()> {
-    let config = Config::load(&config.unwrap_or_else(default_config_path))?;
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, cfg)| {
-            let key = cfg
-                .api_key_env
-                .as_ref()
-                .and_then(|name| std::env::var(name).ok());
-            Ok((name.clone(), Endpoint::new(name, cfg, key)?))
-        })
-        .collect::<Result<IndexMap<_, _>, eightball::backend::BackendError>>()?;
-    let store = Store::open(&db.unwrap_or_else(default_db_path))?;
-    let n = store.prune(config.retention_days).await?;
-    tracing::info!("pruned {n} old decisions");
-    let service = Arc::new(Service::new(config, endpoints, store));
+async fn serve(
+    config: Option<PathBuf>,
+    listen: String,
+    db: Option<PathBuf>,
+    api_key: Option<String>,
+) -> anyhow::Result<()> {
+    let service = build_service(config, db).await?;
+    let ct = CancellationToken::new();
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     let addr = listener.local_addr()?;
     tracing::info!("listening on {addr}");
-    axum::serve(listener, router(service))
-        .with_graceful_shutdown(shutdown())
+    axum::serve(listener, router(service, api_key.as_deref(), &ct))
+        .with_graceful_shutdown(async move {
+            shutdown().await;
+            ct.cancel();
+        })
         .await?;
     Ok(())
 }
@@ -361,4 +379,26 @@ async fn ask(
         };
         i32::from(noul && verdict == "no")
     })
+}
+
+async fn build_service(
+    config: Option<PathBuf>,
+    db: Option<PathBuf>,
+) -> anyhow::Result<Arc<Service>> {
+    let config = Config::load(&config.unwrap_or_else(default_config_path))?;
+    let endpoints = config
+        .endpoints
+        .iter()
+        .map(|(name, cfg)| {
+            let key = cfg
+                .api_key_env
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok());
+            Ok((name.clone(), Endpoint::new(name, cfg, key)?))
+        })
+        .collect::<Result<IndexMap<_, _>, eightball::backend::BackendError>>()?;
+    let store = Store::open(&db.unwrap_or_else(default_db_path))?;
+    let n = store.prune(config.retention_days).await?;
+    tracing::info!("pruned {n} old decisions");
+    Ok(Arc::new(Service::new(config, endpoints, store)))
 }
