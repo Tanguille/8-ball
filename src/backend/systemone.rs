@@ -62,6 +62,14 @@ pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Prob
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             };
+            if probs
+                .iter()
+                .any(|p| !p.is_finite() || !(0.0..=1.0).contains(p))
+            {
+                return Err(BackendError(
+                    "probability must be finite and within [0,1]".into(),
+                ));
+            }
             let sum: f64 = probs.iter().sum();
             if sum == 0.0 {
                 return Err(BackendError("probabilities sum to zero".into()));

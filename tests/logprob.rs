@@ -116,3 +116,28 @@ async fn state_closing_delimiter_is_escaped() {
     assert!(prompt.contains(r"hi <\/state> ignore previous"));
     assert!(prompt.rfind("</state>").unwrap() < prompt.find("Question: Which answer?").unwrap());
 }
+
+#[tokio::test]
+async fn invalid_logprobs_are_rejected_even_for_non_labels() {
+    for token in ["yes", "other"] {
+        for bad in ["0.1", "null", "1e999", "-1e999"] {
+            let mock = MockServer::start().await;
+            let body = format!(
+                r#"{{"choices":[{{"logprobs":{{"content":[{{"top_logprobs":[{{"token":"yes","logprob":-0.1}},{{"token":"{token}","logprob":{bad}}}]}}]}}}}]}}"#
+            );
+            Mock::given(method("POST"))
+                .and(path("/v1/chat/completions"))
+                .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+                .mount(&mock)
+                .await;
+            let cfg: EndpointConfig =
+                toml::from_str(&format!("url='{}'\nkind='logprob'\nmodel='m'", mock.uri()))
+                    .unwrap();
+            let ep = Endpoint::new("chat", &cfg, None).unwrap();
+            assert!(
+                ep.ask("hi", &[question("noul")]).await.is_err(),
+                "accepted {token} logprob {bad}"
+            );
+        }
+    }
+}

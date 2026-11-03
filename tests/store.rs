@@ -48,7 +48,7 @@ async fn insert_and_cache_lookup() {
     let store = Store::open(&dir.path().join("db.sqlite")).unwrap();
     let id = store.insert(decision("first")).await.unwrap();
     let (cached_id, answer) = store
-        .cached("model-question", "first")
+        .cached("model-question", "first", Some("greeting"))
         .await
         .unwrap()
         .unwrap();
@@ -56,14 +56,14 @@ async fn insert_and_cache_lookup() {
     assert!((answer[0] - 0.9).abs() < 1e-9);
     assert!(
         store
-            .cached("model-question", "other")
+            .cached("model-question", "other", Some("greeting"))
             .await
             .unwrap()
             .is_none()
     );
     assert!(
         store
-            .cached("other-model", "first")
+            .cached("other-model", "first", Some("greeting"))
             .await
             .unwrap()
             .is_none()
@@ -111,14 +111,14 @@ async fn pruning_preserves_labelled_rows() {
     assert_eq!(store.prune(0).await.unwrap(), 1);
     assert!(
         store
-            .cached("model-question", "first")
+            .cached("model-question", "first", Some("greeting"))
             .await
             .unwrap()
             .is_none()
     );
     assert!(
         store
-            .cached("model-question", "second")
+            .cached("model-question", "second", Some("greeting"))
             .await
             .unwrap()
             .is_some()
@@ -181,11 +181,73 @@ async fn batch_insert_returns_each_row_id() {
     assert_ne!(ids[0], ids[1]);
     assert_eq!(
         store
-            .cached("model-question", "two")
+            .cached("model-question", "two", Some("greeting"))
             .await
             .unwrap()
             .unwrap()
             .0,
         ids[1]
     );
+}
+
+#[tokio::test]
+async fn pruned_ids_never_label_replacement_rows() {
+    let dir = temp();
+    let path = dir.path().join("db.sqlite");
+    let store = Store::open(&path).unwrap();
+    let old = store.insert(decision("old")).await.unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE decisions SET ts=datetime('now','-1 day')", [])
+        .unwrap();
+    assert_eq!(store.prune(0).await.unwrap(), 1);
+    drop(store);
+    let reopened = Store::open(&path).unwrap();
+    let new = reopened.insert(decision("replacement")).await.unwrap();
+    assert!(new > old, "pruned id {old} was reused as {new}");
+    assert!(reopened.set_label(old, "yes").await.unwrap().is_none());
+    assert!(
+        reopened
+            .labelled("greeting", "question")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn existing_database_migrates_without_losing_labels_or_ids() {
+    let dir = temp();
+    let path = dir.path().join("db.sqlite");
+    let store = Store::open(&path).unwrap();
+    let id = store.insert(decision("saved")).await.unwrap();
+    store.set_label(id, "yes").await.unwrap();
+    drop(store);
+    // Recreate the previous v1 schema, retaining the existing saved row.
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE decisions RENAME TO previous;
+        CREATE TABLE decisions (
+            id INTEGER PRIMARY KEY, ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            spec TEXT, question_hash TEXT NOT NULL, calibration_id TEXT NOT NULL,
+            state_hash TEXT NOT NULL, state TEXT NOT NULL, answer TEXT NOT NULL,
+            verdict TEXT NOT NULL, endpoint TEXT NOT NULL, label TEXT);
+        INSERT INTO decisions SELECT * FROM previous;
+        DROP TABLE previous;",
+    )
+    .unwrap();
+    drop(conn);
+    let store = Store::open(&path).unwrap();
+    let rows = store.labelled("greeting", "question").await.unwrap();
+    assert_eq!(rows[0].id, id);
+    assert_eq!(rows[0].label, "yes");
+    let old = store.insert(decision("old")).await.unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE decisions SET ts=datetime('now','-1 day')", [])
+        .unwrap();
+    store.prune(0).await.unwrap();
+    let new = store.insert(decision("new")).await.unwrap();
+    assert!(new > old);
+    assert!(store.set_label(old, "no").await.unwrap().is_none());
 }

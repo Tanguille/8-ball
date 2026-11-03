@@ -42,7 +42,7 @@ Step 1: scaffold completed. Dependencies were added using every command listed i
 
 ## Final outcome
 
-Not achieved. The owner-resolved logprob blocker is closed. Execution advanced through Chunks 2 and 3 and Chunk 4 auth, then stopped on a reproduced cache/label contradiction in the plan. See the latest contract stop below.
+Not achieved yet. Both owner-resolved contract stops are closed. Chunks 1–3 and Chunk 4 auth/tests are complete; Docker and Chunk 6 remain in progress.
 
 ### Step 1 checks
 
@@ -7149,3 +7149,728 @@ feat/v1
 $ git status --short
 (no output)
 ```
+
+
+## Owner-resolved cache, id retention and probability fixes
+
+Owner approved spec-scoped cache lookup, AUTOINCREMENT ids and backend probability validation. The six regression checks below were written and failed before production changes. They cover both original diagnostics and fail-open transport behavior. Cache hits now require `spec IS ?`, including NULL for ad-hoc requests, and retain the matched row id. Calibration uses the same scope. Cross-scope requests make fresh model calls.
+
+An existing pre-AUTOINCREMENT database is rebuilt in one transaction with ids, rows and labels preserved, then indexes recreated. A previously pruned historical id in such a legacy database cannot be reconstructed; monotonic allocation is guaranteed from migration onwards.
+
+### red command output
+
+```text
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.54s
+────────────
+ Nextest run ID f64065bb-5c0f-433a-9c28-4ee230f93782 with nextest profile: default
+    Starting 6 tests across 5 binaries (24 tests skipped)
+        FAIL [   0.006s] (1/6) eightball::store pruned_ids_never_label_replacement_rows
+  stdout ───
+
+    running 1 test
+    test pruned_ids_never_label_replacement_rows ... FAILED
+
+    failures:
+
+    failures:
+        pruned_ids_never_label_replacement_rows
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'pruned_ids_never_label_replacement_rows' (1363) panicked at tests/store.rs:205:5:
+    pruned id 1 was reused as 1
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  Cancelling due to test failure: 5 tests still running
+        FAIL [   0.008s] (2/6) eightball::store existing_database_migrates_without_losing_labels_or_ids
+  stdout ───
+
+    running 1 test
+    test existing_database_migrates_without_losing_labels_or_ids ... FAILED
+
+    failures:
+
+    failures:
+        existing_database_migrates_without_losing_labels_or_ids
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'existing_database_migrates_without_losing_labels_or_ids' (1364) panicked at tests/store.rs:238:5:
+    assertion failed: new > old
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.015s] (3/6) eightball::systemone invalid_backend_probabilities_are_rejected
+  stdout ───
+
+    running 1 test
+    test invalid_backend_probabilities_are_rejected ... FAILED
+
+    failures:
+
+    failures:
+        invalid_backend_probabilities_are_rejected
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.01s
+
+  stderr ───
+
+    thread 'invalid_backend_probabilities_are_rejected' (1366) panicked at tests/systemone.rs:198:9:
+    accepted {"noul":2.0}
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.017s] (4/6) eightball::cache cache_ids_and_labels_stay_in_the_requested_scope
+  stdout ───
+
+    running 1 test
+    test cache_ids_and_labels_stay_in_the_requested_scope ... FAILED
+
+    failures:
+
+    failures:
+        cache_ids_and_labels_stay_in_the_requested_scope
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.01s
+
+  stderr ───
+
+    thread 'cache_ids_and_labels_stay_in_the_requested_scope' (1365) panicked at tests/cache.rs:178:5:
+    assertion failed: !named.cached
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.019s] (5/6) eightball::logprob invalid_logprobs_are_rejected_even_for_non_labels
+  stdout ───
+
+    running 1 test
+    test invalid_logprobs_are_rejected_even_for_non_labels ... FAILED
+
+    failures:
+
+    failures:
+        invalid_logprobs_are_rejected_even_for_non_labels
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.01s
+
+  stderr ───
+
+    thread 'invalid_logprobs_are_rejected_even_for_non_labels' (1368) panicked at tests/logprob.rs:131:13:
+    accepted yes logprob 0.1
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.061s] (6/6) eightball::mcp_stdio handler_registers_tools_instructions_and_fail_open_results
+  stdout ───
+
+    running 1 test
+    test handler_registers_tools_instructions_and_fail_open_results ... FAILED
+
+    failures:
+
+    failures:
+        handler_registers_tools_instructions_and_fail_open_results
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.06s
+
+  stderr ───
+
+    thread 'handler_registers_tools_instructions_and_fail_open_results' (1367) panicked at tests/mcp_stdio.rs:71:13:
+    assertion `left == right` failed
+      left: Some(false)
+     right: Some(true)
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+────────────
+     Summary [   0.061s] 6 tests run: 0 passed, 6 failed, 24 skipped
+        FAIL [   0.006s] (1/6) eightball::store pruned_ids_never_label_replacement_rows
+        FAIL [   0.008s] (2/6) eightball::store existing_database_migrates_without_losing_labels_or_ids
+        FAIL [   0.015s] (3/6) eightball::systemone invalid_backend_probabilities_are_rejected
+        FAIL [   0.017s] (4/6) eightball::cache cache_ids_and_labels_stay_in_the_requested_scope
+        FAIL [   0.019s] (5/6) eightball::logprob invalid_logprobs_are_rejected_even_for_non_labels
+        FAIL [   0.061s] (6/6) eightball::mcp_stdio handler_registers_tools_instructions_and_fail_open_results
+error: test run failed
+
+```
+
+### green command output
+
+```text
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.27s
+────────────
+ Nextest run ID 085836d6-97da-44a2-a8ae-54c2f5482f25 with nextest profile: default
+    Starting 30 tests across 5 binaries
+        PASS [   0.030s] ( 1/30) eightball::store insert_and_cache_lookup
+        PASS [   0.032s] ( 2/30) eightball::store pruning_preserves_labelled_rows
+        PASS [   0.036s] ( 3/30) eightball::store batch_insert_returns_each_row_id
+        PASS [   0.038s] ( 4/30) eightball::store file_is_private_and_migrations_are_idempotent
+        PASS [   0.027s] ( 5/30) eightball::store labels_can_be_replaced_and_are_scoped
+        PASS [   0.055s] ( 6/30) eightball::store pruned_ids_never_label_replacement_rows
+        PASS [   0.030s] ( 7/30) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.066s] ( 8/30) eightball::logprob case_and_space_variants_add_mass
+        PASS [   0.052s] ( 9/30) eightball::logprob twenty_seven_options_rejected
+        PASS [   0.054s] (10/30) eightball::store calibration_upsert_keeps_latest_bands
+        PASS [   0.070s] (11/30) eightball::store existing_database_migrates_without_losing_labels_or_ids
+        PASS [   0.075s] (12/30) eightball::cache spec_uses_bands_but_ad_hoc_uses_defaults
+        PASS [   0.076s] (13/30) eightball::logprob extra_body_is_merged
+        PASS [   0.075s] (14/30) eightball::cache rejects_unknown_spec_and_mixed_question_sources
+        PASS [   0.074s] (15/30) eightball::logprob lowercase_choice_does_not_match_and_low_mass_errors
+        PASS [   0.076s] (16/30) eightball::cache cache_ids_and_labels_stay_in_the_requested_scope
+        PASS [   0.078s] (17/30) eightball::systemone bearer_only_when_set
+        PASS [   0.049s] (18/30) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.040s] (19/30) eightball::systemone long_state_is_fitted
+        PASS [   0.084s] (20/30) eightball::logprob letters_map_in_option_order
+        PASS [   0.087s] (21/30) eightball::logprob state_closing_delimiter_is_escaped
+        PASS [   0.094s] (22/30) eightball::cache cache_hashes_exactly_the_fitted_state
+        PASS [   0.040s] (23/30) eightball::systemone three_questions_one_request
+        PASS [   0.076s] (24/30) eightball::systemone http_400_is_error_with_body
+        PASS [   0.109s] (25/30) eightball::cache repeated_ask_reuses_answer_and_row_id
+        PASS [   0.137s] (26/30) eightball::mcp_stdio handler_registers_tools_instructions_and_fail_open_results
+        PASS [   0.106s] (27/30) eightball::systemone invalid_backend_probabilities_are_rejected
+        PASS [   0.153s] (28/30) eightball::mcp_stdio binary_stdio_lists_tools_and_preserves_fail_open_errors
+        PASS [   0.245s] (29/30) eightball::logprob invalid_logprobs_are_rejected_even_for_non_labels
+        PASS [   0.688s] (30/30) eightball::systemone concurrency_one_serializes
+────────────
+     Summary [   0.691s] 30 tests run: 30 passed, 0 skipped
+
+```
+
+### clippy command output
+
+```text
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.56s
+
+```
+
+### mock command output
+
+```text
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.75s
+────────────
+ Nextest run ID cd8456e5-7143-48f1-98f7-1326faa8ff25 with nextest profile: default
+    Starting 97 tests across 23 binaries (22 tests skipped)
+        PASS [   0.016s] ( 1/97) eightball::config bad_spec_name
+        PASS [   0.017s] ( 2/97) eightball::calibrate_math bad_target
+        PASS [   0.019s] ( 3/97) eightball::calibrate_math overlap_gives_unsure
+        PASS [   0.020s] ( 4/97) eightball::calibrate_math calibration_id_changes_with_fingerprint
+        PASS [   0.020s] ( 5/97) eightball::calibrate_math choice_threshold
+        PASS [   0.022s] ( 6/97) eightball::calibrate_math too_few_examples
+        PASS [   0.014s] ( 7/97) eightball::config minimal_ok
+        PASS [   0.036s] ( 8/97) eightball::calibrate_math separable_noul
+        PASS [   0.021s] ( 9/97) eightball::config default_must_exist
+        PASS [   0.018s] (10/97) eightball::config spec_parses
+        PASS [   0.022s] (11/97) eightball::config retention_default
+        PASS [   0.048s] (12/97) eightball::calibrate_math question_hash_changes
+        PASS [   0.043s] (13/97) eightball::config unknown_key_rejected
+        PASS [   0.032s] (14/97) eightball::config zero_concurrency
+        PASS [   0.067s] (15/97) eightball::cache rejects_unknown_spec_and_mixed_question_sources
+        PASS [   0.063s] (16/97) eightball::config logprob_needs_model
+        PASS [   0.091s] (17/97) eightball::cache spec_uses_bands_but_ad_hoc_uses_defaults
+        PASS [   0.058s] (18/97) eightball::detect detection_gets_send_bearer
+        PASS [   0.098s] (19/97) eightball::cache cache_ids_and_labels_stay_in_the_requested_scope
+        PASS [   0.015s] (20/97) eightball::embed cosine_similarity
+        PASS [   0.062s] (21/97) eightball::detect explicit_kind_skips_models
+        PASS [   0.102s] (22/97) eightball::cache cache_hashes_exactly_the_fitted_state
+        PASS [   0.067s] (23/97) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.072s] (24/97) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.123s] (25/97) eightball::calibrate_loop conflicting_labels_are_excluded
+        PASS [   0.131s] (26/97) eightball::cache repeated_ask_reuses_answer_and_row_id
+        PASS [   0.099s] (27/97) eightball::detect failed_detection_is_not_cached
+        PASS [   0.065s] (28/97) eightball::embed ten_texts_use_two_ordered_batches
+        PASS [   0.067s] (29/97) eightball::logprob extra_body_is_merged
+        PASS [   0.071s] (30/97) eightball::logprob case_and_space_variants_add_mass
+        PASS [   0.050s] (31/97) eightball::logprob lowercase_choice_does_not_match_and_low_mass_errors
+        PASS [   0.180s] (32/97) eightball::auth keyless_server_accepts_empty_bearer_header
+        PASS [   0.097s] (33/97) eightball::embed shuffled_indices_restore_order
+        PASS [   0.132s] (34/97) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.078s] (35/97) eightball::logprob letters_map_in_option_order
+        PASS [   0.077s] (36/97) eightball::logprob state_closing_delimiter_is_escaped
+        PASS [   0.068s] (37/97) eightball::logprob twenty_seven_options_rejected
+        PASS [   0.115s] (38/97) eightball::embed mixed_dimensions_rejected
+        PASS [   0.023s] (39/97) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.233s] (40/97) eightball::cli_ask dead_server_exits_four
+        PASS [   0.023s] (41/97) eightball::question score_labels
+        PASS [   0.025s] (42/97) eightball::question noul_without_criteria_parses
+        PASS [   0.237s] (43/97) eightball::cli_ask choice_prints_billing
+        PASS [   0.243s] (44/97) eightball::auth cli_passes_key_and_reports_unauthorized_status
+        PASS [   0.182s] (45/97) eightball::doctor reports_healthy_probe_and_dead_error
+        PASS [   0.044s] (46/97) eightball::question validate_rejects
+        PASS [   0.042s] (47/97) eightball::rerank choice_is_rejected
+        PASS [   0.281s] (48/97) eightball::auth health_metrics_and_oauth_probes_are_public
+        PASS [   0.100s] (49/97) eightball::metrics backend_errors_are_counted
+        PASS [   0.031s] (50/97) eightball::store existing_database_migrates_without_losing_labels_or_ids
+        PASS [   0.039s] (51/97) eightball::store calibration_upsert_keeps_latest_bands
+        PASS [   0.028s] (52/97) eightball::store file_is_private_and_migrations_are_idempotent
+        PASS [   0.316s] (53/97) eightball::calibrate_loop label_validation_rejects_unknown_adhoc_old_and_invalid_values
+        PASS [   0.066s] (54/97) eightball::store batch_insert_returns_each_row_id
+        PASS [   0.086s] (55/97) eightball::rest_ask healthz_is_ok
+        PASS [   0.106s] (56/97) eightball::rerank score_is_mapped_from_logit
+        PASS [   0.055s] (57/97) eightball::store insert_and_cache_lookup
+        PASS [   0.043s] (58/97) eightball::store pruning_preserves_labelled_rows
+        PASS [   0.030s] (59/97) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.169s] (60/97) eightball::metrics spec_verdict_and_cache_hits_are_counted
+        PASS [   0.083s] (61/97) eightball::store pruned_ids_never_label_replacement_rows
+        PASS [   0.170s] (62/97) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.121s] (63/97) eightball::store labels_can_be_replaced_and_are_scoped
+        PASS [   0.186s] (64/97) eightball::rest_ask empty_questions_is_400
+        PASS [   0.333s] (65/97) eightball::embed missing_or_duplicate_indices_are_errors
+        PASS [   0.056s] (66/97) eightball::systemone three_questions_one_request
+        PASS [   0.274s] (67/97) eightball::mcp_http bearer_allows_non_loopback_host_header
+        PASS [   0.112s] (68/97) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.304s] (69/97) eightball::mcp_stdio binary_stdio_lists_tools_and_preserves_fail_open_errors
+        PASS [   0.299s] (70/97) eightball::mcp_stdio handler_registers_tools_instructions_and_fail_open_results
+        PASS [   0.119s] (71/97) eightball::systemone long_state_is_fitted
+        PASS [   0.142s] (72/97) eightball::systemone http_400_is_error_with_body
+        PASS [   0.017s] (73/97) eightball::verdict choice_confidence_readme
+        PASS [   0.251s] (74/97) eightball::rest_ask backend_failure_is_502
+        PASS [   0.388s] (75/97) eightball::logprob invalid_logprobs_are_rejected_even_for_non_labels
+        PASS [   0.014s] (76/97) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.023s] (77/97) eightball::verdict choice_default_bands
+        PASS [   0.434s] (78/97) eightball::doctor cli_exit_depends_on_default_endpoint
+        PASS [   0.024s] (79/97) eightball::verdict score_confidence_readme
+        PASS [   0.326s] (80/97) eightball::metrics ad_hoc_decision_has_bounded_labels_and_openmetrics_type
+        PASS [   0.024s] (81/97) eightball::verdict uniform_is_zero
+        PASS [   0.028s] (82/97) eightball::verdict noul_default_bands
+        PASS [   0.190s] (83/97) eightball::systemone bearer_only_when_set
+        PASS [   0.088s] (84/97) eightball::triage sixty_five_items_rejected
+        PASS [   0.106s] (85/97) eightball::triage dedupes_and_partitions_verdicts
+        PASS [   0.100s] (86/97) eightball::triage top_k_requires_embedder
+        PASS [   0.557s] (87/97) eightball::auth bearer_required_for_rest_and_mcp
+        PASS [   0.564s] (88/97) eightball::cli_ask noul_exit_codes
+        PASS [   0.158s] (89/97) eightball::triage one_failed_judgment_fails_whole_triage
+        PASS [   0.206s] (90/97) eightball::triage cli_reads_json_items_from_stdin
+        PASS [   0.169s] (91/97) eightball::triage prefilter_judges_only_closest_items
+        PASS [   0.184s] (92/97) eightball::triage failed_embedder_judges_every_item_with_warning
+        PASS [   0.608s] (93/97) eightball::calibrate_loop cli_supports_spec_labels_calibration_and_exit_codes
+        PASS [   0.452s] (94/97) eightball::mcp_http authenticated_http_client_survives_server_restart
+        PASS [   0.325s] (95/97) eightball::systemone invalid_backend_probabilities_are_rejected
+        PASS [   0.690s] (96/97) eightball::systemone concurrency_one_serializes
+        PASS [   2.286s] (97/97) eightball::calibrate_loop full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits
+────────────
+     Summary [   2.288s] 97 tests run: 97 passed, 22 skipped
+
+```
+
+### live command output
+
+```text
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.44s
+────────────
+ Nextest run ID 9c009d20-3d41-4e82-a8c1-3f37fe3d85cf with nextest profile: default
+    Starting 22 tests across 1 binary
+       START [         ] ( 1/22) eightball::live live_cache_skips_model
+
+running 1 test
+live cache: AskResponse { results: [Decision { id: 1, question: "greeting", verdict: "yes", confidence: 0.9955179588177827, probabilities: {"yes": 0.9977589794088914, "no": 0.0022410205911086445}, score: None, calibrated: false, cached: true }] }, elapsed 954.452µs
+test live_cache_skips_model ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.52s
+
+        PASS [   0.533s] ( 1/22) eightball::live live_cache_skips_model
+       START [         ] ( 2/22) eightball::live live_calibrate_holdout
+
+running 1 test
+greeting fit "The server backup completed at midnight.": label=no, probabilities={"yes": 0.002861169275636781, "no": 0.9971388307243633}
+greeting fit "Good morning, everyone!": label=yes, probabilities={"yes": 0.9974191915792304, "no": 0.002580808420769576}
+greeting fit "Hey there, how are you doing?": label=yes, probabilities={"yes": 0.9975064124993848, "no": 0.0024935875006152353}
+greeting fit "The disk is 98 percent full.": label=no, probabilities={"yes": 0.0014273061980771102, "no": 0.9985726938019229}
+greeting fit "See you tomorrow.": label=no, probabilities={"yes": 0.04678829209062096, "no": 0.953211707909379}
+greeting fit "Hi team!": label=yes, probabilities={"yes": 0.9940289433239308, "no": 0.005971056676069231}
+greeting fit "Morning team 👋": label=yes, probabilities={"yes": 0.99523469305691, "no": 0.004765306943089964}
+greeting fit "Invoice number 4411 is attached.": label=no, probabilities={"yes": 0.00047780808544861696, "no": 0.9995221919145514}
+greeting fit "Please review the changes before Friday.": label=no, probabilities={"yes": 0.0034488855748704265, "no": 0.9965511144251296}
+greeting fit "Hiya, long time no see!": label=yes, probabilities={"yes": 0.993168808837008, "no": 0.006831191162992023}
+greeting fit "Hello Alice, nice to meet you.": label=yes, probabilities={"yes": 0.9966421995526756, "no": 0.003357800447324366}
+greeting fit "Goodbye, and take care on your journey.": label=no, probabilities={"yes": 0.056592059489226215, "no": 0.9434079405107738}
+greeting fit "Can you resend the meeting invitation?": label=no, probabilities={"yes": 0.0017489858594042869, "no": 0.9982510141405957}
+greeting fit "Hey folks, hope you're well!": label=yes, probabilities={"yes": 0.9955304934938296, "no": 0.004469506506170395}
+greeting fit "Howdy!": label=yes, probabilities={"yes": 0.9951842385320172, "no": 0.004815761467982793}
+greeting fit "The soup needs two teaspoons of salt.": label=no, probabilities={"yes": 0.0004303022769323243, "no": 0.9995696977230677}
+greeting fit "The TLS certificate expires in thirty days.": label=no, probabilities={"yes": 0.000674837520811739, "no": 0.9993251624791882}
+greeting fit "Hello there!": label=yes, probabilities={"yes": 0.9974943448528236, "no": 0.0025056551471763777}
+greeting fit "Good morning, Sam. How was your weekend?": label=yes, probabilities={"yes": 0.9976039052277158, "no": 0.0023960947722841963}
+greeting fit "Farewell, everyone.": label=no, probabilities={"yes": 0.2215106614748801, "no": 0.7784893385251199}
+greeting fit "SELECT name FROM users WHERE active = 1;": label=no, probabilities={"yes": 0.0007898735223344167, "no": 0.9992101264776656}
+greeting fit "Greetings from Brussels!": label=yes, probabilities={"yes": 0.9887315679689266, "no": 0.011268432031073417}
+greeting fit "Hi everyone, happy Monday!": label=yes, probabilities={"yes": 0.9972993336737098, "no": 0.0027006663262901798}
+greeting fit "Could you check the CPU temperature?": label=no, probabilities={"yes": 0.004208216209489796, "no": 0.9957917837905103}
+greeting fit "Thank you very much for your assistance.": label=no, probabilities={"yes": 0.0065114685176171335, "no": 0.9934885314823829}
+greeting fit "Good evening, Maria!": label=yes, probabilities={"yes": 0.9970898494382958, "no": 0.0029101505617041834}
+greeting fit "Hey Alex, what's up?": label=yes, probabilities={"yes": 0.9971397801322548, "no": 0.002860219867745206}
+greeting fit "The database connection timed out.": label=no, probabilities={"yes": 0.0006270201242015817, "no": 0.9993729798757984}
+greeting fit "Remember to bring your access badge.": label=no, probabilities={"yes": 0.001868069141280645, "no": 0.9981319308587193}
+greeting fit "Hello friends!": label=yes, probabilities={"yes": 0.9969231444605172, "no": 0.0030768555394827812}
+greeting fit "Good afternoon, Dr Smith.": label=yes, probabilities={"yes": 0.996675161778149, "no": 0.003324838221851034}
+greeting fit "Bye for now!": label=no, probabilities={"yes": 0.06412366967586407, "no": 0.935876330324136}
+greeting fit "The report contains twelve pages.": label=no, probabilities={"yes": 0.000564256149681735, "no": 0.9994357438503183}
+greeting fit "Hey team, good to see you all.": label=yes, probabilities={"yes": 0.9903797410315428, "no": 0.009620258968457196}
+greeting fit "Hello and welcome!": label=yes, probabilities={"yes": 0.9960318804422796, "no": 0.003968119557720362}
+greeting fit "How much does the annual subscription cost?": label=no, probabilities={"yes": 0.0017135848896364212, "no": 0.9982864151103635}
+greeting fit "The network cable is unplugged.": label=no, probabilities={"yes": 0.0008221246430676189, "no": 0.9991778753569324}
+greeting fit "Hi Jordan!": label=yes, probabilities={"yes": 0.9964330534650788, "no": 0.003566946534921178}
+greeting fit "Good day, ladies and gentlemen.": label=yes, probabilities={"yes": 0.9944683855515972, "no": 0.005531614448402777}
+greeting fit "The weather forecast predicts rain tomorrow.": label=no, probabilities={"yes": 0.003426570659788889, "no": 0.9965734293402111}
+greeting calibration: bands=Noul { yes_at: 0.9887315679689266, no_at: 0.2215106614748801 }, report=Report { examples: 40, decided: 40, correct: 40, precision: 1.0, coverage: 1.0, target: 0.95, in_sample: true, warnings: [] }, stored=true
+greeting: fitted precision target achieved
+greeting holdout "Hello!": label=yes, result=Decision { id: 41, question: "greeting", verdict: "yes", confidence: 0.9941771939697173, probabilities: {"yes": 0.9970885969848586, "no": 0.0029114030151413672}, score: None, calibrated: true, cached: false }
+greeting holdout "What time does the next train leave?": label=no, result=Decision { id: 42, question: "greeting", verdict: "no", confidence: 0.955041908018609, probabilities: {"yes": 0.02247904599069552, "no": 0.9775209540093045}, score: None, calibrated: true, cached: false }
+greeting holdout "Good evening all.": label=yes, result=Decision { id: 43, question: "greeting", verdict: "yes", confidence: 0.9930247047910881, probabilities: {"yes": 0.996512352395544, "no": 0.003487647604455968}, score: None, calibrated: true, cached: false }
+greeting holdout "Thanks for fixing the broken link.": label=no, result=Decision { id: 44, question: "greeting", verdict: "no", confidence: 0.9948130111591837, probabilities: {"yes": 0.0025934944204080877, "no": 0.9974065055795919}, score: None, calibrated: true, cached: false }
+greeting holdout "Greetings, colleagues.": label=yes, result=Decision { id: 45, question: "greeting", verdict: "yes", confidence: 0.9938200137870592, probabilities: {"yes": 0.9969100068935296, "no": 0.003089993106470401}, score: None, calibrated: true, cached: false }
+greeting holdout "The application crashed while saving a file.": label=no, result=Decision { id: 46, question: "greeting", verdict: "no", confidence: 0.9992060216005647, probabilities: {"yes": 0.0003969891997176929, "no": 0.9996030108002824}, score: None, calibrated: true, cached: false }
+greeting holdout "Good afternoon, folks!": label=yes, result=Decision { id: 47, question: "greeting", verdict: "yes", confidence: 0.9955405480692283, probabilities: {"yes": 0.9977702740346142, "no": 0.0022297259653858426}, score: None, calibrated: true, cached: false }
+greeting holdout "The deployment succeeded without errors.": label=no, result=Decision { id: 48, question: "greeting", verdict: "no", confidence: 0.9934897374786495, probabilities: {"yes": 0.00325513126067518, "no": 0.9967448687393248}, score: None, calibrated: true, cached: false }
+greeting holdout "Hi, welcome to our meeting.": label=yes, result=Decision { id: 49, question: "greeting", verdict: "unsure", confidence: 0.9654112220377056, probabilities: {"yes": 0.9827056110188528, "no": 0.017294388981147213}, score: None, calibrated: true, cached: false }
+greeting holdout "I will be away from the office next week.": label=no, result=Decision { id: 50, question: "greeting", verdict: "no", confidence: 0.9959192269592776, probabilities: {"yes": 0.0020403865203611608, "no": 0.9979596134796388}, score: None, calibrated: true, cached: false }
+greeting holdout "Hey! Nice to see you again.": label=yes, result=Decision { id: 51, question: "greeting", verdict: "unsure", confidence: 0.9771015236989216, probabilities: {"yes": 0.9885507618494608, "no": 0.01144923815053922}, score: None, calibrated: true, cached: false }
+greeting holdout "The parcel has arrived at the depot.": label=no, result=Decision { id: 52, question: "greeting", verdict: "no", confidence: 0.996208044442978, probabilities: {"yes": 0.0018959777785109743, "no": 0.998104022221489}, score: None, calibrated: true, cached: false }
+greeting holdout "Hello, how may I help you today?": label=yes, result=Decision { id: 53, question: "greeting", verdict: "unsure", confidence: 0.9692327919782533, probabilities: {"yes": 0.9846163959891266, "no": 0.015383604010873353}, score: None, calibrated: true, cached: false }
+greeting holdout "The football match ended in a draw.": label=no, result=Decision { id: 54, question: "greeting", verdict: "no", confidence: 0.9981650697364428, probabilities: {"yes": 0.0009174651317785536, "no": 0.9990825348682214}, score: None, calibrated: true, cached: false }
+greeting holdout "Hiya! How have you been?": label=yes, result=Decision { id: 55, question: "greeting", verdict: "yes", confidence: 0.9951173901238333, probabilities: {"yes": 0.9975586950619166, "no": 0.0024413049380833662}, score: None, calibrated: true, cached: false }
+greeting holdout "The library closes at six o'clock.": label=no, result=Decision { id: 56, question: "greeting", verdict: "no", confidence: 0.9972373141000481, probabilities: {"yes": 0.0013813429499758983, "no": 0.9986186570500241}, score: None, calibrated: true, cached: false }
+greeting holdout "Hi, it's lovely to see you.": label=yes, result=Decision { id: 57, question: "greeting", verdict: "yes", confidence: 0.9823715841677425, probabilities: {"yes": 0.9911857920838713, "no": 0.008814207916128747}, score: None, calibrated: true, cached: false }
+greeting holdout "A new release is available for download.": label=no, result=Decision { id: 58, question: "greeting", verdict: "no", confidence: 0.9940700249101928, probabilities: {"yes": 0.0029649875449036167, "no": 0.9970350124550964}, score: None, calibrated: true, cached: false }
+greeting holdout "Morning, everyone. Hope you slept well!": label=yes, result=Decision { id: 59, question: "greeting", verdict: "yes", confidence: 0.9907826932809745, probabilities: {"yes": 0.9953913466404872, "no": 0.004608653359512771}, score: None, calibrated: true, cached: false }
+greeting holdout "I appreciate your quick response.": label=no, result=Decision { id: 60, question: "greeting", verdict: "no", confidence: 0.9616747831458117, probabilities: {"yes": 0.019162608427094167, "no": 0.9808373915729058}, score: None, calibrated: true, cached: false }
+greeting holdout: precision=1, coverage=0.85, decided=17/20, correct=17
+storage-risk fit "CPU usage reached 95% during the benchmark.": label=no, probabilities={"yes": 0.0025311281636069207, "no": 0.9974688718363931}
+storage-risk fit "Ceph OSD 4 is down and placement groups are degraded.": label=yes, probabilities={"yes": 0.9738429484084477, "no": 0.02615705159155235}
+storage-risk fit "Last night's database backup failed; no recent recovery copy exists.": label=yes, probabilities={"yes": 0.995917659140081, "no": 0.004082340859918987}
+storage-risk fit "The TLS certificate renewed successfully.": label=no, probabilities={"yes": 0.005689995282990901, "no": 0.9943100047170091}
+storage-risk fit "Good morning, team!": label=no, probabilities={"yes": 0.005250157935635089, "no": 0.9947498420643649}
+storage-risk fit "SMART reports pending sectors and uncorrectable read errors on the data drive.": label=yes, probabilities={"yes": 0.9935564048263844, "no": 0.0064435951736155905}
+storage-risk fit "The customer archive file is corrupted and cannot be opened.": label=yes, probabilities={"yes": 0.8857091141326677, "no": 0.11429088586733227}
+storage-risk fit "Disk usage is 40% with ample free space.": label=no, probabilities={"yes": 0.0007168469417131522, "no": 0.9992831530582869}
+storage-risk fit "Add tomatoes and onions to the soup.": label=no, probabilities={"yes": 0.0026745624108052003, "no": 0.9973254375891948}
+storage-risk fit "The filesystem remounted read-only after detecting metadata corruption.": label=yes, probabilities={"yes": 0.8131722028624296, "no": 0.18682779713757036}
+storage-risk fit "The database volume has no free space left.": label=yes, probabilities={"yes": 0.921092623258946, "no": 0.07890737674105397}
+storage-risk fit "All storage health checks passed.": label=no, probabilities={"yes": 0.0010805226046949753, "no": 0.9989194773953051}
+storage-risk fit "The web server returned a 404 for a missing documentation page.": label=no, probabilities={"yes": 0.014433465352643437, "no": 0.9855665346473566}
+storage-risk fit "Ceph reports inconsistent placement groups and scrub errors.": label=yes, probabilities={"yes": 0.8956254222897806, "no": 0.10437457771021941}
+storage-risk fit "The only backup copy cannot be restored because its checksum is invalid.": label=yes, probabilities={"yes": 0.9872402596799054, "no": 0.012759740320094637}
+storage-risk fit "The off-site backup passed its restore test.": label=no, probabilities={"yes": 0.007784954915364517, "no": 0.9922150450846354}
+storage-risk fit "The football team won by two goals.": label=no, probabilities={"yes": 0.00069157413609562, "no": 0.9993084258639043}
+storage-risk fit "The storage pool is degraded and one more disk failure would lose data.": label=yes, probabilities={"yes": 0.9975178035789224, "no": 0.0024821964210776093}
+storage-risk fit "The file server is returning I/O errors when users read documents.": label=yes, probabilities={"yes": 0.9513870699935686, "no": 0.04861293000643141}
+storage-risk fit "A developer fixed a typo in the login page.": label=no, probabilities={"yes": 0.01661739404368476, "no": 0.9833826059563152}
+storage-risk fit "The database query took three seconds; disks report no errors.": label=no, probabilities={"yes": 0.0016875128322717918, "no": 0.9983124871677282}
+storage-risk fit "The root filesystem has exhausted all inodes and cannot create files.": label=yes, probabilities={"yes": 0.901862451483172, "no": 0.09813754851682799}
+storage-risk fit "The NAS reports a failed drive and an unprotected data pool.": label=yes, probabilities={"yes": 0.9973621936899172, "no": 0.002637806310082813}
+storage-risk fit "The firewall certificate was updated.": label=no, probabilities={"yes": 0.09182443961965812, "no": 0.9081755603803419}
+storage-risk fit "The image download completed and its checksum matches.": label=no, probabilities={"yes": 0.007564837546716101, "no": 0.9924351624532839}
+storage-risk fit "Storage replication stopped and the only remaining replica is unhealthy.": label=yes, probabilities={"yes": 0.9837726883380764, "no": 0.016227311661923594}
+storage-risk fit "A ransomware process is encrypting files on the shared data volume.": label=yes, probabilities={"yes": 0.9969327915835376, "no": 0.0030672084164623525}
+storage-risk fit "The storage pool scrub completed with zero errors.": label=no, probabilities={"yes": 0.005894537919559972, "no": 0.99410546208044}
+storage-risk fit "The meeting has been moved to Thursday.": label=no, probabilities={"yes": 0.0050339922880092, "no": 0.9949660077119908}
+storage-risk fit "Database checksums show corrupted pages in the main data directory.": label=yes, probabilities={"yes": 0.9956772907935286, "no": 0.004322709206471376}
+storage-risk fit "Object storage lost three replicas of a critical customer document.": label=yes, probabilities={"yes": 0.9981925681300085, "no": 0.0018074318699915493}
+storage-risk fit "The media volume is healthy with 70% free space.": label=no, probabilities={"yes": 0.003971022958581694, "no": 0.9960289770414184}
+storage-risk fit "A recipe recommends simmering for twenty minutes.": label=no, probabilities={"yes": 0.004736169017634969, "no": 0.995263830982365}
+storage-risk fit "The NVMe drive reports critical media errors and is disconnecting.": label=yes, probabilities={"yes": 0.994363802623238, "no": 0.00563619737676202}
+storage-risk fit "The backup destination is full, so new backups are being skipped.": label=yes, probabilities={"yes": 0.3945663160806148, "no": 0.6054336839193852}
+storage-risk fit "The file copy finished and both source and destination hashes match.": label=no, probabilities={"yes": 0.012015465109376709, "no": 0.9879845348906233}
+storage-risk fit "The laptop fan is running loudly during video playback.": label=no, probabilities={"yes": 0.00788724428979937, "no": 0.9921127557102006}
+storage-risk fit "The distributed storage cluster reports data unavailable and missing replicas.": label=yes, probabilities={"yes": 0.9969218219463368, "no": 0.003078178053663172}
+storage-risk fit "The external backup disk was dropped and now makes clicking noises without mounting.": label=yes, probabilities={"yes": 0.9117223389080468, "no": 0.08827766109195323}
+storage-risk fit "A scheduled restore drill recovered all files without errors.": label=no, probabilities={"yes": 0.006371804114970353, "no": 0.9936281958850296}
+storage-risk calibration: bands=Noul { yes_at: 0.3945663160806148, no_at: 0.09182443961965812 }, report=Report { examples: 40, decided: 40, correct: 40, precision: 1.0, coverage: 1.0, target: 0.95, in_sample: true, warnings: [] }, stored=true
+storage-risk: fitted precision target achieved
+storage-risk holdout "The /var disk is 98% full and writes are failing.": label=yes, result=Decision { id: 101, question: "storage-risk", verdict: "yes", confidence: 0.9750566735575337, probabilities: {"yes": 0.9875283367787668, "no": 0.012471663221233165}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The new application deployment succeeded.": label=no, result=Decision { id: 102, question: "storage-risk", verdict: "no", confidence: 0.9344276566657506, probabilities: {"yes": 0.032786171667124685, "no": 0.9672138283328753}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The RAID array is rebuilding after a drive failure and has lost redundancy.": label=yes, result=Decision { id: 103, question: "storage-risk", verdict: "yes", confidence: 0.9724835180194376, probabilities: {"yes": 0.9862417590097188, "no": 0.013758240990281223}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The nightly backup completed successfully and was verified.": label=no, result=Decision { id: 104, question: "storage-risk", verdict: "no", confidence: 0.9958852862726661, probabilities: {"yes": 0.002057356863666966, "no": 0.9979426431363331}, score: None, calibrated: true, cached: false }
+storage-risk holdout "An operator accidentally deleted the production backup bucket.": label=yes, result=Decision { id: 105, question: "storage-risk", verdict: "yes", confidence: 0.9860396666449105, probabilities: {"yes": 0.9930198333224552, "no": 0.006980166677544752}, score: None, calibrated: true, cached: false }
+storage-risk holdout "Memory usage rose during the load test; storage is healthy.": label=no, result=Decision { id: 106, question: "storage-risk", verdict: "no", confidence: 0.9985789145933972, probabilities: {"yes": 0.0007105427033013474, "no": 0.9992894572966986}, score: None, calibrated: true, cached: false }
+storage-risk holdout "Two disks in the storage array failed simultaneously.": label=yes, result=Decision { id: 107, question: "storage-risk", verdict: "yes", confidence: 0.9660568849306064, probabilities: {"yes": 0.9830284424653032, "no": 0.016971557534696813}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The scheduler moved a stateless frontend pod to another node.": label=no, result=Decision { id: 108, question: "storage-risk", verdict: "no", confidence: 0.9926763346365679, probabilities: {"yes": 0.0036618326817160706, "no": 0.996338167318284}, score: None, calibrated: true, cached: false }
+storage-risk holdout "A database datafile was overwritten by mistake.": label=yes, result=Decision { id: 109, question: "storage-risk", verdict: "yes", confidence: 0.9818903615925505, probabilities: {"yes": 0.9909451807962752, "no": 0.009054819203724751}, score: None, calibrated: true, cached: false }
+storage-risk holdout "Disk capacity was expanded successfully and usage is now 25%.": label=no, result=Decision { id: 110, question: "storage-risk", verdict: "no", confidence: 0.994081561349442, probabilities: {"yes": 0.002959219325278986, "no": 0.997040780674721}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The backup job has failed every night this week.": label=yes, result=Decision { id: 111, question: "storage-risk", verdict: "yes", confidence: 0.9629052044421993, probabilities: {"yes": 0.9814526022210996, "no": 0.018547397778900354}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The monitoring dashboard changed its color theme.": label=no, result=Decision { id: 112, question: "storage-risk", verdict: "no", confidence: 0.997805679835922, probabilities: {"yes": 0.0010971600820389711, "no": 0.998902839917961}, score: None, calibrated: true, cached: false }
+storage-risk holdout "An application accidentally deleted a directory of irreplaceable photos.": label=yes, result=Decision { id: 113, question: "storage-risk", verdict: "yes", confidence: 0.9880637154882392, probabilities: {"yes": 0.9940318577441196, "no": 0.005968142255880382}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The test runner used all available CPU cores.": label=no, result=Decision { id: 114, question: "storage-risk", verdict: "no", confidence: 0.9902684721954675, probabilities: {"yes": 0.004865763902266261, "no": 0.9951342360977338}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The archive disk cannot be read because its partition table is damaged.": label=yes, result=Decision { id: 115, question: "storage-risk", verdict: "yes", confidence: 0.777802549682965, probabilities: {"yes": 0.8889012748414825, "no": 0.11109872515851749}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The system reports low CPU frequency while idle.": label=no, result=Decision { id: 116, question: "storage-risk", verdict: "no", confidence: 0.9972977351719561, probabilities: {"yes": 0.0013511324140219477, "no": 0.998648867585978}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The snapshot retention job deleted the last recovery point by mistake.": label=yes, result=Decision { id: 117, question: "storage-risk", verdict: "yes", confidence: 0.9036506588584248, probabilities: {"yes": 0.9518253294292124, "no": 0.048174670570787614}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The DNS record was updated to the new load balancer address.": label=no, result=Decision { id: 118, question: "storage-risk", verdict: "unsure", confidence: 0.6769092201028815, probabilities: {"yes": 0.16154538994855927, "no": 0.8384546100514407}, score: None, calibrated: true, cached: false }
+storage-risk holdout "A power failure interrupted writes and the filesystem now fails consistency checks.": label=yes, result=Decision { id: 119, question: "storage-risk", verdict: "yes", confidence: 0.964810513057138, probabilities: {"yes": 0.982405256528569, "no": 0.017594743471430974}, score: None, calibrated: true, cached: false }
+storage-risk holdout "The new database index was created successfully.": label=no, result=Decision { id: 120, question: "storage-risk", verdict: "no", confidence: 0.9538501165948892, probabilities: {"yes": 0.023074941702555453, "no": 0.9769250582974446}, score: None, calibrated: true, cached: false }
+storage-risk holdout: precision=1, coverage=0.95, decided=19/20, correct=19
+test live_calibrate_holdout ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 11.79s
+
+        PASS [  11.804s] ( 2/22) eightball::live live_calibrate_holdout
+       START [         ] ( 3/22) eightball::live live_cli_ask
+
+running 1 test
+cli: {"results":[{"id":1,"question":"q","verdict":"yes","confidence":0.9928223977168203,"probabilities":{"yes":0.9964111988584102,"no":0.0035888011415897703},"calibrated":false,"cached":false}]}
+
+test live_cli_ask ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.24s
+
+        PASS [   0.249s] ( 3/22) eightball::live live_cli_ask
+       START [         ] ( 4/22) eightball::live live_detect_chat
+
+running 1 test
+chat info: Info { kind: Logprob, fingerprint: "/cache/Qwen3.5-0.8B-Q8_0.gguf@b12033-785322d17", concurrency: 2 }
+test live_detect_chat ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.03s
+
+        PASS [   0.034s] ( 4/22) eightball::live live_detect_chat
+       START [         ] ( 5/22) eightball::live live_detect_d3
+
+running 1 test
+d3 info: Info { kind: Systemone, fingerprint: "/cache/vllm-d3-nano-Q8_0.gguf@b12033-785322d17", concurrency: 2 }
+test live_detect_d3 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.03s
+
+        PASS [   0.031s] ( 5/22) eightball::live live_detect_d3
+       START [         ] ( 6/22) eightball::live live_doctor
+
+running 1 test
+doctor: DoctorReport { default: "d3", endpoints: [DoctorEndpoint { name: "d3", url: "http://127.0.0.1:9931", kind: Some(Systemone), fingerprint: Some("/cache/vllm-d3-nano-Q8_0.gguf@b12033-785322d17"), concurrency: Some(2), probe: Some(Object {"verdict": String("yes"), "p_yes": Number(0.9989299647430848), "ms": Number(182)}), error: None }, DoctorEndpoint { name: "chat", url: "http://127.0.0.1:9934", kind: Some(Logprob), fingerprint: Some("/cache/Qwen3.5-0.8B-Q8_0.gguf@b12033-785322d17"), concurrency: Some(2), probe: Some(Object {"verdict": String("yes"), "p_yes": Number(0.9985265338885576), "ms": Number(203)}), error: None }, DoctorEndpoint { name: "rerank", url: "http://127.0.0.1:9933", kind: Some(Rerank), fingerprint: Some("/cache/bge-reranker-v2-m3-Q8_0.gguf@b12033-785322d17"), concurrency: Some(1), probe: None, error: None }], embedder: Some(Object {"url": String("http://127.0.0.1:9932"), "model": String("embeddinggemma-2")}), specs: [Object {"name": String("greeting"), "type": String("noul"), "instructions": String("Is this message a greeting?"), "calibration_id": String("995a3e3dd7cc4823"), "calibrated": Bool(false), "report": Null}, Object {"name": String("storage-risk"), "type": String("noul"), "instructions": String("Is storage or data at risk according to this message?"), "calibration_id": String("418b20bf7ff2cb83"), "calibrated": Bool(false), "report": Null}] }
+test live_doctor ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.28s
+
+        PASS [   0.286s] ( 6/22) eightball::live live_doctor
+       START [         ] ( 7/22) eightball::live live_embed
+
+running 1 test
+embedding dimensions: 768; disk/storage cosine: 0.794015, disk/soup: 0.5782903
+test live_embed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.10s
+
+        PASS [   0.108s] ( 7/22) eightball::live live_embed
+       START [         ] ( 8/22) eightball::live live_logprob_choice
+
+running 1 test
+chat "I was charged twice for my order": [[0.8113105891213139, 0.18752212096673748, 0.0011672899119485791]]
+chat "My parcel never arrived": [[0.4286000992121823, 0.570540779923952, 0.0008591208638656969]]
+chat "The app crashes when I log in": [[0.5397690479562204, 0.2687425298101056, 0.19148842223367407]]
+chat choice correct: 2/3
+test live_logprob_choice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.37s
+
+        PASS [   0.377s] ( 8/22) eightball::live live_logprob_choice
+       START [         ] ( 9/22) eightball::live live_logprob_mass
+
+running 1 test
+mass validation: Ok(([[0.9984586770827663, 0.001541322917233736]], "hi there, how are you?"))
+test live_logprob_mass ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.22s
+
+        PASS [   0.223s] ( 9/22) eightball::live live_logprob_mass
+       START [         ] (10/22) eightball::live live_logprob_noul
+
+running 1 test
+chat "hi there, how are you?": [[0.9984586770827663, 0.001541322917233736]]
+chat "Good morning everyone!": [[0.9988069426168723, 0.0011930573831277456]]
+chat "The disk on node control-2 is 98% full.": [[0.06981691575902657, 0.9301830842409735]]
+chat "Invoice #4411 is attached.": [[0.4719876966083157, 0.5280123033916844]]
+test live_logprob_noul ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.38s
+
+        PASS [   0.390s] (10/22) eightball::live live_logprob_noul
+       START [         ] (11/22) eightball::live live_mcp_failure_is_fail_open
+
+running 1 test
+2026-11-03T17:32:49.722088Z  INFO 8ball: pruned 0 old decisions
+2026-11-03T17:32:49.725211Z  INFO serve_inner: rmcp::service: Service initialized as server peer_info=Some(InitializeRequestParams { meta: None, protocol_version: ProtocolVersion("2025-11-25"), capabilities: ClientCapabilities { experimental: None, extensions: None, roots: None, sampling: None, elicitation: None }, client_info: Implementation { name: "rmcp", title: None, version: "3.8.0", description: None, icons: None, website_url: None } })
+2026-11-03T17:32:49.726103Z  INFO serve_inner: rmcp::service: received notification notification=InitializedNotification(NotificationNoParam { method: InitializedNotificationMethod, extensions: Extensions })
+2026-11-03T17:32:49.726254Z  INFO serve_inner: rmcp::handler::server: client initialized
+MCP real transport fail-open: CallToolResult { result_type: None, content: [Text(TextContent { text: "8ball failed: backend d3: error sending request for url (http://127.0.0.1:9/v1/systemone). Fail open: do the work you were gating.", meta: None, annotations: None })], structured_content: None, is_error: Some(true), meta: None }
+2026-11-03T17:32:49.731520Z  INFO serve_inner: rmcp::service: input stream terminated
+2026-11-03T17:32:49.731648Z  INFO serve_inner: rmcp::service: serve finished quit_reason=Closed
+test live_mcp_failure_is_fail_open ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.05s
+
+        PASS [   0.052s] (11/22) eightball::live live_mcp_failure_is_fail_open
+       START [         ] (12/22) eightball::live live_mcp_handler_ask
+
+running 1 test
+MCP handler real response: CallToolResult { result_type: None, content: [Text(TextContent { text: "{\"results\":[{\"id\":1,\"question\":\"greeting\",\"verdict\":\"yes\",\"confidence\":0.9955366658112137,\"probabilities\":{\"yes\":0.9977683329056068,\"no\":0.0022316670943931527},\"calibrated\":false,\"cached\":false}]}", meta: None, annotations: None })], structured_content: Some(Object {"results": Array [Object {"id": Number(1), "question": String("greeting"), "verdict": String("yes"), "confidence": Number(0.9955366658112136), "probabilities": Object {"yes": Number(0.9977683329056068), "no": Number(0.0022316670943931527)}, "calibrated": Bool(false), "cached": Bool(false)}]}), is_error: Some(false), meta: None }
+test live_mcp_handler_ask ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.30s
+
+        PASS [   0.303s] (12/22) eightball::live live_mcp_handler_ask
+       START [         ] (13/22) eightball::live live_mcp_http_triage
+
+running 1 test
+MCP HTTP real triage: CallToolResult { result_type: None, content: [Text(TextContent { text: "{\"kept\":[{\"index\":0,\"decision\":{\"id\":1,\"question\":\"q\",\"verdict\":\"yes\",\"confidence\":0.9730890078717795,\"probabilities\":{\"yes\":0.9865445039358898,\"no\":0.013455496064110228},\"calibrated\":false,\"cached\":false}},{\"index\":1,\"decision\":{\"id\":2,\"question\":\"q\",\"verdict\":\"yes\",\"confidence\":0.9392370642867465,\"probabilities\":{\"yes\":0.9696185321433732,\"no\":0.030381467856626765},\"calibrated\":false,\"cached\":false}},{\"index\":2,\"decision\":{\"id\":3,\"question\":\"q\",\"verdict\":\"yes\",\"confidence\":0.9894533823374263,\"probabilities\":{\"yes\":0.9947266911687132,\"no\":0.005273308831286849},\"calibrated\":false,\"cached\":false}}],\"unsure\":[],\"dropped\":7}", meta: None, annotations: None })], structured_content: Some(Object {"kept": Array [Object {"index": Number(0), "decision": Object {"id": Number(1), "question": String("q"), "verdict": String("yes"), "confidence": Number(0.9730890078717797), "probabilities": Object {"yes": Number(0.9865445039358898), "no": Number(0.013455496064110228)}, "calibrated": Bool(false), "cached": Bool(false)}}, Object {"index": Number(1), "decision": Object {"id": Number(2), "question": String("q"), "verdict": String("yes"), "confidence": Number(0.9392370642867464), "probabilities": Object {"yes": Number(0.9696185321433732), "no": Number(0.030381467856626765)}, "calibrated": Bool(false), "cached": Bool(false)}}, Object {"index": Number(2), "decision": Object {"id": Number(3), "question": String("q"), "verdict": String("yes"), "confidence": Number(0.9894533823374264), "probabilities": Object {"yes": Number(0.9947266911687132), "no": Number(0.005273308831286849)}, "calibrated": Bool(false), "cached": Bool(false)}}], "unsure": Array [], "dropped": Number(7)}), is_error: Some(false), meta: None }
+HTTP server stderr: 2026-11-03T17:32:50.188056Z  INFO serve_inner: rmcp::service: Service initialized as server peer_info=Some(InitializeRequestParams { meta: None, protocol_version: ProtocolVersion("2026-07-28"), capabilities: ClientCapabilities { experimental: None, extensions: None, roots: None, sampling: None, elicitation: None }, client_info: Implementation { name: "rmcp", title: None, version: "3.8.0", description: None, icons: None, website_url: None } })
+2026-11-03T17:32:50.188763Z  INFO serve_inner: rmcp::service: input stream terminated
+2026-11-03T17:32:50.188866Z  INFO serve_inner: rmcp::service: serve finished quit_reason=Closed
+2026-11-03T17:32:50.192890Z  INFO serve_inner: rmcp::service: Service initialized as server peer_info=Some(InitializeRequestParams { meta: None, protocol_version: ProtocolVersion("2025-11-25"), capabilities: ClientCapabilities { experimental: None, extensions: None, roots: None, sampling: None, elicitation: None }, client_info: Implementation { name: "rmcp", title: None, version: "3.8.0", description: None, icons: None, website_url: None } })
+2026-11-03T17:32:51.104351Z  INFO serve_inner: rmcp::service: input stream terminated
+2026-11-03T17:32:51.104420Z  INFO serve_inner: rmcp::service: serve finished quit_reason=Closed
+
+test live_mcp_http_triage ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 1.07s
+
+        PASS [   1.073s] (13/22) eightball::live live_mcp_http_triage
+       START [         ] (14/22) eightball::live live_mcp_stdio_ask
+
+running 1 test
+2026-11-03T17:32:51.192553Z  INFO 8ball: pruned 0 old decisions
+2026-11-03T17:32:51.209748Z  INFO serve_inner: rmcp::service: Service initialized as server peer_info=Some(InitializeRequestParams { meta: None, protocol_version: ProtocolVersion("2025-11-25"), capabilities: ClientCapabilities { experimental: None, extensions: None, roots: None, sampling: None, elicitation: None }, client_info: Implementation { name: "rmcp", title: None, version: "3.8.0", description: None, icons: None, website_url: None } })
+2026-11-03T17:32:51.210248Z  INFO serve_inner: rmcp::service: received notification notification=InitializedNotification(NotificationNoParam { method: InitializedNotificationMethod, extensions: Extensions })
+2026-11-03T17:32:51.210412Z  INFO serve_inner: rmcp::handler::server: client initialized
+MCP stdio real response: CallToolResult { result_type: None, content: [Text(TextContent { text: "{\"results\":[{\"id\":1,\"question\":\"greeting\",\"verdict\":\"yes\",\"confidence\":0.9955179588177827,\"probabilities\":{\"yes\":0.9977589794088914,\"no\":0.0022410205911086445},\"calibrated\":false,\"cached\":false}]}", meta: None, annotations: None })], structured_content: Some(Object {"results": Array [Object {"id": Number(1), "question": String("greeting"), "verdict": String("yes"), "confidence": Number(0.9955179588177828), "probabilities": Object {"yes": Number(0.9977589794088914), "no": Number(0.0022410205911086445)}, "calibrated": Bool(false), "cached": Bool(false)}]}), is_error: Some(false), meta: None }
+2026-11-03T17:32:51.411711Z  INFO serve_inner: rmcp::service: input stream terminated
+2026-11-03T17:32:51.411837Z  INFO serve_inner: rmcp::service: serve finished quit_reason=Closed
+test live_mcp_stdio_ask ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.31s
+
+        PASS [   0.313s] (14/22) eightball::live live_mcp_stdio_ask
+       START [         ] (15/22) eightball::live live_question_edit_invalidates
+
+running 1 test
+greeting fit "The server backup completed at midnight.": label=no, probabilities={"yes": 0.002861169275636781, "no": 0.9971388307243633}
+greeting fit "Good morning, everyone!": label=yes, probabilities={"yes": 0.9974191915792304, "no": 0.002580808420769576}
+greeting fit "Hey there, how are you doing?": label=yes, probabilities={"yes": 0.9975064124993848, "no": 0.0024935875006152353}
+greeting fit "The disk is 98 percent full.": label=no, probabilities={"yes": 0.0014273061980771102, "no": 0.9985726938019229}
+greeting fit "See you tomorrow.": label=no, probabilities={"yes": 0.04678829209062096, "no": 0.953211707909379}
+greeting fit "Hi team!": label=yes, probabilities={"yes": 0.9940289433239308, "no": 0.005971056676069231}
+greeting fit "Morning team 👋": label=yes, probabilities={"yes": 0.99523469305691, "no": 0.004765306943089964}
+greeting fit "Invoice number 4411 is attached.": label=no, probabilities={"yes": 0.00047780808544861696, "no": 0.9995221919145514}
+greeting fit "Please review the changes before Friday.": label=no, probabilities={"yes": 0.0034488855748704265, "no": 0.9965511144251296}
+greeting fit "Hiya, long time no see!": label=yes, probabilities={"yes": 0.993168808837008, "no": 0.006831191162992023}
+greeting fit "Hello Alice, nice to meet you.": label=yes, probabilities={"yes": 0.9966421995526756, "no": 0.003357800447324366}
+greeting fit "Goodbye, and take care on your journey.": label=no, probabilities={"yes": 0.056592059489226215, "no": 0.9434079405107738}
+greeting fit "Can you resend the meeting invitation?": label=no, probabilities={"yes": 0.0017489858594042869, "no": 0.9982510141405957}
+greeting fit "Hey folks, hope you're well!": label=yes, probabilities={"yes": 0.9955304934938296, "no": 0.004469506506170395}
+greeting fit "Howdy!": label=yes, probabilities={"yes": 0.9951842385320172, "no": 0.004815761467982793}
+greeting fit "The soup needs two teaspoons of salt.": label=no, probabilities={"yes": 0.0004303022769323243, "no": 0.9995696977230677}
+greeting fit "The TLS certificate expires in thirty days.": label=no, probabilities={"yes": 0.000674837520811739, "no": 0.9993251624791882}
+greeting fit "Hello there!": label=yes, probabilities={"yes": 0.9974943448528236, "no": 0.0025056551471763777}
+greeting fit "Good morning, Sam. How was your weekend?": label=yes, probabilities={"yes": 0.9976039052277158, "no": 0.0023960947722841963}
+greeting fit "Farewell, everyone.": label=no, probabilities={"yes": 0.2215106614748801, "no": 0.7784893385251199}
+greeting fit "SELECT name FROM users WHERE active = 1;": label=no, probabilities={"yes": 0.0007898735223344167, "no": 0.9992101264776656}
+greeting fit "Greetings from Brussels!": label=yes, probabilities={"yes": 0.9887315679689266, "no": 0.011268432031073417}
+greeting fit "Hi everyone, happy Monday!": label=yes, probabilities={"yes": 0.9972993336737098, "no": 0.0027006663262901798}
+greeting fit "Could you check the CPU temperature?": label=no, probabilities={"yes": 0.004208216209489796, "no": 0.9957917837905103}
+greeting fit "Thank you very much for your assistance.": label=no, probabilities={"yes": 0.0065114685176171335, "no": 0.9934885314823829}
+greeting fit "Good evening, Maria!": label=yes, probabilities={"yes": 0.9970898494382958, "no": 0.0029101505617041834}
+greeting fit "Hey Alex, what's up?": label=yes, probabilities={"yes": 0.9971397801322548, "no": 0.002860219867745206}
+greeting fit "The database connection timed out.": label=no, probabilities={"yes": 0.0006270201242015817, "no": 0.9993729798757984}
+greeting fit "Remember to bring your access badge.": label=no, probabilities={"yes": 0.001868069141280645, "no": 0.9981319308587193}
+greeting fit "Hello friends!": label=yes, probabilities={"yes": 0.9969231444605172, "no": 0.0030768555394827812}
+greeting fit "Good afternoon, Dr Smith.": label=yes, probabilities={"yes": 0.996675161778149, "no": 0.003324838221851034}
+greeting fit "Bye for now!": label=no, probabilities={"yes": 0.06412366967586407, "no": 0.935876330324136}
+greeting fit "The report contains twelve pages.": label=no, probabilities={"yes": 0.000564256149681735, "no": 0.9994357438503183}
+greeting fit "Hey team, good to see you all.": label=yes, probabilities={"yes": 0.9903797410315428, "no": 0.009620258968457196}
+greeting fit "Hello and welcome!": label=yes, probabilities={"yes": 0.9960318804422796, "no": 0.003968119557720362}
+greeting fit "How much does the annual subscription cost?": label=no, probabilities={"yes": 0.0017135848896364212, "no": 0.9982864151103635}
+greeting fit "The network cable is unplugged.": label=no, probabilities={"yes": 0.0008221246430676189, "no": 0.9991778753569324}
+greeting fit "Hi Jordan!": label=yes, probabilities={"yes": 0.9964330534650788, "no": 0.003566946534921178}
+greeting fit "Good day, ladies and gentlemen.": label=yes, probabilities={"yes": 0.9944683855515972, "no": 0.005531614448402777}
+greeting fit "The weather forecast predicts rain tomorrow.": label=no, probabilities={"yes": 0.003426570659788889, "no": 0.9965734293402111}
+greeting calibration: bands=Noul { yes_at: 0.9887315679689266, no_at: 0.2215106614748801 }, report=Report { examples: 40, decided: 40, correct: 40, precision: 1.0, coverage: 1.0, target: 0.95, in_sample: true, warnings: [] }, stored=true
+greeting: fitted precision target achieved
+edited question: AskResponse { results: [Decision { id: 41, question: "greeting", verdict: "yes", confidence: 0.9803006872888791, probabilities: {"yes": 0.9901503436444395, "no": 0.009849656355560454}, score: None, calibrated: false, cached: false }] }; calibration=CalibrateResponse { spec: "greeting", calibration_id: "bde11e683de0a863", bands: Noul { yes_at: 1.01, no_at: -0.01 }, report: Report { examples: 0, decided: 0, correct: 0, precision: 0.0, coverage: 0.0, target: 0.95, in_sample: true, warnings: ["yes side: not enough evidence for the target", "no side: not enough evidence for the target", "fewer than 20 examples"] }, stored: true }
+test live_question_edit_invalidates ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 4.22s
+
+        PASS [   4.232s] (15/22) eightball::live live_question_edit_invalidates
+       START [         ] (16/22) eightball::live live_rerank_relevance
+
+running 1 test
+rerank "the disk is 98% full": [[0.9038698014220569, 0.09613019857794314]]
+rerank "a recipe for soup": [[1.8229576409416892e-5, 0.9999817704235906]]
+test live_rerank_relevance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.12s
+
+        PASS [   0.130s] (16/22) eightball::live live_rerank_relevance
+       START [         ] (17/22) eightball::live live_systemone_choice
+
+running 1 test
+"I was charged twice for my order": [[0.9947632517823832, 0.0020648654797305968, 0.0031718827378861385]]
+"My parcel never arrived": [[0.03348390306046388, 0.9576809061787368, 0.008835190760799286]]
+"The app crashes when I log in": [[0.0001016056124537072, 9.343081452847106e-5, 0.9998049635730176]]
+test live_systemone_choice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.39s
+
+        PASS [   0.392s] (17/22) eightball::live live_systemone_choice
+       START [         ] (18/22) eightball::live live_systemone_long_state_fits
+
+running 1 test
+long state: [[0.8418858296564597, 0.15811417034354025]]; fitted characters 2003
+test live_systemone_long_state_fits ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.57s
+
+        PASS [   0.572s] (18/22) eightball::live live_systemone_long_state_fits
+       START [         ] (19/22) eightball::live live_systemone_noul_clear_cases
+
+running 1 test
+"hi there, how are you?": [[0.9977792984110628, 0.0022207015889371684]]
+"Good morning everyone!": [[0.9973104968558432, 0.002689503144156835]]
+"The disk on node control-2 is 98% full.": [[0.0006734414207704911, 0.9993265585792295]]
+"Invoice #4411 is attached.": [[0.0006017470308050106, 0.999398252969195]]
+test live_systemone_noul_clear_cases ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.39s
+
+        PASS [   0.394s] (19/22) eightball::live live_systemone_noul_clear_cases
+       START [         ] (20/22) eightball::live live_systemone_score
+
+running 1 test
+urgent: [[0.0035533644092976225, 0.0024632714944271077, 0.09199483747399864, 0.9019885266222766]], score 2.892418526309254; typo: [[0.8658067956293518, 0.016835738079480713, 0.0534055786459527, 0.06395188764521488]], score 0.3155025583070308
+test live_systemone_score ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.20s
+
+        PASS [   0.200s] (20/22) eightball::live live_systemone_score
+       START [         ] (21/22) eightball::live live_systemone_three_questions_one_call
+
+running 1 test
+multi: [[0.001626082216226916, 0.998373917783773], [0.9930987578168688, 0.00038615523376224806, 0.006515086949368796], [0.05358819608051216, 0.013706931575184388, 0.47920685379576855, 0.4534980185485349]]
+test live_systemone_three_questions_one_call ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.26s
+
+        PASS [   0.266s] (21/22) eightball::live live_systemone_three_questions_one_call
+       START [         ] (22/22) eightball::live live_triage_with_prefilter
+
+running 1 test
+prefilter triage: TriageResponse { kept: [TriageItem { index: 0, decision: Decision { id: 1, question: "q", verdict: "yes", confidence: 0.972880804308264, probabilities: {"yes": 0.986440402154132, "no": 0.013559597845868021}, score: None, calibrated: false, cached: false } }, TriageItem { index: 1, decision: Decision { id: 2, question: "q", verdict: "yes", confidence: 0.9392370642867465, probabilities: {"yes": 0.9696185321433732, "no": 0.030381467856626765}, score: None, calibrated: false, cached: false } }, TriageItem { index: 2, decision: Decision { id: 3, question: "q", verdict: "yes", confidence: 0.9894533823374263, probabilities: {"yes": 0.9947266911687132, "no": 0.005273308831286849}, score: None, calibrated: false, cached: false } }], unsure: [], dropped: 7, warning: None }
+test live_triage_with_prefilter ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.72s
+
+        PASS [   0.724s] (22/22) eightball::live live_triage_with_prefilter
+────────────
+     Summary [  22.702s] 22 tests run: 22 passed, 0 skipped
+
+```
+
+Verification: `cargo fmt --all --check` and `git diff --check` passed. 97 mock tests and 22 live tests passed. The former contract stop is resolved; continue Chunk 4 step 6.

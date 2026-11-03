@@ -28,7 +28,7 @@ async fn fixture() -> (Service, Store, MockServer, tempfile::TempDir) {
         })
         .mount(&mock)
         .await;
-    let config: Config=toml::from_str(&format!("default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'",mock.uri())).unwrap();
+    let config: Config=toml::from_str(&format!("default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'",mock.uri())).unwrap();
     let ep = Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = Store::open(&dir.path().join("db.sqlite")).unwrap();
@@ -117,7 +117,7 @@ async fn rejects_unknown_spec_and_mixed_question_sources() {
     );
 }
 #[tokio::test]
-async fn spec_uses_bands_but_ad_hoc_uses_defaults_on_same_cache() {
+async fn spec_uses_bands_but_ad_hoc_uses_defaults() {
     let (service, store, mock, _dir) = fixture().await;
     let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
@@ -163,6 +163,51 @@ async fn spec_uses_bands_but_ad_hoc_uses_defaults_on_same_cache() {
         .results
         .remove(0);
     assert!(!adhoc.calibrated);
-    assert!(adhoc.cached);
+    assert!(!adhoc.cached);
     assert_eq!(adhoc.verdict, "yes");
+}
+
+#[tokio::test]
+async fn cache_ids_and_labels_stay_in_the_requested_scope() {
+    let (service, store, _mock, _dir) = fixture().await;
+    let adhoc: AskRequest = serde_json::from_value(json!({
+        "state":"hello", "questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]
+    }))
+    .unwrap();
+    let ad = service.ask(adhoc).await.unwrap().results.remove(0);
+    let named = service
+        .ask(request("hello"))
+        .await
+        .unwrap()
+        .results
+        .remove(0);
+    assert!(!named.cached);
+    assert_ne!(ad.id, named.id);
+    service.label(named.id, "yes".into()).await.unwrap();
+    let copy_request: AskRequest =
+        serde_json::from_value(json!({"spec":"greeting-copy","state":"hello"})).unwrap();
+    let copy = service
+        .ask(copy_request.clone())
+        .await
+        .unwrap()
+        .results
+        .remove(0);
+    assert!(!copy.cached);
+    assert_ne!(named.id, copy.id);
+    service.label(copy.id, "no".into()).await.unwrap();
+    let again = service.ask(copy_request).await.unwrap().results.remove(0);
+    assert!(again.cached);
+    assert_eq!(again.id, copy.id);
+    let q: Question =
+        serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
+    let qh = question_hash(&q);
+    assert_eq!(
+        store.labelled("greeting", &qh).await.unwrap()[0].label,
+        "yes"
+    );
+    assert_eq!(
+        store.labelled("greeting-copy", &qh).await.unwrap()[0].label,
+        "no"
+    );
+    assert!(service.label(ad.id, "yes".into()).await.is_err());
 }

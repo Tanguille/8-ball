@@ -1637,7 +1637,7 @@ impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError>;
     pub async fn insert(&self, d: NewDecision) -> Result<i64, StoreError>;
     pub async fn insert_many(&self, ds: Vec<NewDecision>) -> Result<Vec<i64>, StoreError>; // one transaction
-    pub async fn cached(&self, calibration_id: &str, state_hash: &str) -> Result<Option<(i64, Probs)>, StoreError>;
+    pub async fn cached(&self, calibration_id: &str, state_hash: &str, spec: Option<&str>) -> Result<Option<(i64, Probs)>, StoreError>;
     pub async fn set_label(&self, id: i64, label: &str) -> Result<Option<(Option<String>, String)>, StoreError>; // returns (spec, question_hash) of the row, None if no row
     pub async fn labelled(&self, spec: &str, question_hash: &str) -> Result<Vec<Labelled>, StoreError>;
     pub async fn put_calibration(&self, calibration_id: &str, spec: &str, bands: &Bands, report: &Report) -> Result<(), StoreError>;
@@ -1670,7 +1670,7 @@ Implementation rules:
 - **Migrations**: run this with `conn.execute_batch` on every open:
   ```sql
   CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT, -- never reuse pruned ids (a saved old id must not label a new row)
     ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     spec TEXT,
     question_hash TEXT NOT NULL,
@@ -1720,7 +1720,7 @@ Tests in `tests/store.rs` (`tempfile::tempdir()`):
 2. Get the endpoint and its `info().await`. Compute `state = fit(req.state, max)` and `state_hash = short_hash(&state)`.
    - Expose `fit` and the max on `Endpoint`: `pub fn fitted(&self, state: &str) -> String`. That way the service hashes exactly what the backend sends, and the backend's own `ask` no longer fits again. Change `Endpoint::ask` to take an already-fitted state.
    - Update Chunk 1's `tests/systemone.rs` `long_state_is_fitted` and `fit_respects_char_boundaries` tests to call `ep.fitted(...)` (or `backend::fit`) directly, instead of relying on `ask` to trim.
-3. For each question, compute `qh = question_hash(q)` and `cid = calibration_id(&qh, info.kind, &info.fingerprint)`, then call `store.cached(cid, state_hash)`.
+3. For each question, compute `qh = question_hash(q)` and `cid = calibration_id(&qh, info.kind, &info.fingerprint)`, then call `store.cached(cid, state_hash, spec)`, which also matches the row's `spec` column (`spec IS ?`, so None matches only ad-hoc rows). A hit therefore always belongs to the same spec, so reusing its id keeps labels correct (owner decision 2026-11-03: this replaces any cross-spec reuse).
 4. Send only the uncached questions to `endpoint.ask(&state, &uncached)`.
 5. For each question:
    - The bands come from `store.calibration(cid)` when the request uses a spec. If they exist, `calibrated = true`; otherwise use `Bands::default_for` with `calibrated = false`. Ad-hoc questions always use the defaults with `calibrated = false`.
@@ -1746,7 +1746,7 @@ Tests in `tests/store.rs` (`tempfile::tempdir()`):
 **`Service::calibrate(spec, precision: Option<f64>, dry_run: bool) -> Result<CalibrateResponse, ServiceError>`:**
 1. Load the spec, its endpoint and `info`. Compute `qh` and `cid`.
 2. Call `labelled(spec, qh)`. Group the rows by `state_hash`. A group whose labels disagree is skipped and adds the warning `"conflicting labels for decision ids {ids}"`.
-3. For each remaining state, call `store.cached(cid, state_hash)` to get the probs. On a miss, ask the endpoint with that state, store the answer with `insert` (so the next run hits the cache), and use it.
+3. For each remaining state, call `store.cached(cid, state_hash, Some(spec))` to get the probs. On a miss, ask the endpoint with that state, store the answer with `insert` (so the next run hits the cache), and use it.
 4. Build an `Example` per state, then call `verdict::calibrate(kind, &examples, precision.unwrap_or(0.95))`. An `Err` becomes `BadRequest`.
 5. Unless `dry_run`, call `put_calibration(cid, spec, bands, report)`.
 6. Return `{"spec", "calibration_id", "bands", "report", "stored": !dry_run}`.
@@ -1982,7 +1982,7 @@ async fn no_oauth() -> Response {
 
 #### Step 5: Tests
 
-**Execution status:** Required mock/CLI/HTTP tests pass. Independent review reproduced a cache/label contradiction; execution is stopped before Docker pending owner decision.
+**Execution status:** Required mock/CLI/HTTP tests pass. Owner resolved the cache/label stop on 2026-11-03: cache is scoped by spec, ids use AUTOINCREMENT, and malformed backend probabilities fail open. Regression fixes and Docker verification are in progress.
 `tests/mcp_stdio.rs`:
 1. Write a temp config with a wiremock systemone mock and one spec `greeting`. Use a temp DB path.
 2. Build the transport:
@@ -2595,3 +2595,10 @@ This version was then expanded with verified API details for a small executor mo
 - After the last step, make a final documentation pass. Once the plan's contents are consolidated into existing docs, remove the plan file; if no relevant docs exist, rework the plan into a reference document.
 
 **Important**: Every prompt should verify the branch and worktree before doing any work.
+
+
+### Owner decisions after independent review (2026-11-03)
+
+- Cache lookup includes `spec IS ?`; cache hits retain their matched row id without inserting a row. Cross-spec and ad-hoc/spec reuse is excluded. Calibration lookup passes the same spec.
+- Decision ids use `INTEGER PRIMARY KEY AUTOINCREMENT`. Existing v1 databases migrate transactionally, retaining rows, ids and labels. Already-pruned historical ids cannot be recovered from a legacy database.
+- Reject non-finite/out-of-range System One probabilities and positive/non-finite logprobs as backend errors, preserving REST errors and MCP fail-open guidance.

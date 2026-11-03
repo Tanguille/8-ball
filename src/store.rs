@@ -58,11 +58,29 @@ impl Store {
             .append(true)
             .mode(0o600)
             .open(path)?;
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get::<_, String>(0))?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(Duration::from_secs(5))?;
-        conn.execute_batch(MIGRATIONS)?;
+        let tx = conn.transaction()?;
+        let schema: Option<String> = tx
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE type='table' AND name='decisions'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if schema.is_some_and(|sql| !sql.to_uppercase().contains("AUTOINCREMENT")) {
+            // Preserve saved ids and labels when upgrading the original v1 table.
+            tx.execute_batch("ALTER TABLE decisions RENAME TO decisions_previous;")?;
+            tx.execute_batch(MIGRATIONS)?;
+            tx.execute_batch(
+                "INSERT INTO decisions SELECT * FROM decisions_previous;
+                DROP TABLE decisions_previous;",
+            )?;
+        }
+        tx.execute_batch(MIGRATIONS)?;
+        tx.commit()?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -108,10 +126,12 @@ impl Store {
         &self,
         calibration_id: &str,
         state_hash: &str,
+        spec: Option<&str>,
     ) -> Result<Option<(i64, Probs)>, StoreError> {
         let cid = calibration_id.to_owned();
         let state_hash = state_hash.to_owned();
-        self.call(move |conn|conn.query_row("SELECT id,answer FROM decisions WHERE calibration_id=?1 AND state_hash=?2 ORDER BY id DESC LIMIT 1",params![cid,state_hash],|row|Ok((row.get(0)?,json_column(row,1)?))).optional()).await
+        let spec = spec.map(str::to_owned);
+        self.call(move |conn|conn.query_row("SELECT id,answer FROM decisions WHERE calibration_id=?1 AND state_hash=?2 AND spec IS ?3 ORDER BY id DESC LIMIT 1",params![cid,state_hash,spec],|row|Ok((row.get(0)?,json_column(row,1)?))).optional()).await
     }
 
     pub(crate) async fn metadata(
@@ -225,7 +245,7 @@ fn json_column<T: serde::de::DeserializeOwned>(
 
 const MIGRATIONS: &str = r"
   CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     spec TEXT,
     question_hash TEXT NOT NULL,

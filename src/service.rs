@@ -300,22 +300,23 @@ impl Service {
                 warnings.push(format!("conflicting labels for decision ids {ids}"));
                 continue;
             }
-            let probs = if let Some((_, probs)) = self.store.cached(&cid, &state_hash).await? {
-                probs
-            } else {
-                self.ask(AskRequest {
-                    state: first.state.clone(),
-                    spec: Some(spec.into()),
-                    questions: vec![],
-                    endpoint: Some(name.clone()),
-                })
-                .await?
-                .results
-                .remove(0)
-                .probabilities
-                .into_values()
-                .collect()
-            };
+            let probs =
+                if let Some((_, probs)) = self.store.cached(&cid, &state_hash, Some(spec)).await? {
+                    probs
+                } else {
+                    self.ask(AskRequest {
+                        state: first.state.clone(),
+                        spec: Some(spec.into()),
+                        questions: vec![],
+                        endpoint: Some(name.clone()),
+                    })
+                    .await?
+                    .results
+                    .remove(0)
+                    .probabilities
+                    .into_values()
+                    .collect()
+                };
             examples.push(verdict::Example {
                 probs,
                 label: first.label.clone(),
@@ -575,7 +576,10 @@ impl Service {
         for q in &questions {
             let qh = verdict::question_hash(q);
             let cid = verdict::calibration_id(&qh, info.kind, &info.fingerprint);
-            let answer = self.store.cached(&cid, &state_hash).await?;
+            let answer = self
+                .store
+                .cached(&cid, &state_hash, req.spec.as_deref())
+                .await?;
             if answer.is_none() {
                 uncached.push(q.clone());
             }

@@ -183,3 +183,28 @@ async fn concurrency_one_serializes() {
         }
     }
 }
+
+#[tokio::test]
+async fn invalid_backend_probabilities_are_rejected() {
+    for value in [
+        json!({"noul":2.0}),
+        json!({"noul":-0.1}),
+        json!({"noul":null}),
+        json!({"probabilities":{"a":-0.2,"b":1.0}}),
+        json!({"probabilities":{"a":0.5,"b":1.2}}),
+    ] {
+        let server = MockServer::start().await;
+        mount(
+            &server,
+            ResponseTemplate::new(200).set_body_json(json!({"answers":{"q":value}})),
+        )
+        .await;
+        let q = if value.get("noul").is_some() {
+            question()
+        } else {
+            serde_json::from_value(json!({"id":"q","type":"choice","instructions":"Which?","criteria":{"a":"","b":""}})).unwrap()
+        };
+        let ep = Endpoint::new("d3", &cfg(&server.uri()), None).unwrap();
+        assert!(ep.ask("hi", &[q]).await.is_err(), "accepted {value}");
+    }
+}

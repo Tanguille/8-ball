@@ -19,8 +19,11 @@ pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Prob
         for entry in entries {
             let token=entry["token"].as_str().ok_or_else(||BackendError("missing logprob token".into()))?.trim_start();
             let token=if matches!(q.kind,Kind::Noul { .. }) {token.to_lowercase()} else {token.into()};
+            let logprob=entry["logprob"].as_f64().ok_or_else(||BackendError("missing logprob".into()))?;
+            if !logprob.is_finite() || logprob > 0.0 {
+                return Err(BackendError("logprob must be finite and non-positive".into()));
+            }
             if let Some(index)=labels.iter().position(|label|*label==token) {
-                let logprob=entry["logprob"].as_f64().ok_or_else(||BackendError("missing logprob".into()))?;
                 probs[index]+=logprob.exp();
             }
         }

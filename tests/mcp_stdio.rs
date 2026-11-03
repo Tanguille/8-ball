@@ -9,13 +9,14 @@ use wiremock::{
 
 #[tokio::test]
 async fn handler_registers_tools_instructions_and_fail_open_results() {
-    for status in [200, 500] {
+    for (status, probability) in [(200, 0.97), (500, 0.97), (200, 2.0)] {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/systemone"))
             .respond_with(
-                ResponseTemplate::new(status)
-                    .set_body_json(json!({"answers":{"greeting":{"type":"noul","noul":0.97}}})),
+                ResponseTemplate::new(status).set_body_json(
+                    json!({"answers":{"greeting":{"type":"noul","noul":probability}}}),
+                ),
             )
             .mount(&mock)
             .await;
@@ -62,7 +63,7 @@ async fn handler_registers_tools_instructions_and_fail_open_results() {
             )
             .await
             .unwrap();
-        if status == 200 {
+        if status == 200 && probability < 1.0 {
             assert_eq!(
                 result.structured_content.as_ref().unwrap()["results"][0]["verdict"],
                 "yes"
