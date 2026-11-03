@@ -202,6 +202,8 @@ async fn live_logprob_noul() {
     require(9934).await;
     let ep = Endpoint::new("chat", &dev_config().endpoints["chat"], None).unwrap();
     let qs = questions();
+    let mut greetings = Vec::new();
+    let mut non_greetings = Vec::new();
     for (state, yes) in [
         ("hi there, how are you?", true),
         ("Good morning everyone!", true),
@@ -211,9 +213,22 @@ async fn live_logprob_noul() {
         let (p, _) = ep.ask(state, &qs[..1]).await.unwrap();
         eprintln!("chat {state:?}: {p:?}");
         assert!(
-            if yes { p[0][0] > 0.7 } else { p[0][0] < 0.3 },
+            if yes { p[0][0] > 0.5 } else { p[0][0] < 0.5 },
             "{state:?}: {p:?}"
         );
+        if yes {
+            greetings.push(p[0][0]);
+        } else {
+            non_greetings.push(p[0][0]);
+        }
+    }
+    for greeting in greetings {
+        for non_greeting in &non_greetings {
+            assert!(
+                greeting > *non_greeting,
+                "greeting {greeting} <= non-greeting {non_greeting}"
+            );
+        }
     }
 }
 #[tokio::test]

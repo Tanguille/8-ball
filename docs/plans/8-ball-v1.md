@@ -1499,7 +1499,7 @@ Test in `tests/doctor.rs`: one healthy mock endpoint and one dead endpoint (an u
    - `concurrency == 2` (from `/props`);
    - a fingerprint containing `vllm-d3-nano-Q8_0.gguf@b`.
 2. **`live_detect_chat`** (step 2): the chat endpoint gives `kind == Logprob`. Its `/v1/models` has `architecture` without `decisions`, and the config sets `model`.
-3. **`live_logprob_noul`** (step 3): the same four clear-cut greeting cases as `live_systemone_noul_clear_cases`, through the `chat` endpoint. Greetings get p(yes) > 0.7 and non-greetings < 0.3. The small chat model is less sharp than D3, hence the looser thresholds; ask the user before loosening them further.
+3. **`live_logprob_noul`** (step 3): the same four clear-cut greeting cases as `live_systemone_noul_clear_cases`, through the `chat` endpoint. Assert ranking, not absolute thresholds (user decision 2026-11-03, after the 0.8B stand-in gave the invoice 0.472): every greeting's p(yes) is strictly higher than every non-greeting's, and each case's argmax is correct (greetings p(yes) > 0.5, non-greetings < 0.5). This tests the backend's probability mapping, not model sharpness; calibration handles sharpness. Ask the user before loosening it further.
 4. **`live_logprob_choice`** (step 3): the billing/shipping/technical cases through `chat`. The right option has the highest probability in at least 2 of the 3 cases. The 0.8B model isn't D3, so if all 3 pass, tighten this to 3 of 3.
 5. **`live_logprob_mass`** (step 3): every answer in the two tests above had a label mass ≥ 0.5, so none errored. If they error with "did not answer with a label":
    - print the raw `top_logprobs` with `eprintln!`;
