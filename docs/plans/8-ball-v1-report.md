@@ -3640,3 +3640,128 @@ $ cargo nextest run
 ```
 
 `cargo fmt --all` passed. 60 tests passed; 15 live tests intentionally ignored by this dependency-only check. No new behavior or tools installed.
+
+### Chunk 3 step 2: hashes and calibration math
+
+```text
+$ cargo nextest run --test calibrate_math (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0432]: unresolved imports `eightball::verdict::Example`, `eightball::verdict::calibrate`, `eightball::verdict::calibration_id`, `eightball::verdict::question_hash`, `eightball::verdict::short_hash`
+ --> tests/calibrate_math.rs:1:79
+  |
+1 | ...tion},verdict::{Bands,Example,calibrate,calibration_id,question_hash,short_hash,verdict}};
+  |                          ^^^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^^^ ^^^^^^^^^^^^^ ^^^^^^^^^^ no `short_hash` in `verdict`
+  |                          |       |         |              |
+  |                          |       |         |              no `question_hash` in `verdict`
+  |                          |       |         no `calibration_id` in `verdict`
+  |                          |       no `calibrate` in `verdict`
+  |                          no `Example` in `verdict`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `eightball` (test "calibrate_math") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=calibrate_math'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test calibrate_math (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.62s
+────────────
+ Nextest run ID 71c0f486-0807-4649-9427-69ae8d3a02e7 with nextest profile: default
+    Starting 7 tests across 1 binary
+        PASS [   0.003s] (1/7) eightball::calibrate_math overlap_gives_unsure
+        PASS [   0.003s] (2/7) eightball::calibrate_math separable_noul
+        PASS [   0.003s] (3/7) eightball::calibrate_math question_hash_changes
+        PASS [   0.003s] (4/7) eightball::calibrate_math bad_target
+        PASS [   0.003s] (5/7) eightball::calibrate_math calibration_id_changes_with_fingerprint
+        PASS [   0.003s] (6/7) eightball::calibrate_math choice_threshold
+        PASS [   0.003s] (7/7) eightball::calibrate_math too_few_examples
+────────────
+     Summary [   0.004s] 7 tests run: 7 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.94s
+────────────
+ Nextest run ID 8eda2171-eeee-422d-8a1a-96502955b9e0 with nextest profile: default
+    Starting 67 tests across 16 binaries (15 tests skipped)
+        PASS [   0.005s] ( 1/67) eightball::calibrate_math bad_target
+        PASS [   0.006s] ( 2/67) eightball::calibrate_math separable_noul
+        PASS [   0.006s] ( 3/67) eightball::calibrate_math too_few_examples
+        PASS [   0.006s] ( 4/67) eightball::calibrate_math question_hash_changes
+        PASS [   0.006s] ( 5/67) eightball::calibrate_math overlap_gives_unsure
+        PASS [   0.006s] ( 6/67) eightball::calibrate_math calibration_id_changes_with_fingerprint
+        PASS [   0.006s] ( 7/67) eightball::config zero_concurrency
+        PASS [   0.006s] ( 8/67) eightball::config logprob_needs_model
+        PASS [   0.006s] ( 9/67) eightball::config default_must_exist
+        PASS [   0.007s] (10/67) eightball::calibrate_math choice_threshold
+        PASS [   0.007s] (11/67) eightball::config spec_parses
+        PASS [   0.009s] (12/67) eightball::config minimal_ok
+        PASS [   0.009s] (13/67) eightball::config bad_spec_name
+        PASS [   0.010s] (14/67) eightball::config unknown_key_rejected
+        PASS [   0.008s] (15/67) eightball::embed cosine_similarity
+        PASS [   0.015s] (16/67) eightball::config retention_default
+        PASS [   0.008s] (17/67) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.008s] (18/67) eightball::question noul_without_criteria_parses
+        PASS [   0.013s] (19/67) eightball::question score_labels
+        PASS [   0.010s] (20/67) eightball::question validate_rejects
+        PASS [   0.033s] (21/67) eightball::embed ten_texts_use_two_ordered_batches
+        PASS [   0.034s] (22/67) eightball::embed shuffled_indices_restore_order
+        PASS [   0.034s] (23/67) eightball::logprob extra_body_is_merged
+        PASS [   0.035s] (24/67) eightball::logprob case_and_space_variants_add_mass
+        PASS [   0.035s] (25/67) eightball::logprob letters_map_in_option_order
+        PASS [   0.042s] (26/67) eightball::detect explicit_kind_skips_models
+        PASS [   0.042s] (27/67) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.039s] (28/67) eightball::embed mixed_dimensions_rejected
+        PASS [   0.046s] (29/67) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.039s] (30/67) eightball::logprob lowercase_choice_does_not_match_and_low_mass_errors
+        PASS [   0.038s] (31/67) eightball::logprob state_closing_delimiter_is_escaped
+        PASS [   0.039s] (32/67) eightball::logprob twenty_seven_options_rejected
+        PASS [   0.050s] (33/67) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.007s] (34/67) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.032s] (35/67) eightball::rerank score_is_mapped_from_logit
+        PASS [   0.043s] (36/67) eightball::rerank choice_is_rejected
+        PASS [   0.078s] (37/67) eightball::detect detection_gets_send_bearer
+        PASS [   0.072s] (38/67) eightball::doctor reports_healthy_probe_and_dead_error
+        PASS [   0.083s] (39/67) eightball::detect failed_detection_is_not_cached
+        PASS [   0.041s] (40/67) eightball::systemone long_state_is_fitted
+        PASS [   0.015s] (41/67) eightball::verdict choice_confidence_readme
+        PASS [   0.094s] (42/67) eightball::cli_ask choice_prints_billing
+        PASS [   0.012s] (43/67) eightball::verdict choice_default_bands
+        PASS [   0.099s] (44/67) eightball::cli_ask dead_server_exits_four
+        PASS [   0.048s] (45/67) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.008s] (46/67) eightball::verdict score_confidence_readme
+        PASS [   0.100s] (47/67) eightball::embed missing_or_duplicate_indices_are_errors
+        PASS [   0.006s] (48/67) eightball::verdict uniform_is_zero
+        PASS [   0.014s] (49/67) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.077s] (50/67) eightball::rest_ask backend_failure_is_502
+        PASS [   0.015s] (51/67) eightball::verdict noul_default_bands
+        PASS [   0.063s] (52/67) eightball::systemone three_questions_one_request
+        PASS [   0.066s] (53/67) eightball::systemone bearer_only_when_set
+        PASS [   0.073s] (54/67) eightball::rest_ask empty_questions_is_400
+        PASS [   0.065s] (55/67) eightball::systemone http_400_is_error_with_body
+        PASS [   0.077s] (56/67) eightball::rest_ask healthz_is_ok
+        PASS [   0.067s] (57/67) eightball::triage one_failed_judgment_fails_whole_triage
+        PASS [   0.058s] (58/67) eightball::triage sixty_five_items_rejected
+        PASS [   0.081s] (59/67) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.081s] (60/67) eightball::triage cli_reads_json_items_from_stdin
+        PASS [   0.081s] (61/67) eightball::triage dedupes_and_partitions_verdicts
+        PASS [   0.054s] (62/67) eightball::triage top_k_requires_embedder
+        PASS [   0.073s] (63/67) eightball::triage prefilter_judges_only_closest_items
+        PASS [   0.088s] (64/67) eightball::triage failed_embedder_judges_every_item_with_warning
+        PASS [   0.151s] (65/67) eightball::doctor cli_exit_depends_on_default_endpoint
+        PASS [   0.180s] (66/67) eightball::cli_ask noul_exit_codes
+        PASS [   0.667s] (67/67) eightball::systemone concurrency_one_serializes
+────────────
+     Summary [   0.717s] 67 tests run: 67 passed, 15 skipped
+```
+
+`cargo fmt --all` passed. All seven prescribed calibration-math tests pass; full suite: 67 passed, 15 ignored live tests. Threshold search enforces the minimum evidence per side; reports use the same real verdict function as decisions. No deviations.

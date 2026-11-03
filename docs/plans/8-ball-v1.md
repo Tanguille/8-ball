@@ -1559,6 +1559,8 @@ cargo add prometheus-client
 Add `pub mod store;` to `lib.rs`.
 
 #### Step 2: Hashes and calibration math in `verdict.rs` (tests first)
+
+**Execution status:** Complete; seven mock math/hash tests and full checks pass; evidence in report.
 Add:
 ```rust
 /// First 16 hex chars of sha256(text).
