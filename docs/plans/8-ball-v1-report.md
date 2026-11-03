@@ -260,3 +260,62 @@ Sanity curl rerank:
 ```
 
 Sanity embedding curl: `768` dimensions. Loaded-model self-check passed on ports 9931–9934. Reranker returns logits (2.2409818172454834, -10.912446975708008); Chunk 2 must use sigmoid. `shellcheck`, `yayamlls validate`, `cargo fmt --all --check`, and `cargo clippy --all-targets -- -D warnings` passed. Nextest empty-scaffold check: 0 tests, 0 failures (`--no-tests pass`).
+
+### Step 2: questions
+
+```text
+$ cargo nextest run --test question (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0432]: unresolved imports `eightball::question::Kind`, `eightball::question::Question`, `eightball::question::validate_all`
+ --> tests/question.rs:1:27
+  |
+1 | use eightball::question::{Kind, Question, validate_all};
+  |                           ^^^^  ^^^^^^^^  ^^^^^^^^^^^^ no `validate_all` in `question`
+  |                           |     |
+  |                           |     no `Question` in `question`
+  |                           no `Kind` in `question`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `eightball` (test "question") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=question'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test question (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.56s
+────────────
+ Nextest run ID c168cbfc-aea9-48c5-a9a4-e18b5c586a11 with nextest profile: default
+    Starting 4 tests across 1 binary
+        PASS [   0.004s] (1/4) eightball::question score_labels
+        PASS [   0.004s] (2/4) eightball::question noul_without_criteria_parses
+        PASS [   0.004s] (3/4) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.004s] (4/4) eightball::question validate_rejects
+────────────
+     Summary [   0.005s] 4 tests run: 4 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.48s
+────────────
+ Nextest run ID 8931f442-fdc1-464c-a6f7-0ccfbb2d00ac with nextest profile: default
+    Starting 4 tests across 3 binaries
+        PASS [   0.003s] (1/4) eightball::question noul_without_criteria_parses
+        PASS [   0.003s] (2/4) eightball::question validate_rejects
+        PASS [   0.003s] (3/4) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.003s] (4/4) eightball::question score_labels
+────────────
+     Summary [   0.003s] 4 tests run: 4 passed, 0 skipped
+```
+
+`cargo fmt --all` passed. Clippy requested `Eq` alongside `PartialEq`; added the derives without changing behavior. All four specified question tests pass, including the six validation rejection cases.
+
+The Aikido plugin-requested external scan was rejected by automatic approval review: it would transmit repository source files outside the authorized local-only scope. No scan was performed; no external scan approval is needed to continue the plan's local checks.

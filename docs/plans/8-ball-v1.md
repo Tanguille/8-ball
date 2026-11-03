@@ -951,6 +951,8 @@ git switch -c feat/v1
 If the user says no to the download, skip the live steps in every chunk and report that they were skipped. Never pretend they ran.
 
 #### Step 2: `question.rs` (tests first)
+
+**Execution status:** Complete; red/green and full-check evidence in `8-ball-v1-report.md`.
 1. Create `tests/question.rs` with these tests:
    - `choice_roundtrip_keeps_order`: deserialize `{"id":"q","instructions":"x","type":"choice","criteria":{"b":"","a":"desc"}}`. Assert `kind.labels() == ["b","a"]`, and that serializing back to JSON gives the same key order.
    - `noul_without_criteria_parses`: `{"id":"q","instructions":"x","type":"noul"}` parses.
