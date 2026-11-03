@@ -1287,7 +1287,7 @@ Only if the raw curl gives the same "wrong" answer is it the model. In that case
 ---
 
 ### Chunk 2: Any endpoint
-**Status:** Blocked at step 3 (model limit; see `8-ball-v1-report.md`) · **Wave:** 2 · **Estimated Context:** ~80k tokens · **Complexity:** High
+**Status:** In Progress (owner revised step 3 live requirement; evidence in report) · **Wave:** 2 · **Estimated Context:** ~80k tokens · **Complexity:** High
 
 #### Goal
 - `kind` can be omitted for systemone and logprob endpoints, which are then auto-detected.
@@ -1364,7 +1364,7 @@ Tests in `tests/detect.rs`, all with wiremock:
 
 #### Step 3: Logprob backend (tests first)
 
-**Execution status:** WIP, contract-blocked. 44 mock tests pass; raw model replay reproduces invoice P(greeting) 0.4719876966 against the required <0.3. No assertion changed; one owner decision required, detailed in report.
+**Execution status:** Complete after owner decision 2026-11-03 changed the live test to ranking and correct argmax. 44 mock and all 11 live tests pass; evidence and historical stop are in the report.
 `backend/logprob.rs`:
 ```rust
 pub async fn ask(ep: &Endpoint, state: &str, qs: &[Question]) -> Result<Vec<Probs>, BackendError>;
