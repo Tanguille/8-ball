@@ -277,6 +277,8 @@ The directory-publication check for a hosted privacy-policy URL is deferred by t
 
 Follow the [Rust style guide](docs/rust-style.md), adapted from Mesh Organiser, for source and tests.
 
+Dependency updates use the cluster's Renovate operator and [.renovaterc.json5](.renovaterc.json5), following Mesh Organiser's pinned preset and dashboard rerun checkbox. Activation requires the existing GitHub App installation to include this private repository, the config on the default branch, and the operator's discovery list to include `Tanguille/8-ball`. Updates require review; the local model image also requires dashboard approval so it can stay aligned with the cluster image.
+
 ```sh
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
