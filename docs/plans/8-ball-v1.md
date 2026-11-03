@@ -1763,6 +1763,8 @@ Also add `#[arg(long)] spec: Option<String>` to `Ask`. With `--spec`, the positi
 **Doctor `specs`** now lists every spec with `name`, `type`, `instructions`, `calibration_id`, `calibrated` (bool) and `report` (if calibrated).
 
 #### Step 6: Metrics
+
+**Execution status:** Complete; three exporter/cardinality/error tests and full checks pass; evidence in report.
 `service.rs`:
 ```rust
 #[derive(Clone, Debug, Hash, PartialEq, Eq, prometheus_client::encoding::EncodeLabelSet)]

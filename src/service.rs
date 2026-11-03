@@ -127,7 +127,56 @@ impl From<StoreError> for ServiceError {
     }
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, prometheus_client::encoding::EncodeLabelSet)]
+struct DecisionLabels {
+    endpoint: String,
+    spec: String,
+    verdict: String,
+}
+#[derive(Clone, Debug, Hash, PartialEq, Eq, prometheus_client::encoding::EncodeLabelSet)]
+struct EndpointLabels {
+    endpoint: String,
+}
+
+pub struct Metrics {
+    registry: prometheus_client::registry::Registry,
+    decisions: prometheus_client::metrics::family::Family<
+        DecisionLabels,
+        prometheus_client::metrics::counter::Counter,
+    >,
+    backend_errors: prometheus_client::metrics::family::Family<
+        EndpointLabels,
+        prometheus_client::metrics::counter::Counter,
+    >,
+}
+impl Default for Metrics {
+    fn default() -> Self {
+        let mut registry = prometheus_client::registry::Registry::default();
+        let decisions = prometheus_client::metrics::family::Family::<
+            DecisionLabels,
+            prometheus_client::metrics::counter::Counter,
+        >::default();
+        let backend_errors = prometheus_client::metrics::family::Family::<
+            EndpointLabels,
+            prometheus_client::metrics::counter::Counter,
+        >::default();
+        registry.register("eightball_decisions", "Decision results", decisions.clone());
+        registry.register(
+            "eightball_backend_errors",
+            "Failed endpoint calls",
+            backend_errors.clone(),
+        );
+        Self {
+            registry,
+            decisions,
+            backend_errors,
+        }
+    }
+}
+
 struct Judgment {
+    endpoint: String,
+    spec: Option<String>,
     decision: Decision,
     fresh: Option<NewDecision>,
 }
@@ -137,6 +186,7 @@ pub struct Service {
     endpoints: IndexMap<String, Endpoint>,
     embedder: Option<Embedder>,
     store: Store,
+    metrics: Metrics,
 }
 
 impl Service {
@@ -154,6 +204,27 @@ impl Service {
             endpoints,
             embedder,
             store,
+            metrics: Metrics::default(),
+        }
+    }
+
+    pub fn metrics(&self) -> Result<String, ServiceError> {
+        let mut text = String::new();
+        prometheus_client::encoding::text::encode(&mut text, &self.metrics.registry)
+            .map_err(|e| ServiceError::Store(format!("metrics encoding: {e}")))?;
+        Ok(text)
+    }
+
+    fn backend_error(&self, name: &str, error: crate::backend::BackendError) -> ServiceError {
+        self.metrics
+            .backend_errors
+            .get_or_create(&EndpointLabels {
+                endpoint: name.into(),
+            })
+            .inc();
+        ServiceError::Backend {
+            endpoint: name.into(),
+            message: error.0,
         }
     }
 
@@ -202,10 +273,10 @@ impl Service {
         let (questions, name) = self.resolve_questions(Some(spec), &[], None)?;
         let question = &questions[0];
         let endpoint = &self.endpoints[&name];
-        let info = endpoint.info().await.map_err(|e| ServiceError::Backend {
-            endpoint: name.clone(),
-            message: e.to_string(),
-        })?;
+        let info = endpoint
+            .info()
+            .await
+            .map_err(|e| self.backend_error(&name, e))?;
         let qh = verdict::question_hash(question);
         let cid = verdict::calibration_id(&qh, info.kind, &info.fingerprint);
         let mut groups: IndexMap<String, Vec<crate::store::Labelled>> = IndexMap::new();
@@ -269,7 +340,7 @@ impl Service {
             let mut report=DoctorEndpoint {name:name.clone(),url:self.config.endpoints[name].url.clone(),kind:None,fingerprint:None,concurrency:None,probe:None,error:None};
             let info=match endpoint.info().await {
                 Ok(info)=>info,
-                Err(e)=> {report.error=Some(e.to_string());return report;},
+                Err(e)=> {report.error=Some(self.backend_error(name,e).to_string());return report;},
             };
             report.kind=Some(info.kind);report.fingerprint=Some(info.fingerprint.clone());report.concurrency=Some(info.concurrency);
             if info.kind!=BackendKind::Rerank {
@@ -279,7 +350,7 @@ impl Service {
                 let ms=start.elapsed().as_millis();
                 report.probe=Some(match result {
                     Ok((probs,_))=>serde_json::json!({"verdict":verdict::verdict(&question.kind,&question.kind.labels(),&probs[0],Bands::default_for(&question.kind)),"p_yes":probs[0][0],"ms":ms}),
-                    Err(e)=>serde_json::json!({"error":e.to_string(),"ms":ms}),
+                    Err(e)=>serde_json::json!({"error":self.backend_error(name,e).to_string(),"ms":ms}),
                 });
             }
             report
@@ -307,7 +378,10 @@ impl Service {
                         Err(e) => status["error"] = serde_json::json!(e.to_string()),
                     }
                 }
-                Err(e) => status["error"] = serde_json::json!(e.to_string()),
+                Err(e) => {
+                    status["error"] =
+                        serde_json::json!(self.backend_error(&endpoint, e).to_string());
+                }
             }
             specs.push(status);
         }
@@ -487,10 +561,7 @@ impl Service {
         let (questions, name) =
             self.resolve_questions(req.spec.as_deref(), &req.questions, req.endpoint.as_deref())?;
         let endpoint = &self.endpoints[&name];
-        let backend_error = |e: crate::backend::BackendError| ServiceError::Backend {
-            endpoint: name.clone(),
-            message: e.to_string(),
-        };
+        let backend_error = |e| self.backend_error(&name, e);
         let info = endpoint.info().await.map_err(backend_error)?;
         let state = endpoint.fitted(&req.state);
         let state_hash = verdict::short_hash(&state);
@@ -558,7 +629,12 @@ impl Service {
                 calibrated,
                 cached,
             };
-            judgments.push(Judgment { decision, fresh });
+            judgments.push(Judgment {
+                endpoint: name.clone(),
+                spec: req.spec.clone(),
+                decision,
+                fresh,
+            });
         }
         Ok(judgments)
     }
@@ -580,6 +656,23 @@ impl Service {
                 if !judgment.decision.cached {
                     judgment.decision.id = ids.next().expect("id for each fresh decision");
                 }
+                let verdict = if judgment.spec.is_none() {
+                    if judgment.decision.verdict == "unsure" {
+                        "unsure".into()
+                    } else {
+                        "decided".into()
+                    }
+                } else {
+                    judgment.decision.verdict.clone()
+                };
+                self.metrics
+                    .decisions
+                    .get_or_create(&DecisionLabels {
+                        endpoint: judgment.endpoint,
+                        spec: judgment.spec.unwrap_or_default(),
+                        verdict,
+                    })
+                    .inc();
                 judgment.decision
             })
             .collect())

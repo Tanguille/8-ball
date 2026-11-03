@@ -18,6 +18,7 @@ pub fn router(service: Arc<Service>) -> Router {
         .route("/v1/doctor", get(doctor))
         .route("/v1/label", post(label))
         .route("/v1/calibrate", post(calibrate))
+        .route("/metrics", get(metrics))
         .route("/healthz", get(|| async { "ok" }))
         .with_state(service)
 }
@@ -78,4 +79,16 @@ impl IntoResponse for ServiceError {
         };
         (status, Json(json!({"error":self.to_string()}))).into_response()
     }
+}
+
+async fn metrics(State(service): State<Arc<Service>>) -> Result<impl IntoResponse, ServiceError> {
+    service.metrics().map(|body| {
+        (
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "application/openmetrics-text; version=1.0.0; charset=utf-8",
+            )],
+            body,
+        )
+    })
 }
