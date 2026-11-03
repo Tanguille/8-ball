@@ -575,3 +575,205 @@ async fn live_question_edit_invalidates() {
     eprintln!("edited question: {result:?}; calibration={calibration:?}");
     assert_eq!(calibration.report.examples, 0);
 }
+
+fn mcp_command(config: &std::path::Path, db: &std::path::Path) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"));
+    command
+        .arg("mcp")
+        .arg("--config")
+        .arg(config)
+        .arg("--db")
+        .arg(db)
+        .kill_on_drop(true);
+    command
+}
+struct LiveServer {
+    child: std::process::Child,
+    url: String,
+}
+impl Drop for LiveServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+fn live_server(config: &std::path::Path, db: &std::path::Path, key: Option<&str>) -> LiveServer {
+    use std::{
+        io::{BufRead, BufReader},
+        process::{Command, Stdio},
+    };
+    let mut command = Command::new(env!("CARGO_BIN_EXE_8ball"));
+    command
+        .arg("serve")
+        .arg("--config")
+        .arg(config)
+        .arg("--db")
+        .arg(db)
+        .args(["--listen", "127.0.0.1:0"])
+        .stderr(Stdio::piped());
+    if let Some(key) = key {
+        command.args(["--api-key", key]);
+    }
+    let mut server = LiveServer {
+        child: command.spawn().unwrap(),
+        url: String::new(),
+    };
+    let mut errors = String::new();
+    for line in BufReader::new(server.child.stderr.take().unwrap()).lines() {
+        let line = line.unwrap();
+        if let Some((_, addr)) = line.split_once("listening on ") {
+            server.url = format!("http://{}", addr.trim());
+            return server;
+        }
+        errors.push_str(&line);
+        errors.push('\n');
+    }
+    panic!("HTTP server did not start: {errors}");
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_mcp_handler_ask() {
+    use rmcp::{ServiceExt, model::CallToolRequestParams};
+    require(9931).await;
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let service = std::sync::Arc::new(calibration_service(
+        dev_config(),
+        &dir.path().join("db.sqlite"),
+    ));
+    let (server_io, client_io) = tokio::io::duplex(16_384);
+    let task = tokio::spawn(async move {
+        eightball::mcp::Mcp::new(service)
+            .serve(server_io)
+            .await
+            .unwrap()
+            .waiting()
+            .await
+            .unwrap();
+    });
+    let client = ().serve(client_io).await.unwrap();
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("decision_ask").with_arguments(
+                json!({"state":"hi there, how are you?","spec":"greeting"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    eprintln!("MCP handler real response: {result:?}");
+    assert_eq!(
+        result.structured_content.unwrap()["results"][0]["verdict"],
+        "yes"
+    );
+    client.cancel().await.unwrap();
+    task.abort();
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_mcp_stdio_ask() {
+    use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
+    require(9931).await;
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml");
+    let client =
+        ().serve(
+            TokioChildProcess::new(mcp_command(&config, &dir.path().join("db.sqlite"))).unwrap(),
+        )
+        .await
+        .unwrap();
+    let tools = client.list_all_tools().await.unwrap();
+    assert_eq!(tools.len(), 2);
+    let info = client.peer_info().unwrap();
+    let instructions = info.instructions.as_deref().unwrap();
+    assert!(instructions.contains("greeting") && instructions.contains("storage-risk"));
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("decision_ask").with_arguments(
+                json!({"state":"hi there, how are you?","spec":"greeting"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    eprintln!("MCP stdio real response: {result:?}");
+    assert_eq!(
+        result.structured_content.unwrap()["results"][0]["verdict"],
+        "yes"
+    );
+    client.cancel().await.unwrap();
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_mcp_http_triage() {
+    use rmcp::{
+        ServiceExt,
+        model::CallToolRequestParams,
+        transport::{
+            StreamableHttpClientTransport,
+            streamable_http_client::StreamableHttpClientTransportConfig,
+        },
+    };
+    require(9931).await;
+    require(9932).await;
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml");
+    let server = live_server(&config, &dir.path().join("db.sqlite"), Some("k"));
+    let transport = StreamableHttpClientTransport::from_config(
+        StreamableHttpClientTransportConfig::with_uri(format!("{}/mcp", server.url))
+            .auth_header("k"),
+    );
+    let client = ().serve(transport).await.unwrap();
+    let args = json!({"items":["The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.","A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5});
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("decision_triage")
+                .with_arguments(args.as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    eprintln!("MCP HTTP real triage: {result:?}");
+    let body = result.structured_content.unwrap();
+    assert_eq!(
+        body["kept"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["index"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    client.cancel().await.unwrap();
+}
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_mcp_failure_is_fail_open() {
+    use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
+    let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let config = dir.path().join("dead.toml");
+    std::fs::write(
+        &config,
+        "default='d3'\n[endpoints.d3]\nurl='http://127.0.0.1:9'\nkind='systemone'",
+    )
+    .unwrap();
+    let client =
+        ().serve(
+            TokioChildProcess::new(mcp_command(&config, &dir.path().join("db.sqlite"))).unwrap(),
+        )
+        .await
+        .unwrap();
+    let result=client.call_tool(CallToolRequestParams::new("decision_ask").with_arguments(json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}).as_object().unwrap().clone())).await.unwrap();
+    eprintln!("MCP real transport fail-open: {result:?}");
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        result
+            .content
+            .iter()
+            .filter_map(|c| c.as_text())
+            .any(|t| t.text.contains("Fail open"))
+    );
+    client.cancel().await.unwrap();
+}

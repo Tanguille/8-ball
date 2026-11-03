@@ -1853,6 +1853,8 @@ cargo add --dev rmcp --features client,transport-child-process,transport-streama
 `tokio-util` provides `CancellationToken`. Add `pub mod mcp;` to `lib.rs`.
 
 #### Step 2: `mcp.rs` (tests first, see step 5)
+
+**Execution status:** Complete; mock and real JSON-RPC handler tests pass. Planned transport tests are written and await step 3; source-based API/lint adjustments are in report.
 ```rust
 use rmcp::{Json, ServerHandler, handler::server::{router::tool::ToolRouter, wrapper::Parameters},
            model::{ServerCapabilities, ServerInfo}, tool, tool_handler, tool_router};

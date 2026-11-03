@@ -5637,3 +5637,174 @@ $ cargo nextest run
 ```
 
 `cargo fmt --all` passed. 84 mock tests pass; 18 live tests ignored in this dependency-only run. No new behavior yet.
+
+### Chunk 4 step 2: MCP tools
+
+```text
+$ cargo nextest run --test mcp_stdio (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0432]: unresolved import `eightball::mcp::Mcp`
+ --> tests/mcp_stdio.rs:2:50
+  |
+2 | use eightball::{backend::Endpoint,config::Config,mcp::Mcp,service::Service,store::Store};
+  |                                                  ^^^^^---
+  |                                                       |
+  |                                                       no `Mcp` in `mcp`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `eightball` (test "mcp_stdio") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=mcp_stdio'` exited with code 101
+```
+
+```text
+$ MCP live tests written before handler implementation (red)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+error[E0433]: cannot find `Mcp` in `mcp`
+   --> tests/live.rs:607:55
+    |
+607 |     let task=tokio::spawn(async move {eightball::mcp::Mcp::new(service).serve(server_io).await.unwrap().waiting().await.unwrap();});
+    |                                                       ^^^ could not find `Mcp` in `mcp`
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `eightball` (test "live") due to 1 previous error
+error: command `/home/tanguille/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run '--message-format=json-render-diagnostics' '--test=live'` exited with code 101
+```
+
+```text
+$ cargo nextest run --test mcp_stdio (green)
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.43s
+────────────
+ Nextest run ID b1b9a6b5-2710-4309-906c-937aac528b51 with nextest profile: default
+    Starting 1 test across 1 binary
+        PASS [   0.046s] (1/1) eightball::mcp_stdio handler_registers_tools_instructions_and_fail_open_results
+────────────
+     Summary [   0.047s] 1 test run: 1 passed, 0 skipped
+```
+
+```text
+$ cargo clippy --all-targets -- -D warnings
+    Checking eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.49s
+```
+
+```text
+$ cargo nextest run
+   Compiling eightball v0.1.0 (/home/tanguille/Documents/PriveProjecten/8-ball)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.67s
+────────────
+ Nextest run ID 419da4f8-d34e-481a-8a22-19cf2ade4057 with nextest profile: default
+    Starting 85 tests across 21 binaries (22 tests skipped)
+        PASS [   0.006s] ( 1/85) eightball::calibrate_math question_hash_changes
+        PASS [   0.006s] ( 2/85) eightball::calibrate_math separable_noul
+        PASS [   0.007s] ( 3/85) eightball::calibrate_math bad_target
+        PASS [   0.007s] ( 4/85) eightball::calibrate_math choice_threshold
+        PASS [   0.007s] ( 5/85) eightball::calibrate_math calibration_id_changes_with_fingerprint
+        PASS [   0.007s] ( 6/85) eightball::config retention_default
+        PASS [   0.008s] ( 7/85) eightball::config spec_parses
+        PASS [   0.009s] ( 8/85) eightball::config minimal_ok
+        PASS [   0.009s] ( 9/85) eightball::config default_must_exist
+        PASS [   0.009s] (10/85) eightball::calibrate_math too_few_examples
+        PASS [   0.010s] (11/85) eightball::calibrate_math overlap_gives_unsure
+        PASS [   0.010s] (12/85) eightball::config logprob_needs_model
+        PASS [   0.010s] (13/85) eightball::config bad_spec_name
+        PASS [   0.007s] (14/85) eightball::config zero_concurrency
+        PASS [   0.009s] (15/85) eightball::config unknown_key_rejected
+        PASS [   0.006s] (16/85) eightball::embed cosine_similarity
+        PASS [   0.034s] (17/85) eightball::cache rejects_unknown_spec_and_mixed_question_sources
+        PASS [   0.027s] (18/85) eightball::detect failed_detection_is_not_cached
+        PASS [   0.026s] (19/85) eightball::detect text_architecture_and_model_detect_logprob
+        PASS [   0.038s] (20/85) eightball::cache cache_hashes_exactly_the_fitted_state
+        PASS [   0.032s] (21/85) eightball::detect missing_architecture_requires_explicit_kind
+        PASS [   0.043s] (22/85) eightball::calibrate_loop conflicting_labels_are_excluded
+        PASS [   0.046s] (23/85) eightball::cache repeated_ask_reuses_answer_and_row_id
+        PASS [   0.047s] (24/85) eightball::cache spec_uses_bands_but_ad_hoc_uses_defaults_on_same_cache
+        PASS [   0.040s] (25/85) eightball::detect explicit_kind_skips_models
+        PASS [   0.041s] (26/85) eightball::detect decisions_props_and_fingerprint
+        PASS [   0.043s] (27/85) eightball::detect detection_gets_send_bearer
+        PASS [   0.037s] (28/85) eightball::logprob case_and_space_variants_add_mass
+        PASS [   0.040s] (29/85) eightball::embed shuffled_indices_restore_order
+        PASS [   0.045s] (30/85) eightball::embed mixed_dimensions_rejected
+        PASS [   0.006s] (31/85) eightball::question noul_without_criteria_parses
+        PASS [   0.007s] (32/85) eightball::question validate_rejects
+        PASS [   0.011s] (33/85) eightball::question score_labels
+        PASS [   0.056s] (34/85) eightball::doctor reports_healthy_probe_and_dead_error
+        PASS [   0.019s] (35/85) eightball::question choice_roundtrip_keeps_order
+        PASS [   0.053s] (36/85) eightball::embed ten_texts_use_two_ordered_batches
+        PASS [   0.070s] (37/85) eightball::calibrate_loop label_validation_rejects_unknown_adhoc_old_and_invalid_values
+        PASS [   0.071s] (38/85) eightball::cli_ask dead_server_exits_four
+        PASS [   0.037s] (39/85) eightball::logprob lowercase_choice_does_not_match_and_low_mass_errors
+        PASS [   0.039s] (40/85) eightball::logprob letters_map_in_option_order
+        PASS [   0.039s] (41/85) eightball::logprob state_closing_delimiter_is_escaped
+        PASS [   0.009s] (42/85) eightball::store file_is_private_and_migrations_are_idempotent
+        PASS [   0.007s] (43/85) eightball::store labels_can_be_replaced_and_are_scoped
+        PASS [   0.049s] (44/85) eightball::logprob extra_body_is_merged
+        PASS [   0.015s] (45/85) eightball::store batch_insert_returns_each_row_id
+        PASS [   0.012s] (46/85) eightball::store insert_and_cache_lookup
+        PASS [   0.073s] (47/85) eightball::embed missing_or_duplicate_indices_are_errors
+        PASS [   0.015s] (48/85) eightball::store calibration_upsert_keeps_latest_bands
+        PASS [   0.008s] (49/85) eightball::store pruning_preserves_labelled_rows
+        PASS [   0.011s] (50/85) eightball::systemone fit_respects_char_boundaries
+        PASS [   0.094s] (51/85) eightball::cli_ask choice_prints_billing
+        PASS [   0.047s] (52/85) eightball::metrics spec_verdict_and_cache_hits_are_counted
+        PASS [   0.065s] (53/85) eightball::metrics backend_errors_are_counted
+        PASS [   0.031s] (54/85) eightball::systemone http_400_is_error_with_body
+        PASS [   0.034s] (55/85) eightball::systemone long_state_is_fitted
+        PASS [   0.053s] (56/85) eightball::rest_ask healthz_is_ok
+        PASS [   0.039s] (57/85) eightball::systemone http_501_is_not_decision_model
+        PASS [   0.042s] (58/85) eightball::systemone bearer_only_when_set
+        PASS [   0.005s] (59/85) eightball::verdict choice_confidence_readme
+        PASS [   0.080s] (60/85) eightball::metrics ad_hoc_decision_has_bounded_labels_and_openmetrics_type
+        PASS [   0.004s] (61/85) eightball::verdict noul_default_bands
+        PASS [   0.003s] (62/85) eightball::verdict score_confidence_readme
+        PASS [   0.087s] (63/85) eightball::logprob twenty_seven_options_rejected
+        PASS [   0.072s] (64/85) eightball::rerank score_is_mapped_from_logit
+        PASS [   0.008s] (65/85) eightball::verdict choice_default_bands
+        PASS [   0.076s] (66/85) eightball::rerank choice_is_rejected
+        PASS [   0.066s] (67/85) eightball::rest_ask empty_questions_is_400
+        PASS [   0.006s] (68/85) eightball::verdict score_verdict_is_mode_index
+        PASS [   0.007s] (69/85) eightball::verdict uniform_is_zero
+        PASS [   0.048s] (70/85) eightball::systemone three_questions_one_request
+        PASS [   0.077s] (71/85) eightball::rest_ask backend_failure_is_502
+        PASS [   0.095s] (72/85) eightball::mcp_stdio handler_registers_tools_instructions_and_fail_open_results
+        PASS [   0.086s] (73/85) eightball::rest_ask noul_ask_returns_probabilities_and_verdict
+        PASS [   0.061s] (74/85) eightball::triage failed_embedder_judges_every_item_with_warning
+        PASS [   0.070s] (75/85) eightball::triage cli_reads_json_items_from_stdin
+        PASS [   0.046s] (76/85) eightball::triage sixty_five_items_rejected
+        PASS [   0.067s] (77/85) eightball::triage one_failed_judgment_fails_whole_triage
+        PASS [   0.054s] (78/85) eightball::triage top_k_requires_embedder
+        PASS [   0.080s] (79/85) eightball::triage dedupes_and_partitions_verdicts
+        PASS [   0.069s] (80/85) eightball::triage prefilter_judges_only_closest_items
+        PASS [   0.175s] (81/85) eightball::doctor cli_exit_depends_on_default_endpoint
+        PASS [   0.188s] (82/85) eightball::cli_ask noul_exit_codes
+        PASS [   0.223s] (83/85) eightball::calibrate_loop cli_supports_spec_labels_calibration_and_exit_codes
+        PASS [   0.643s] (84/85) eightball::systemone concurrency_one_serializes
+        PASS [   0.907s] (85/85) eightball::calibrate_loop full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits
+────────────
+     Summary [   0.909s] 85 tests run: 85 passed, 22 skipped
+```
+
+```text
+$ cargo nextest run --test live --run-ignored only -E test(live_mcp_handler_ask) --no-capture
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+────────────
+ Nextest run ID 2006cc24-54a6-471d-bd3b-6c8c60e8eb0e with nextest profile: default
+    Starting 1 test across 1 binary (21 tests skipped)
+       START [         ] (1/1) eightball::live live_mcp_handler_ask
+
+running 1 test
+MCP handler real response: CallToolResult { result_type: None, content: [Text(TextContent { text: "{\"results\":[{\"id\":1,\"question\":\"greeting\",\"verdict\":\"yes\",\"confidence\":0.9956815001348671,\"probabilities\":{\"yes\":0.9978407500674336,\"no\":0.0021592499325664427},\"calibrated\":false,\"cached\":false}]}", meta: None, annotations: None })], structured_content: Some(Object {"results": Array [Object {"id": Number(1), "question": String("greeting"), "verdict": String("yes"), "confidence": Number(0.9956815001348672), "probabilities": Object {"yes": Number(0.9978407500674336), "no": Number(0.0021592499325664427)}, "calibrated": Bool(false), "cached": Bool(false)}]}), is_error: Some(false), meta: None }
+test live_mcp_handler_ask ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.21s
+
+        PASS [   0.210s] (1/1) eightball::live live_mcp_handler_ask
+────────────
+     Summary [   0.210s] 1 test run: 1 passed, 21 skipped
+```
+
+`cargo fmt --all` passed. 85 mock tests pass. The real in-process JSON-RPC handler test passes with P(greeting) 0.99784075. Both tools are always listed, instructions include specs, structured results work, and backend failures carry `is_error` with the required fail-open text.
+
+Source-based API/lint adjustments: rmcp 3.8.0 deprecates `ServerInfo` in favor of `ServerConfig`; used the equivalent current type. Its `tool_handler` macro generates an await-free async `list_tools`, which fails the required `unused_async_trait_impl` clippy lint. Kept the macro and supplied its exact source-derived list-tools response with `future::ready`, preserving version-sensitive cache hints. No lint was suppressed.
+
+The three planned transport live tests were written before handler code, as required. They remain pending step 3 transport wiring; this step's additional real handler test proves handler behavior independently. The live HTTP check uses the real binary while the mock HTTP tests will run in process; this also exercises CLI wiring without prematurely depending on the changed router signature.

@@ -208,6 +208,10 @@ impl Service {
         }
     }
 
+    pub(crate) const fn specs(&self) -> &IndexMap<String, crate::config::SpecConfig> {
+        &self.config.specs
+    }
+
     pub fn metrics(&self) -> Result<String, ServiceError> {
         let mut text = String::new();
         prometheus_client::encoding::text::encode(&mut text, &self.metrics.registry)
