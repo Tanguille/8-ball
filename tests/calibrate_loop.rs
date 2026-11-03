@@ -61,7 +61,7 @@ async fn app() -> App {
         .await;
     let config:Config=toml::from_str(&format!("default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.team]\ntype='choice'\ninstructions='Team?'\ncriteria={{a='',b=''}}\n[specs.urgency]\ntype='score'\ninstructions='Urgent?'\ncriteria=['low','high']",model.uri())).unwrap();
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let store = Store::open(&dir.path().join("db.sqlite")).await.unwrap();
     let endpoints = config
         .endpoints
         .iter()
@@ -191,7 +191,9 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     let changed = Service::new(
         config,
         endpoints,
-        Store::open(&app.dir.path().join("db.sqlite")).unwrap(),
+        Store::open(&app.dir.path().join("db.sqlite"))
+            .await
+            .unwrap(),
     );
     assert!(
         !changed

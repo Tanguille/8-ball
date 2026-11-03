@@ -393,7 +393,8 @@ async fn build_service(
         .collect::<Result<IndexMap<_, _>, eightball::backend::BackendError>>()?;
     let store = Store::open(
         &db.unwrap_or_else(|| xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")),
-    )?;
+    )
+    .await?;
     let n = store.prune(config.retention_days).await?;
     tracing::info!("pruned {n} old decisions");
     Ok(Arc::new(Service::new(config, endpoints, store)))

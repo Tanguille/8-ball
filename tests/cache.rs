@@ -31,7 +31,7 @@ async fn fixture() -> (Service, Store, MockServer, tempfile::TempDir) {
     let config: Config=toml::from_str(&format!("default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'",mock.uri())).unwrap();
     let ep = Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let store = Store::open(&dir.path().join("db.sqlite")).await.unwrap();
     (
         Service::new(config, [("d3".into(), ep)].into(), store.clone()),
         store,

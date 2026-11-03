@@ -40,7 +40,7 @@ indexmap = { version = "2.14.2", features = ["serde"] }
 prometheus-client = "0.25.2"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 rmcp = { version = "3.8.0", features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server"] }
-rusqlite = { version = "0.41.1", features = ["bundled"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 sha2 = "0.11.1"

@@ -35,7 +35,7 @@ async fn app(
     let service = Arc::new(Service::new(
         cfg,
         [("d3".into(), ep)].into(),
-        Store::open(&dir.path().join("db.sqlite")).unwrap(),
+        Store::open(&dir.path().join("db.sqlite")).await.unwrap(),
     ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());

@@ -328,7 +328,9 @@ async fn live_triage_with_prefilter() {
         .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
         .collect();
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let store = eightball::store::Store::open(&dir.path().join("db.sqlite"))
+        .await
+        .unwrap();
     let service = Service::new(config, endpoints, store);
     let req: TriageRequest=serde_json::from_value(json!({"items":[
         "The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.",
@@ -361,7 +363,9 @@ async fn live_doctor() {
         .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
         .collect();
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let store = eightball::store::Store::open(&dir.path().join("db.sqlite"))
+        .await
+        .unwrap();
     let report = Service::new(config, endpoints, store).doctor().await;
     eprintln!("doctor: {report:?}");
     for endpoint in &report.endpoints {
@@ -393,7 +397,7 @@ async fn live_cache_skips_model() {
         .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
         .collect();
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let store = Store::open(&dir.path().join("db.sqlite")).await.unwrap();
     let service = Service::new(config, endpoints, store);
     let req = AskRequest {
         state: "hi there, how are you?".into(),
@@ -411,7 +415,10 @@ async fn live_cache_skips_model() {
     assert!(elapsed < std::time::Duration::from_millis(50));
 }
 
-fn calibration_service(config: Config, path: &std::path::Path) -> eightball::service::Service {
+async fn calibration_service(
+    config: Config,
+    path: &std::path::Path,
+) -> eightball::service::Service {
     let endpoints = config
         .endpoints
         .iter()
@@ -420,7 +427,7 @@ fn calibration_service(config: Config, path: &std::path::Path) -> eightball::ser
     eightball::service::Service::new(
         config,
         endpoints,
-        eightball::store::Store::open(path).unwrap(),
+        eightball::store::Store::open(path).await.unwrap(),
     )
 }
 fn fixture_rows(spec: &str) -> Vec<(String, String)> {
@@ -497,7 +504,7 @@ async fn live_calibrate_holdout() {
     use eightball::service::AskRequest;
     require(9931).await;
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service = calibration_service(dev_config(), &dir.path().join("db.sqlite"));
+    let service = calibration_service(dev_config(), &dir.path().join("db.sqlite")).await;
     for spec in ["greeting", "storage-risk"] {
         fit_fixture(&service, spec).await;
         let mut decided = 0_u32;
@@ -546,7 +553,7 @@ async fn live_question_edit_invalidates() {
     require(9931).await;
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let db = dir.path().join("db.sqlite");
-    let service = calibration_service(dev_config(), &db);
+    let service = calibration_service(dev_config(), &db).await;
     fit_fixture(&service, "greeting").await;
     let original = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml"),
@@ -558,7 +565,7 @@ async fn live_question_edit_invalidates() {
     );
     let path = dir.path().join("edited.toml");
     std::fs::write(&path, edited).unwrap();
-    let changed = calibration_service(Config::load(&path).unwrap(), &db);
+    let changed = calibration_service(Config::load(&path).unwrap(), &db).await;
     let result = changed
         .ask(AskRequest {
             state: "hi there".into(),
@@ -650,10 +657,8 @@ async fn live_mcp_handler_ask() {
     use rmcp::{ServiceExt, model::CallToolRequestParams};
     require(9931).await;
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service = std::sync::Arc::new(calibration_service(
-        dev_config(),
-        &dir.path().join("db.sqlite"),
-    ));
+    let service =
+        std::sync::Arc::new(calibration_service(dev_config(), &dir.path().join("db.sqlite")).await);
     let (server_io, client_io) = tokio::io::duplex(16_384);
     let task = tokio::spawn(async move {
         eightball::mcp::Mcp::new(service)

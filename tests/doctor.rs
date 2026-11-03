@@ -26,7 +26,9 @@ async fn service(default: &str) -> (Service, MockServer, tempfile::TempDir) {
         .map(|(name, cfg)| (name.clone(), Endpoint::new(name, cfg, None).unwrap()))
         .collect();
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let store = eightball::store::Store::open(&dir.path().join("db.sqlite"))
+        .await
+        .unwrap();
     (Service::new(config, endpoints, store), mock, dir)
 }
 #[tokio::test]

@@ -121,6 +121,8 @@ The logprob backend needs reasoning disabled for a one-token answer. Set `extra_
 
 ## Privacy
 
+Storage uses SQLx with bundled SQLite; no database server or SQLx CLI is required. Startup applies embedded migrations automatically, including upgrades from the original v1 database, preserving decisions, labels, calibrations and existing id counters. Back up an existing database with SQLite-aware backup tooling before upgrading so committed data in the WAL is included. SQLite remains the only supported database; PostgreSQL and persistent vector search are future work.
+
 The database stores the raw text of every successful decision and is created with mode 0600. Unlabelled rows older than `retention_days` are deleted at startup; labelled rows remain. The intended cluster deployment uses kopiur to copy the PVC to R2; cluster deployment and backups are outside this local build. Model requests go to your configured endpoints, and harness prompts also go to the harness's configured model provider.
 
 [Privacy Policy](README.md#privacy) describes this local plugin's data handling. Review a shared server operator's policy before sending private data.

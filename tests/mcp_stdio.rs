@@ -26,7 +26,7 @@ async fn handler_registers_tools_instructions_and_fail_open_results() {
         let service = Arc::new(Service::new(
             config,
             [("d3".into(), ep)].into(),
-            Store::open(&dir.path().join("db.sqlite")).unwrap(),
+            Store::open(&dir.path().join("db.sqlite")).await.unwrap(),
         ));
         let (server_io, client_io) = tokio::io::duplex(16_384);
         let task = tokio::spawn(async move {

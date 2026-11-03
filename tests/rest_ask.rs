@@ -35,7 +35,9 @@ async fn app(
     )]
     .into();
     let dir = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&dir.path().join("db.sqlite")).unwrap();
+    let store = eightball::store::Store::open(&dir.path().join("db.sqlite"))
+        .await
+        .unwrap();
     let service = Arc::new(Service::new(cfg, endpoints, store));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
