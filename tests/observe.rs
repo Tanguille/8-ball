@@ -24,7 +24,10 @@ impl Fixture {
     }
 
     async fn run(&self, url: &str, extra: &[&str]) -> Value {
-        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+        // A child-only umask makes the privacy check independent of the test runner's umask.
+        let output = tokio::process::Command::new("sh")
+            .args(["-c", "umask 000; exec \"$@\"", "8ball-test"])
+            .arg(env!("CARGO_BIN_EXE_8ball"))
             .args([
                 "observe",
                 "--spec",
@@ -54,8 +57,11 @@ impl Fixture {
     }
 
     fn record(&self) -> Value {
-        serde_json::from_str(&fs::read_to_string(self.directory.path().join("run.jsonl")).unwrap())
-            .unwrap()
+        let text = fs::read_to_string(self.directory.path().join("run.jsonl")).unwrap();
+        assert_eq!(text.lines().count(), 1, "one JSONL record per run");
+        assert!(text.ends_with('\n'), "JSONL record ends with a newline");
+
+        serde_json::from_str(&text).unwrap()
     }
 }
 
