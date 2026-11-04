@@ -329,9 +329,17 @@ async fn context_is_model_data_and_part_of_cache_identity() {
     let repeated: Value = triage(&url, &body).await.json().await.unwrap();
     body["context"] = json!("uses another backup tool");
     let changed: Value = triage(&url, &body).await.json().await.unwrap();
+    body["context"] = json!("uses kopiur");
+    body["items"] = json!([{"title":"other change"}]);
+    let changed_item: Value = triage(&url, &body).await.json().await.unwrap();
     assert_eq!(first["kept"][0]["decision"]["cached"], false);
     assert_eq!(repeated["kept"][0]["decision"]["cached"], true);
     assert_eq!(changed["kept"][0]["decision"]["cached"], false);
+    assert_eq!(changed_item["kept"][0]["decision"]["cached"], false);
+    assert_ne!(
+        first["kept"][0]["decision"]["id"],
+        changed_item["kept"][0]["decision"]["id"]
+    );
     assert_ne!(
         first["kept"][0]["decision"]["id"],
         changed["kept"][0]["decision"]["id"]
@@ -342,7 +350,7 @@ async fn context_is_model_data_and_part_of_cache_identity() {
         .filter(|request| request.method == "POST")
         .map(|request| serde_json::from_slice(&request.body).unwrap())
         .collect();
-    assert_eq!(calls.len(), 2);
+    assert_eq!(calls.len(), 3);
     let state: Value = serde_json::from_str(calls[0]["state"].as_str().unwrap()).unwrap();
     assert_eq!(
         state,
@@ -354,11 +362,23 @@ async fn context_is_model_data_and_part_of_cache_identity() {
 
 #[tokio::test]
 async fn oversized_contextual_batch_is_rejected_before_any_judgment() {
-    let (url, model, _embedding, task, _dir) = app(None).await;
-    let body = json!({"items":["short", "界".repeat(2001)],"spec":"relevant","context":"current inventory"});
-    let response = triage(&url, &body).await;
-    assert_eq!(response.status(), 400);
-    assert!(response.text().await.unwrap().contains("context"));
+    let (url, model, embedding, task, _dir) = app(Some(true)).await;
+    for mut body in [
+        json!({"items":["short", "界".repeat(2001)],"spec":"relevant","context":"current inventory"}),
+        json!({"items":["first", "second"],"spec":"relevant","context":"界".repeat(2001)}),
+    ] {
+        for top_k in [Value::Null, json!(1)] {
+            body["top_k"] = top_k;
+            let response = triage(&url, &body).await;
+            assert_eq!(response.status(), 400);
+            let error: Value = response.json().await.unwrap();
+            assert_eq!(
+                error["error"],
+                "bad request: context and item exceed the endpoint state limit; shorten the evidence"
+            );
+        }
+    }
+    assert!(embedding.received_requests().await.unwrap().is_empty());
     assert!(
         model
             .received_requests()
@@ -366,6 +386,37 @@ async fn oversized_contextual_batch_is_rejected_before_any_judgment() {
             .unwrap()
             .iter()
             .all(|request| request.method != "POST")
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn serialized_object_order_is_preserved_with_and_without_context() {
+    let (url, model, _embedding, task, _dir) = app(None).await;
+    let items: Value = serde_json::from_str(
+        r#"[{"id":"a","title":"t"},{"title":"t","id":"a"},{"id":"a","title":"t"}]"#,
+    )
+    .unwrap();
+    for context in [Value::Null, json!("current inventory")] {
+        let body = json!({"items":items,"spec":"relevant","context":context});
+        let response = triage(&url, &body).await;
+        assert_eq!(response.status(), 200);
+        let response: Value = response.json().await.unwrap();
+        let indices: Vec<_> = response["kept"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["index"].as_u64().unwrap())
+            .collect();
+        assert_eq!(indices, [0, 1]);
+    }
+    let requests = model.received_requests().await.unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.method == "POST")
+            .count(),
+        4
     );
     task.abort();
 }

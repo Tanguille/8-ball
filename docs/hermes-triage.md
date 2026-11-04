@@ -37,7 +37,7 @@ Responses retain `kept`, `unsure`, and `dropped`, and add:
 - `rejected`: model-judged items that did not match `keep`, including their decisions and original indices.
 - `prefiltered`: original indices excluded by embedding similarity, **without a model judgment**.
 
-`dropped` is the sum of these two groups. Identical input items still collapse to their first index. Do not interpret a prefiltered item as a confident rejection. This pilot never sets `top_k`; measuring missed candidates requires judging every candidate.
+`dropped` is the sum of these two groups. Items with identical serialized state collapse to their first index. JSON object key order is preserved in both contextual and context-free requests; reordered objects remain distinct model inputs. Do not interpret a prefiltered item as a confident rejection. This pilot never sets `top_k`; measuring missed candidates requires judging every candidate.
 
 ## Observe without filtering
 
@@ -54,9 +54,9 @@ export EIGHTBALL_URL=http://127.0.0.1:8080
 
 The command reuses the CLI's authentication and JSON handling. Its `--timeout-ms` defaults to 25,000 and covers the response body. Redirects are refused. No Python runtime is needed.
 
-Choose a new observation path for every run. Each file is created exclusively with mode 0600 and contains one JSONL record: `observed_at_unix_ms` (Unix milliseconds), spec, endpoint override, original snapshot, duration, complete response, and any error. An existing file is never overwritten. Observation files contain raw input text; keep them private and apply your own retention policy.
+Choose a new observation path for every run. With valid input and a successful write, the command creates a file exclusively with mode 0600 containing one JSONL record: `observed_at_unix_ms` (Unix milliseconds), spec, endpoint override, original snapshot, duration, complete response, and any error. An existing file is never overwritten. Missing, unreadable, or invalid input produces no observation file; the error appears in the stdout payload as `context.input_error`. Write failures appear as `context.observation_error` and can leave a partial file. Observation files contain raw input text; keep them private and apply your own retention policy.
 
-The final stdout line always contains `wakeAgent: true` with the **entire original snapshot**. Model rejections, uncertain results, HTTP failures, and observation-write failures never remove candidates. A missing or invalid input wakes Hermes with an explicit input error; it must fetch evidence rather than conclude there were no changes. The model verdicts stay in the observation file, outside Hermes' injected evidence, to reduce evaluation bias.
+The final stdout line contains `wakeAgent: true`. With valid input, `context.snapshot` contains the **entire original snapshot**. Model rejections, uncertain results, HTTP failures, and observation-write failures never remove candidates. When `context.input_error` is present, `context.snapshot` is absent, including when JSON parsed but failed validation. Hermes must fetch valid evidence rather than conclude there were no changes. The model verdicts stay in the observation file, outside Hermes' injected evidence, to reduce evaluation bias.
 
 Hermes supports pre-check scripts through its [native cron `script` interface](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron/#skipping-the-agent-entirely-wakeagent). A future approved installation can have a wrapper collect a fresh snapshot, choose a unique output path, then invoke `8ball observe`. The two-line `examples/hermes/gitops-observe.sh` launcher simply executes the CLI; it contains no HTTP or decision logic. Hermes accepts a script file, not a shell command as the `script` value. Nothing in this PR modifies the running Hermes instance.
 
@@ -90,6 +90,7 @@ Report interpretation:
 - `coverage`: decided cases divided by all cases; `decision_accuracy` excludes errors and abstentions.
 - `skip_precision`: fraction of proposed skips that were genuinely unhelpful.
 - `useful_recall`: useful cases retained, including unsure/error fallbacks. High recall alone can mean the service failed on everything; always inspect errors and coverage.
+- `errors`: transport failures and responses the evaluator cannot interpret. These cases always fail open (`would_keep: true`), never count as skips or misses, and contribute no latency samples. Their per-case error messages explain the failure; recall does not establish accuracy on these cases.
 - `would_skip_fraction`: potential downstream items avoided, **not measured token, money, or latency savings**.
 - `cached_latency` and `uncached_latency`: separate nearest-rank p50/p95 end-to-end request timings for successful cases. Uncached timings include server/probe/queue/storage overhead, not just inference. Errors retain per-case durations but do not enter either latency distribution. Ratios with zero denominators are `null`.
 

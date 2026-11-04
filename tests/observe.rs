@@ -155,7 +155,9 @@ async fn truncated_response_still_wakes_agent() {
     let fixture = Fixture::new();
     let body = fixture.run(&url, &[]).await;
     assert_eq!(body["context"]["snapshot"], fixture.snapshot);
-    assert!(fixture.record()["error"].is_string());
+    let record = fixture.record();
+    assert!(record["error"].as_str().unwrap().contains("body"));
+    assert!(record["result"].is_null());
     task.await.unwrap();
 }
 
@@ -185,9 +187,14 @@ async fn invalid_or_missing_input_wakes_agent_without_inference() {
         fs::write(&path, input).unwrap();
         let body = fixture.run(&server.uri(), &[]).await;
         assert!(body["context"]["input_error"].is_string());
+        assert!(body["context"].get("snapshot").is_none());
+        assert!(!fixture.directory.path().join("run.jsonl").exists());
     }
     fs::remove_file(path).unwrap();
-    assert!(fixture.run(&server.uri(), &[]).await["context"]["input_error"].is_string());
+    let body = fixture.run(&server.uri(), &[]).await;
+    assert!(body["context"]["input_error"].is_string());
+    assert!(body["context"].get("snapshot").is_none());
+    assert!(!fixture.directory.path().join("run.jsonl").exists());
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
