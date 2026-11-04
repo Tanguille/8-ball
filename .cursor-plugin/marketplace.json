@@ -1,0 +1,16 @@
+{
+  "name": "8-ball",
+  "owner": {
+    "name": "Tanguille"
+  },
+  "metadata": {
+    "description": "Cheap typed judgments from small decision models"
+  },
+  "plugins": [
+    {
+      "name": "8-ball",
+      "source": "./plugin",
+      "description": "Cheap typed judgments from small decision models"
+    }
+  ]
+}
