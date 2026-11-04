@@ -1,0 +1,13 @@
+{
+  "name": "8-ball",
+  "version": "0.1.0",
+  "mcpServers": {
+    "8ball": {
+      "httpUrl": "http://127.0.0.1:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer $EIGHTBALL_API_KEY"
+      }
+    }
+  },
+  "skills": "skills"
+}

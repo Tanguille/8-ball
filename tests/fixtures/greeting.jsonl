@@ -1,0 +1,60 @@
+{"state":"Hello!","label":"yes"}
+{"state":"The server backup completed at midnight.","label":"no"}
+{"state":"Good morning, everyone!","label":"yes"}
+{"state":"What time does the next train leave?","label":"no"}
+{"state":"Hey there, how are you doing?","label":"yes"}
+{"state":"The disk is 98 percent full.","label":"no"}
+{"state":"Good evening all.","label":"yes"}
+{"state":"See you tomorrow.","label":"no"}
+{"state":"Hi team!","label":"yes"}
+{"state":"Thanks for fixing the broken link.","label":"no"}
+{"state":"Morning team 👋","label":"yes"}
+{"state":"Invoice number 4411 is attached.","label":"no"}
+{"state":"Greetings, colleagues.","label":"yes"}
+{"state":"Please review the changes before Friday.","label":"no"}
+{"state":"Hiya, long time no see!","label":"yes"}
+{"state":"The application crashed while saving a file.","label":"no"}
+{"state":"Hello Alice, nice to meet you.","label":"yes"}
+{"state":"Goodbye, and take care on your journey.","label":"no"}
+{"state":"Good afternoon, folks!","label":"yes"}
+{"state":"Can you resend the meeting invitation?","label":"no"}
+{"state":"Hey folks, hope you're well!","label":"yes"}
+{"state":"The deployment succeeded without errors.","label":"no"}
+{"state":"Howdy!","label":"yes"}
+{"state":"The soup needs two teaspoons of salt.","label":"no"}
+{"state":"Hi, welcome to our meeting.","label":"yes"}
+{"state":"The TLS certificate expires in thirty days.","label":"no"}
+{"state":"Hello there!","label":"yes"}
+{"state":"I will be away from the office next week.","label":"no"}
+{"state":"Good morning, Sam. How was your weekend?","label":"yes"}
+{"state":"Farewell, everyone.","label":"no"}
+{"state":"Hey! Nice to see you again.","label":"yes"}
+{"state":"SELECT name FROM users WHERE active = 1;","label":"no"}
+{"state":"Greetings from Brussels!","label":"yes"}
+{"state":"The parcel has arrived at the depot.","label":"no"}
+{"state":"Hi everyone, happy Monday!","label":"yes"}
+{"state":"Could you check the CPU temperature?","label":"no"}
+{"state":"Hello, how may I help you today?","label":"yes"}
+{"state":"Thank you very much for your assistance.","label":"no"}
+{"state":"Good evening, Maria!","label":"yes"}
+{"state":"The football match ended in a draw.","label":"no"}
+{"state":"Hey Alex, what's up?","label":"yes"}
+{"state":"The database connection timed out.","label":"no"}
+{"state":"Hiya! How have you been?","label":"yes"}
+{"state":"Remember to bring your access badge.","label":"no"}
+{"state":"Hello friends!","label":"yes"}
+{"state":"The library closes at six o'clock.","label":"no"}
+{"state":"Good afternoon, Dr Smith.","label":"yes"}
+{"state":"Bye for now!","label":"no"}
+{"state":"Hi, it's lovely to see you.","label":"yes"}
+{"state":"The report contains twelve pages.","label":"no"}
+{"state":"Hey team, good to see you all.","label":"yes"}
+{"state":"A new release is available for download.","label":"no"}
+{"state":"Hello and welcome!","label":"yes"}
+{"state":"How much does the annual subscription cost?","label":"no"}
+{"state":"Morning, everyone. Hope you slept well!","label":"yes"}
+{"state":"The network cable is unplugged.","label":"no"}
+{"state":"Hi Jordan!","label":"yes"}
+{"state":"I appreciate your quick response.","label":"no"}
+{"state":"Good day, ladies and gentlemen.","label":"yes"}
+{"state":"The weather forecast predicts rain tomorrow.","label":"no"}
