@@ -45,6 +45,46 @@ struct AskArgs {
     remote: Remote,
 }
 
+#[derive(clap::Args)]
+struct TriageArgs {
+    #[arg(required_unless_present = "spec", conflicts_with = "spec")]
+    instructions: Option<String>,
+    #[arg(long, conflicts_with_all = ["kind", "options", "levels"])]
+    spec: Option<String>,
+    /// UTF-8 file containing shared evidence for every item.
+    #[arg(long)]
+    context_file: Option<PathBuf>,
+    #[arg(long = "type", default_value = "noul", value_parser = ["noul", "choice", "score"])]
+    kind: String,
+    #[arg(long = "option")]
+    options: Vec<String>,
+    #[arg(long = "level")]
+    levels: Vec<String>,
+    #[arg(long)]
+    keep: Option<String>,
+    #[arg(long)]
+    top_k: Option<usize>,
+    #[arg(long)]
+    endpoint: Option<String>,
+    #[command(flatten)]
+    remote: Remote,
+}
+
+#[derive(clap::Args)]
+struct EvaluateArgs {
+    #[arg(long)]
+    spec: String,
+    #[arg(long)]
+    endpoint: Option<String>,
+    #[arg(long, default_value = "yes")]
+    keep: String,
+    /// Total deadline per case, including response decoding.
+    #[arg(long, default_value = "25000", value_parser = clap::value_parser!(u64).range(1..))]
+    timeout_ms: u64,
+    #[command(flatten)]
+    remote: Remote,
+}
+
 /// Where the CLI client finds the `8ball serve` REST API.
 #[derive(clap::Args)]
 struct Remote {
@@ -101,23 +141,9 @@ enum Command {
     /// Ask an ad-hoc question (state from --state or stdin).
     Ask(AskArgs),
     /// Judge a JSON array from stdin.
-    Triage {
-        instructions: String,
-        #[arg(long = "type", default_value = "noul", value_parser = ["noul", "choice", "score"])]
-        kind: String,
-        #[arg(long = "option")]
-        options: Vec<String>,
-        #[arg(long = "level")]
-        levels: Vec<String>,
-        #[arg(long)]
-        keep: Option<String>,
-        #[arg(long)]
-        top_k: Option<usize>,
-        #[arg(long)]
-        endpoint: Option<String>,
-        #[command(flatten)]
-        remote: Remote,
-    },
+    Triage(TriageArgs),
+    /// Replay labelled JSONL cases from stdin without changing calibration.
+    Evaluate(EvaluateArgs),
     /// Inspect endpoint detection and health.
     Doctor {
         #[command(flatten)]
@@ -190,36 +216,8 @@ async fn run() -> anyhow::Result<i32> {
             Ok(0)
         }
         Command::Ask(args) => ask(args).await,
-        Command::Triage {
-            instructions,
-            kind,
-            options,
-            levels,
-            keep,
-            top_k,
-            endpoint,
-            remote,
-        } => {
-            let question = make_question(&kind, instructions, options, levels);
-            let mut input = String::new();
-            std::io::stdin().read_to_string(&mut input)?;
-            let items: Vec<Value> = serde_json::from_str(&input)?;
-            let body = remote
-                .post(
-                    "/v1/triage",
-                    &json!({
-                        "items": items,
-                        "question": question,
-                        "keep": keep,
-                        "top_k": top_k,
-                        "endpoint": endpoint
-                    }),
-                )
-                .await?;
-            println!("{body}");
-
-            Ok(0)
-        }
+        Command::Triage(args) => triage(args).await,
+        Command::Evaluate(args) => evaluate(args).await,
         Command::Doctor { remote } => doctor(&remote).await,
         Command::Label { id, value, remote } => {
             println!(
@@ -445,4 +443,72 @@ async fn doctor(remote: &Remote) -> anyhow::Result<i32> {
             0
         },
     )
+}
+
+async fn triage(args: TriageArgs) -> anyhow::Result<i32> {
+    let question = args
+        .instructions
+        .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
+    let context = args.context_file.map(std::fs::read_to_string).transpose()?;
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)?;
+    let items: Vec<Value> = serde_json::from_str(&input)?;
+    let body = args
+        .remote
+        .post(
+            "/v1/triage",
+            &json!({
+                "items":items, "context":context, "spec":args.spec,
+                "question":question, "keep":args.keep, "top_k":args.top_k, "endpoint":args.endpoint
+            }),
+        )
+        .await?;
+    println!("{body}");
+
+    Ok(0)
+}
+
+async fn evaluate(args: EvaluateArgs) -> anyhow::Result<i32> {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)?;
+    let cases = eightball::evaluate::parse(&input)?;
+    let client = reqwest::Client::new();
+    let mut observations = Vec::with_capacity(cases.len());
+    for case in cases {
+        let start = std::time::Instant::now();
+        let response = async {
+            let body = args
+                .remote
+                .send(
+                    client
+                        .post(args.remote.at("/v1/triage"))
+                        .timeout(std::time::Duration::from_millis(args.timeout_ms))
+                        .json(
+                            &json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
+                    "items":[case.item],"context":case.context}),
+                        ),
+                )
+                .await?;
+
+            Ok::<_, anyhow::Error>(
+                serde_json::from_value::<eightball::service::TriageResponse>(body)?,
+            )
+        }
+        .await
+        .map_err(|e| format!("{e:#}"));
+        observations.push(eightball::evaluate::Observation::new(
+            case,
+            start.elapsed(),
+            response,
+        ));
+    }
+    let report = eightball::evaluate::Report::from_observations(&observations);
+    let code = if report.errors == 0 { 0 } else { 4 };
+    println!(
+        "{}",
+        json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
+        "report":report,"observations":observations})
+    );
+
+    Ok(code)
 }

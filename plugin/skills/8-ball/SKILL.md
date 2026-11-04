@@ -9,11 +9,13 @@ metadata:
 
 # 8-ball
 
-The server's MCP instructions carry the full usage rules; follow them. In short: act only on a clear verdict, treat `unsure` and errors as "do the normal thing", one judgment per question, all context in `state`.
+The server's MCP instructions carry the full usage rules; follow them. In short: act only on a clear verdict, treat `unsure` and errors as "do the normal thing", one judgment per question, all evidence in `state` (or shared `context` for triage).
 
 ## Tools
 - `decision_ask`: `{state, spec}` for a named calibrated question, or `{state, questions: [{id, type, instructions, criteria}]}`.
-- `decision_triage`: `{items: [...≤64], spec | question, keep?, top_k?}`.
+- `decision_triage`: `{items: [...≤64], spec | question, context?, keep?, top_k?}`.
+
+Triage includes `rejected` model decisions and `prefiltered` unjudged indices. Do not treat embedding exclusions as confident rejections. Contextual inputs must fit the endpoint state limit; errors mean continue the normal work.
 
 ## From a script
 ```python

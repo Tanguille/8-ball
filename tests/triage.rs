@@ -319,3 +319,118 @@ async fn cli_reads_json_items_from_stdin() {
     assert_eq!(body["dropped"], 1);
     task.abort();
 }
+
+#[tokio::test]
+async fn context_is_model_data_and_part_of_cache_identity() {
+    let (url, model, _embedding, task, _dir) = app(None).await;
+    let mut body =
+        json!({"items":[{"title":"backup change"}],"spec":"relevant","context":"uses kopiur"});
+    let first: Value = triage(&url, &body).await.json().await.unwrap();
+    let repeated: Value = triage(&url, &body).await.json().await.unwrap();
+    body["context"] = json!("uses another backup tool");
+    let changed: Value = triage(&url, &body).await.json().await.unwrap();
+    assert_eq!(first["kept"][0]["decision"]["cached"], false);
+    assert_eq!(repeated["kept"][0]["decision"]["cached"], true);
+    assert_eq!(changed["kept"][0]["decision"]["cached"], false);
+    assert_ne!(
+        first["kept"][0]["decision"]["id"],
+        changed["kept"][0]["decision"]["id"]
+    );
+    let requests = model.received_requests().await.unwrap();
+    let calls: Vec<Value> = requests
+        .iter()
+        .filter(|request| request.method == "POST")
+        .map(|request| serde_json::from_slice(&request.body).unwrap())
+        .collect();
+    assert_eq!(calls.len(), 2);
+    let state: Value = serde_json::from_str(calls[0]["state"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        state,
+        json!({"context":"uses kopiur","item":{"title":"backup change"}})
+    );
+    assert_eq!(calls[0]["questions"], calls[1]["questions"]);
+    task.abort();
+}
+
+#[tokio::test]
+async fn oversized_contextual_batch_is_rejected_before_any_judgment() {
+    let (url, model, _embedding, task, _dir) = app(None).await;
+    let body = json!({"items":["short", "界".repeat(2001)],"spec":"relevant","context":"current inventory"});
+    let response = triage(&url, &body).await;
+    assert_eq!(response.status(), 400);
+    assert!(response.text().await.unwrap().contains("context"));
+    assert!(
+        model
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| request.method != "POST")
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn rejected_decisions_are_distinct_from_unjudged_prefiltered_items() {
+    let (url, _model, _embedding, task, _dir) = app(Some(true)).await;
+    let body: Value = triage(&url, &request(&json!(["no", "unsure", "yes1"])))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["rejected"][0]["index"], 0);
+    assert_eq!(body["rejected"][0]["decision"]["verdict"], "no");
+    assert_eq!(body["prefiltered"], json!([]));
+    let mut request = request(&json!(["one", "three"]));
+    request["top_k"] = json!(1);
+    let body: Value = triage(&url, &request).await.json().await.unwrap();
+    assert_eq!(body["prefiltered"], json!([0]));
+    assert_eq!(body["rejected"], json!([]));
+    assert_eq!(body["dropped"], 1);
+    task.abort();
+}
+
+#[tokio::test]
+async fn cli_supports_named_spec_and_context_file() {
+    let (url, model, _embedding, task, directory) = app(None).await;
+    let context_path = directory.path().join("context.txt");
+    std::fs::write(&context_path, "uses kopiur").unwrap();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+        .args([
+            "triage",
+            "--spec",
+            "relevant",
+            "--context-file",
+            context_path.to_str().unwrap(),
+            "--url",
+            &url,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"["backup change"]"#)
+        .await
+        .unwrap();
+    let output = child.wait_with_output().await.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let requests = model.received_requests().await.unwrap();
+    let call = requests
+        .iter()
+        .find(|request| request.method == "POST")
+        .unwrap();
+    let body: Value = serde_json::from_slice(&call.body).unwrap();
+    let state: Value = serde_json::from_str(body["state"].as_str().unwrap()).unwrap();
+    assert_eq!(state["context"], "uses kopiur");
+    assert!(body["questions"].get("relevant").is_some());
+    task.abort();
+}

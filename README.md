@@ -55,7 +55,8 @@ Use the server root without a trailing slash. On the server, `EIGHTBALL_API_KEY`
 - `serve`: run REST and HTTP MCP on `127.0.0.1:8080`; use `--config`, `--db` or `--listen` to override paths/address.
 - `mcp`: serve MCP over stdin/stdout; logs go to stderr.
 - `ask`: ask an ad-hoc noul/choice/score question or a named `--spec`; read state from `--state` or stdin.
-- `triage`: judge a JSON array from stdin, optionally using `--top-k` embedding prefiltering.
+- `triage`: judge a JSON array from stdin with a question or `--spec`, optional `--context-file` shared evidence, and `--top-k` embedding prefiltering.
+- `evaluate`: replay labelled JSONL cases against a named spec; report misses, abstentions, errors and latency without changing calibration.
 - `label <id> <value>`: label a saved decision belonging to a current named spec.
 - `calibrate <spec>`: fit bands from labelled states; `--dry-run` reports without saving.
 - `doctor`: inspect endpoint detection, health, model fingerprints and spec calibration.
@@ -114,6 +115,10 @@ Aim for at least 20 examples per side before running `8ball calibrate <spec>`.
 Bands select which answers are decisive at the requested precision; the rest are `unsure`.
 A dry run leaves stored bands untouched; reports are in-sample, so evaluate a separate holdout.
 Changing the question or model invalidates its calibration identity; ad-hoc questions always use defaults.
+
+## Hermes observation pilot
+
+[Contextual triage and evaluation](docs/hermes-triage.md) includes a GitOps digest pre-check example that records decisions while passing every candidate to Hermes, plus a held-out replay workflow. It does not modify or deploy Hermes.
 
 ## Thinking chat models
 
