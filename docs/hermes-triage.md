@@ -47,16 +47,18 @@ The collector supplies a UTF-8 JSON snapshot with `context` and `items`, includi
 umask 077
 export EIGHTBALL_URL=http://127.0.0.1:8080
 # Export EIGHTBALL_API_KEY if the server requires it.
-python3 examples/hermes/gitops_observe.py \
+8ball observe --spec gitops-investigate \
   --input examples/hermes/snapshot.json \
   --observations /tmp/8ball-gitops-run.jsonl
 ```
 
-Choose a new observation path for every run. Each file is created exclusively with mode 0600 and contains one JSONL record: timestamp, spec, endpoint override, original snapshot, duration, complete response, and any error. An existing file is never overwritten. Observation files contain raw input text; keep them private and apply your own retention policy.
+The command reuses the CLI's authentication and JSON handling. Its `--timeout-ms` defaults to 25,000 and covers the response body. Redirects are refused. No Python runtime is needed.
+
+Choose a new observation path for every run. Each file is created exclusively with mode 0600 and contains one JSONL record: `observed_at_unix_ms` (Unix milliseconds), spec, endpoint override, original snapshot, duration, complete response, and any error. An existing file is never overwritten. Observation files contain raw input text; keep them private and apply your own retention policy.
 
 The final stdout line always contains `wakeAgent: true` with the **entire original snapshot**. Model rejections, uncertain results, HTTP failures, and observation-write failures never remove candidates. A missing or invalid input wakes Hermes with an explicit input error; it must fetch evidence rather than conclude there were no changes. The model verdicts stay in the observation file, outside Hermes' injected evidence, to reduce evaluation bias.
 
-Hermes supports pre-check scripts through its [native cron `script` interface](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron/#skipping-the-agent-entirely-wakeagent). A future approved installation can have a wrapper collect a fresh snapshot, choose a unique output path, then invoke this example. Hermes accepts a script file, not a shell command as the `script` value. Nothing in this PR modifies the running Hermes instance.
+Hermes supports pre-check scripts through its [native cron `script` interface](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron/#skipping-the-agent-entirely-wakeagent). A future approved installation can have a wrapper collect a fresh snapshot, choose a unique output path, then invoke `8ball observe`. The two-line `examples/hermes/gitops-observe.sh` launcher simply executes the CLI; it contains no HTTP or decision logic. Hermes accepts a script file, not a shell command as the `script` value. Nothing in this PR modifies the running Hermes instance.
 
 ## Replay a separate labelled holdout
 
@@ -99,5 +101,4 @@ Compare these results with measured Hermes calls, latency, and token usage befor
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo nextest run
-python3 -B -m unittest discover -s examples/hermes -p 'test_*.py'
 ```

@@ -1,4 +1,10 @@
-use std::{io::Read, path::PathBuf, sync::Arc};
+use std::{
+    fs,
+    io::{Read, Write},
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use clap::Parser;
 use rmcp::ServiceExt;
@@ -78,9 +84,21 @@ struct EvaluateArgs {
     endpoint: Option<String>,
     #[arg(long, default_value = "yes")]
     keep: String,
-    /// Total deadline per case, including response decoding.
-    #[arg(long, default_value = "25000", value_parser = clap::value_parser!(u64).range(1..))]
-    timeout_ms: u64,
+    #[command(flatten)]
+    remote: Remote,
+}
+
+#[derive(clap::Args)]
+struct ObserveArgs {
+    #[arg(long)]
+    spec: String,
+    #[arg(long)]
+    endpoint: Option<String>,
+    #[arg(long)]
+    input: PathBuf,
+    /// New private JSONL file; existing files are never overwritten.
+    #[arg(long)]
+    observations: PathBuf,
     #[command(flatten)]
     remote: Remote,
 }
@@ -88,6 +106,9 @@ struct EvaluateArgs {
 /// Where the CLI client finds the `8ball serve` REST API.
 #[derive(clap::Args)]
 struct Remote {
+    /// Total request deadline; defaults to 25000 for observe/evaluate, otherwise unset.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    timeout_ms: Option<u64>,
     #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
     url: String,
     #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
@@ -95,13 +116,22 @@ struct Remote {
 }
 
 impl Remote {
+    fn client(&self) -> anyhow::Result<reqwest::Client> {
+        let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+        if let Some(timeout_ms) = self.timeout_ms {
+            builder = builder.timeout(std::time::Duration::from_millis(timeout_ms));
+        }
+
+        Ok(builder.build()?)
+    }
+
     async fn post(&self, path: &str, body: &Value) -> anyhow::Result<Value> {
-        self.send(reqwest::Client::new().post(self.at(path)).json(body))
+        self.send(self.client()?.post(self.at(path)).json(body))
             .await
     }
 
     async fn get(&self, path: &str) -> anyhow::Result<Value> {
-        self.send(reqwest::Client::new().get(self.at(path))).await
+        self.send(self.client()?.get(self.at(path))).await
     }
 
     fn at(&self, path: &str) -> String {
@@ -144,6 +174,8 @@ enum Command {
     Triage(TriageArgs),
     /// Replay labelled JSONL cases from stdin without changing calibration.
     Evaluate(EvaluateArgs),
+    /// Record triage decisions and always wake Hermes with every original candidate.
+    Observe(ObserveArgs),
     /// Inspect endpoint detection and health.
     Doctor {
         #[command(flatten)]
@@ -218,6 +250,7 @@ async fn run() -> anyhow::Result<i32> {
         Command::Ask(args) => ask(args).await,
         Command::Triage(args) => triage(args).await,
         Command::Evaluate(args) => evaluate(args).await,
+        Command::Observe(args) => observe(args).await,
         Command::Doctor { remote } => doctor(&remote).await,
         Command::Label { id, value, remote } => {
             println!(
@@ -449,7 +482,7 @@ async fn triage(args: TriageArgs) -> anyhow::Result<i32> {
     let question = args
         .instructions
         .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
-    let context = args.context_file.map(std::fs::read_to_string).transpose()?;
+    let context = args.context_file.map(fs::read_to_string).transpose()?;
     let mut input = String::new();
     std::io::stdin().read_to_string(&mut input)?;
     let items: Vec<Value> = serde_json::from_str(&input)?;
@@ -468,26 +501,22 @@ async fn triage(args: TriageArgs) -> anyhow::Result<i32> {
     Ok(0)
 }
 
-async fn evaluate(args: EvaluateArgs) -> anyhow::Result<i32> {
+async fn evaluate(mut args: EvaluateArgs) -> anyhow::Result<i32> {
+    args.remote.timeout_ms.get_or_insert(25_000);
     let mut input = String::new();
     std::io::stdin().read_to_string(&mut input)?;
     let cases = eightball::evaluate::parse(&input)?;
-    let client = reqwest::Client::new();
+    let client = args.remote.client()?;
     let mut observations = Vec::with_capacity(cases.len());
     for case in cases {
         let start = std::time::Instant::now();
         let response = async {
             let body = args
                 .remote
-                .send(
-                    client
-                        .post(args.remote.at("/v1/triage"))
-                        .timeout(std::time::Duration::from_millis(args.timeout_ms))
-                        .json(
-                            &json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
+                .send(client.post(args.remote.at("/v1/triage")).json(
+                    &json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
                     "items":[case.item],"context":case.context}),
-                        ),
-                )
+                ))
                 .await?;
 
             Ok::<_, anyhow::Error>(
@@ -511,4 +540,70 @@ async fn evaluate(args: EvaluateArgs) -> anyhow::Result<i32> {
     );
 
     Ok(code)
+}
+
+async fn observe(mut args: ObserveArgs) -> anyhow::Result<i32> {
+    args.remote.timeout_ms.get_or_insert(25_000);
+    let mut context = json!({"mode":"observe"});
+    let snapshot = (|| -> anyhow::Result<Value> {
+        let snapshot: Value = serde_json::from_str(&fs::read_to_string(&args.input)?)?;
+        anyhow::ensure!(
+            snapshot["context"].is_string()
+                && snapshot["items"]
+                    .as_array()
+                    .is_some_and(|items| items.len() <= 64),
+            "snapshot requires context text and an items array of at most 64 candidates"
+        );
+
+        Ok(snapshot)
+    })();
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(e) => {
+            context["input_error"] = json!(format!("{e:#}"));
+            println!("{}", json!({"wakeAgent":true,"context":context}));
+
+            return Ok(0);
+        }
+    };
+    let start = std::time::Instant::now();
+    let response = args
+        .remote
+        .post(
+            "/v1/triage",
+            &json!({
+                "items":snapshot["items"], "context":snapshot["context"],
+                "spec":args.spec, "endpoint":args.endpoint
+            }),
+        )
+        .await;
+    let (result, error) = match response {
+        Ok(result) => (Some(result), None),
+        Err(e) => (None, Some(format!("{e:#}"))),
+    };
+    let record = json!({"mode":"observe", "spec":args.spec, "endpoint":args.endpoint,
+        "snapshot":snapshot, "result":result, "error":error,
+        "elapsed_ms":start.elapsed().as_secs_f64() * 1000.0,
+        "observed_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|elapsed| elapsed.as_millis())});
+    let saved = (|| -> std::io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&args.observations)?;
+
+        writeln!(file, "{record}")
+    })();
+    match saved {
+        Ok(()) => context["observations"] = json!(args.observations.to_string_lossy()),
+        Err(e) => context["observation_error"] = json!(e.to_string()),
+    }
+    if let Some(error) = error {
+        context["decision_error"] = json!(error);
+    }
+    // Keep verdicts out of Hermes' evidence so the observation does not bias its work.
+    context["snapshot"] = snapshot;
+    println!("{}", json!({"wakeAgent":true,"context":context}));
+
+    Ok(0)
 }

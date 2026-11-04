@@ -48,7 +48,7 @@ export EIGHTBALL_API_KEY=your-server-token
 8ball ask --spec greeting --state hi
 ```
 
-Use the server root without a trailing slash. On the server, `EIGHTBALL_API_KEY` enables bearer authentication for REST and MCP; health and metrics remain public. The client uses the same variable for its header.
+Use the server root without a trailing slash. Remote CLI commands accept `--timeout-ms` and refuse HTTP redirects. The deadline defaults to 25,000 ms for `observe` and `evaluate`; other commands have no deadline unless specified. On the server, `EIGHTBALL_API_KEY` enables bearer authentication for REST and MCP; health and metrics remain public. The client uses the same variable for its header.
 
 ## Commands
 
@@ -56,6 +56,7 @@ Use the server root without a trailing slash. On the server, `EIGHTBALL_API_KEY`
 - `mcp`: serve MCP over stdin/stdout; logs go to stderr.
 - `ask`: ask an ad-hoc noul/choice/score question or a named `--spec`; read state from `--state` or stdin.
 - `triage`: judge a JSON array from stdin with a question or `--spec`, optional `--context-file` shared evidence, and `--top-k` embedding prefiltering.
+- `observe`: record a snapshot’s triage decisions in a private file and emit Hermes wake-up JSON while preserving every candidate.
 - `evaluate`: replay labelled JSONL cases against a named spec; report misses, abstentions, errors and latency without changing calibration.
 - `label <id> <value>`: label a saved decision belonging to a current named spec.
 - `calibrate <spec>`: fit bands from labelled states; `--dry-run` reports without saving.
