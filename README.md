@@ -295,7 +295,12 @@ dev/models.sh status
 cargo nextest run --test live --run-ignored only
 docker build -t 8ball:dev .
 docker run --rm 8ball:dev --version
+bash dev/image-smoke.sh 8ball:dev
 claude plugin validate plugin --strict
 ```
 
 Build with current stable Rust; `Cargo.lock` records tested dependency versions. Latest versions reduce upgrade backlog but do not guarantee freedom from breaking changes.
+
+The [container workflow](.github/workflows/image.yaml) follows rsume's build, smoke-test, and GHCR publish pattern. Relevant branch pushes publish a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after testing startup, SQLite initialization, authentication, and triage with a read-only root filesystem. The workflow summary records the digest to pin in deployments. It targets the homelab's `linux/amd64` nodes and uses `GITHUB_TOKEN`; no publishing token needs configuring. New GHCR packages default to private; keep that visibility when managing package access.
+
+Cluster pulls need a separate classic GitHub token with `read:packages`, stored in an image pull secret. The image contains the `8ball` CLI/server, not models or server configuration. Mount a TOML configuration read-only, provide writable storage for `EIGHTBALL_DB`, and set `EIGHTBALL_API_KEY`. The Hermes observation pilot preserves every candidate; publishing an image does not enable filtering or deploy it.
