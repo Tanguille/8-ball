@@ -1,0 +1,28 @@
+{
+  "name": "8-ball",
+  "version": "0.1.0",
+  "description": "Cheap typed judgments from small decision models",
+  "author": {
+    "name": "Tanguille"
+  },
+  "license": "MIT",
+  "keywords": [
+    "decision-model",
+    "triage",
+    "mcp",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.codex.json",
+  "interface": {
+    "displayName": "8-ball",
+    "shortDescription": "Cheap typed judgments from small decision models",
+    "longDescription": "Cheap typed judgments from small decision models",
+    "developerName": "Tanguille",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ]
+  }
+}

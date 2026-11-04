@@ -1,0 +1,13 @@
+{
+  "name": "8-ball",
+  "owner": {
+    "name": "Tanguille"
+  },
+  "plugins": [
+    {
+      "name": "8-ball",
+      "description": "Cheap typed judgments from small decision models",
+      "source": "./plugin"
+    }
+  ]
+}
