@@ -1,0 +1,2 @@
+{"id":"restore-change","item":{"title":"Kopiur restore compatibility change","description":"Existing backup restores require a configuration adjustment."},"context":"Synthetic example: we use kopiur for backups and CNPG for PostgreSQL. VolSync is not installed.","expected_keep":true}
+{"id":"unused-component","item":{"title":"VolSync maintenance release","description":"Routine version bump without migration instructions."},"context":"Synthetic example: we use kopiur for backups and CNPG for PostgreSQL. VolSync is not installed.","expected_keep":false}

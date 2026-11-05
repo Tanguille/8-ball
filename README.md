@@ -48,14 +48,16 @@ export EIGHTBALL_API_KEY=your-server-token
 8ball ask --spec greeting --state hi
 ```
 
-Use the server root without a trailing slash. On the server, `EIGHTBALL_API_KEY` enables bearer authentication for REST and MCP; health and metrics remain public. The client uses the same variable for its header.
+Use the server root without a trailing slash. Remote CLI commands accept `--timeout-ms` and refuse HTTP redirects. The deadline defaults to 25,000 ms for `observe` and `evaluate`; other commands have no deadline unless specified. On the server, `EIGHTBALL_API_KEY` enables bearer authentication for REST and MCP; health and metrics remain public. The client uses the same variable for its header.
 
 ## Commands
 
 - `serve`: run REST and HTTP MCP on `127.0.0.1:8080`; use `--config`, `--db` or `--listen` to override paths/address.
 - `mcp`: serve MCP over stdin/stdout; logs go to stderr.
 - `ask`: ask an ad-hoc noul/choice/score question or a named `--spec`; read state from `--state` or stdin.
-- `triage`: judge a JSON array from stdin, optionally using `--top-k` embedding prefiltering.
+- `triage`: judge a JSON array from stdin with a question or `--spec`, optional `--context-file` shared evidence, and `--top-k` embedding prefiltering.
+- `observe`: record a snapshot’s triage decisions in a private file and emit Hermes wake-up JSON while preserving every candidate.
+- `evaluate`: replay labelled JSONL cases against a named spec; report misses, abstentions, errors and latency without changing calibration.
 - `label <id> <value>`: label a saved decision belonging to a current named spec.
 - `calibrate <spec>`: fit bands from labelled states; `--dry-run` reports without saving.
 - `doctor`: inspect endpoint detection, health, model fingerprints and spec calibration.
@@ -114,6 +116,10 @@ Aim for at least 20 examples per side before running `8ball calibrate <spec>`.
 Bands select which answers are decisive at the requested precision; the rest are `unsure`.
 A dry run leaves stored bands untouched; reports are in-sample, so evaluate a separate holdout.
 Changing the question or model invalidates its calibration identity; ad-hoc questions always use defaults.
+
+## Hermes observation pilot
+
+[Contextual triage and evaluation](docs/hermes-triage.md) includes a GitOps digest pre-check example that records decisions while passing every candidate to Hermes, plus a held-out replay workflow. It does not modify or deploy Hermes.
 
 ## Thinking chat models
 
@@ -289,7 +295,12 @@ dev/models.sh status
 cargo nextest run --test live --run-ignored only
 docker build -t 8ball:dev .
 docker run --rm 8ball:dev --version
+bash dev/image-smoke.sh 8ball:dev
 claude plugin validate plugin --strict
 ```
 
 Build with current stable Rust; `Cargo.lock` records tested dependency versions. Latest versions reduce upgrade backlog but do not guarantee freedom from breaking changes.
+
+The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. Relevant branch pushes publish a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after testing startup, SQLite initialization, authentication, and triage with a read-only root filesystem. The workflow summary records the digest to pin in deployments. It targets the homelab's `linux/amd64` nodes and uses `GITHUB_TOKEN`; no publishing token needs configuring. New GHCR packages default to private; keep that visibility when managing package access.
+
+Cluster pulls need a separate classic GitHub token with `read:packages`, stored in an image pull secret. The image contains the `8ball` CLI/server, not models or server configuration. Mount a TOML configuration read-only, provide writable storage for `EIGHTBALL_DB`, and set `EIGHTBALL_API_KEY`. The Hermes observation pilot preserves every candidate; publishing an image does not enable filtering or deploy it.
