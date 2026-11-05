@@ -1,6 +1,6 @@
 # Rust Code Style
 
-This guide is adapted from `docs/rust-style.md` in Mesh Organiser (last changed in `3c28dc4d`) on 2026-11-03. It applies to production code and tests. 8-ball conventions take precedence where noted.
+This guide applies to production code and tests. 8-ball conventions take precedence where noted.
 
 ## General Conventions
 

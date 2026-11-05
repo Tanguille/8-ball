@@ -320,7 +320,7 @@ To uninstall, remove only `mcp.servers.8ball` from the configuration and the ski
 
 ## Development checks
 
-Follow the [Rust style guide](docs/rust-style.md), adapted from Mesh Organiser, for source and tests.
+Follow the [Rust style guide](docs/rust-style.md) for source and tests.
 
 ```sh
 cargo fmt --all --check
@@ -337,13 +337,13 @@ claude plugin validate plugin --strict
 
 The live tests need `dev/models.sh up`. This script takes `up`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. They use the llama.cpp image and pinned models of the cluster. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
 
-Dependency updates use the Renovate operator of the cluster and [.renovaterc.json5](.renovaterc.json5), with the pinned preset and dashboard rerun checkbox of Mesh Organiser. Updates require review. The local model image also requires dashboard approval, so that it stays aligned with the cluster image.
+Dependency updates use the Renovate operator of the cluster and [.renovaterc.json5](.renovaterc.json5), with a pinned preset and a dashboard rerun checkbox. Updates require review. The local model image also requires dashboard approval, so that it stays aligned with the cluster image.
 
 Build with current stable Rust. `Cargo.lock` records the tested dependency versions. Latest versions reduce the upgrade backlog, but they do not guarantee that no breaking changes occur.
 
 ## Container image
 
-The [container workflow](.github/workflows/image.yaml) follows the build, smoke-test, and GHCR publish pattern of rsume. Relevant branch pushes publish a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after the smoke test passes. The workflow summary records the digest to pin in deployments. The workflow targets the `linux/amd64` nodes of the homelab. It uses `GITHUB_TOKEN` and needs no publishing token.
+The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. Relevant branch pushes publish a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after the smoke test passes. The workflow summary records the digest to pin in deployments. The workflow targets the `linux/amd64` nodes of the homelab. It uses `GITHUB_TOKEN` and needs no publishing token.
 
 New GHCR packages are private by default. Keep that visibility.
 
