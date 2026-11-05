@@ -1,3 +1,8 @@
-target
-.git
-docs
+**
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!src/
+!src/**
+!migrations/
+!migrations/**

@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Container image
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - src/**
+      - migrations/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - Dockerfile
+      - .dockerignore
+      - dev/image-smoke.sh
+      - examples/hermes/config.toml
+      - .github/workflows/image.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/tanguille/8-ball:sha-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: docker build --pull --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE" .
+      - name: Smoke test
+        run: bash dev/image-smoke.sh "$IMAGE"
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        run: |
+          docker push "$IMAGE"
+          docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
