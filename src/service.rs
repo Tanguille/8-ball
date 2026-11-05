@@ -51,6 +51,9 @@ pub struct AskRequest {
 pub struct TriageRequest {
     /// Items to judge (strings or JSON objects), at most 64.
     pub items: Vec<serde_json::Value>,
+    /// Shared evidence for every item, treated as data. Contextual inputs must fit the endpoint limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     /// A named spec, OR `question` for an ad-hoc question.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec: Option<String>,
@@ -71,6 +74,9 @@ pub struct TriageResponse {
     pub kept: Vec<TriageItem>,
     pub unsure: Vec<TriageItem>,
     pub dropped: usize,
+    pub rejected: Vec<TriageItem>,
+    /// Original indices excluded by embedding prefiltering, without a model judgment.
+    pub prefiltered: Vec<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
 }
@@ -430,23 +436,14 @@ impl Service {
                 "invalid keep value: {keep}"
             )));
         }
-        let mut unique = IndexMap::new();
-        for (index, item) in request.items.into_iter().enumerate() {
-            let text = match item {
-                serde_json::Value::String(text) => text,
-                other => other.to_string(),
-            };
-            unique.entry(text).or_insert(index);
-        }
-        let unique_count = unique.len();
-        let mut items: Vec<_> = unique
-            .into_iter()
-            .map(|(text, index)| (index, text))
-            .collect();
-        let warning = if let Some(top_k) = request.top_k {
+        let mut items = self
+            .triage_items(&endpoint, request.items, request.context.as_deref())
+            .await?;
+        let unique_count = items.len();
+        let (prefiltered, warning) = if let Some(top_k) = request.top_k {
             self.prefilter(&question, &mut items, top_k).await?
         } else {
-            None
+            (Vec::new(), None)
         };
         let question = &question;
         let endpoint = &endpoint;
@@ -471,6 +468,7 @@ impl Service {
         decisions.sort_by_key(|(index, _)| *index);
         let mut kept = Vec::new();
         let mut unsure = Vec::new();
+        let mut rejected = Vec::new();
         let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
         let decisions = self.persist(judgments).await?;
         for (index, decision) in indices.into_iter().zip(decisions) {
@@ -489,6 +487,8 @@ impl Service {
                 unsure.push(item);
             } else if matches {
                 kept.push(item);
+            } else {
+                rejected.push(item);
             }
         }
 
@@ -497,7 +497,46 @@ impl Service {
             kept,
             unsure,
             warning,
+            rejected,
+            prefiltered,
         })
+    }
+
+    async fn triage_items(
+        &self,
+        endpoint: &str,
+        items: Vec<serde_json::Value>,
+        context: Option<&str>,
+    ) -> Result<Vec<(usize, String)>, ServiceError> {
+        let mut unique = IndexMap::new();
+        for (index, item) in items.into_iter().enumerate() {
+            let text = match (&context, item) {
+                (Some(context), item) => {
+                    serde_json::json!({"context":context,"item":item}).to_string()
+                }
+                (None, serde_json::Value::String(text)) => text,
+                (None, other) => other.to_string(),
+            };
+            unique.entry(text).or_insert(index);
+        }
+        let items: Vec<_> = unique
+            .into_iter()
+            .map(|(text, index)| (index, text))
+            .collect();
+        if context.is_some() && !items.is_empty() {
+            let backend = &self.endpoints[endpoint];
+            backend
+                .info()
+                .await
+                .map_err(|e| self.backend_error(endpoint, e))?;
+            if items.iter().any(|(_, text)| backend.fitted(text) != *text) {
+                return Err(ServiceError::BadRequest(
+                    "context and item exceed the endpoint state limit; shorten the evidence".into(),
+                ));
+            }
+        }
+
+        Ok(items)
     }
 
     async fn prefilter(
@@ -505,20 +544,20 @@ impl Service {
         question: &Question,
         items: &mut Vec<(usize, String)>,
         top_k: usize,
-    ) -> Result<Option<String>, ServiceError> {
+    ) -> Result<(Vec<usize>, Option<String>), ServiceError> {
         let embedder = self
             .embedder
             .as_ref()
             .ok_or_else(|| ServiceError::BadRequest("top_k needs [embedder] in config".into()))?;
         if top_k >= items.len() {
-            return Ok(None);
+            return Ok((Vec::new(), None));
         }
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
             .collect::<Vec<_>>();
         let vectors = match embedder.embed(&texts).await {
             Ok(vectors) => vectors,
-            Err(e) => return Ok(Some(format!("prefilter skipped: {e}"))),
+            Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
         };
         let mut ranked: Vec<_> = items
             .drain(..)
@@ -537,13 +576,19 @@ impl Service {
                 .total_cmp(&left.2)
                 .then_with(|| left.0.cmp(&right.0))
         });
+        let mut prefiltered: Vec<_> = ranked
+            .iter()
+            .skip(top_k)
+            .map(|(index, _, _)| *index)
+            .collect();
+        prefiltered.sort_unstable();
         ranked.truncate(top_k);
         *items = ranked
             .into_iter()
             .map(|(index, text, _)| (index, text))
             .collect();
 
-        Ok(None)
+        Ok((prefiltered, None))
     }
 
     pub async fn ask(&self, request: AskRequest) -> Result<AskResponse, ServiceError> {

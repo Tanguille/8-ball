@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod config;
+pub mod evaluate;
 pub mod http;
 pub mod mcp;
 pub mod metrics;

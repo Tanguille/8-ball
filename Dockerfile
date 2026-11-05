@@ -7,6 +7,7 @@ ENV CARGO_TARGET_DIR=/src/target
 RUN cargo build --release --locked && cp target/release/8ball /8ball
 
 FROM gcr.io/distroless/static:nonroot
+LABEL org.opencontainers.image.source=https://github.com/Tanguille/8-ball
 COPY --from=build /8ball /8ball
 ENV EIGHTBALL_LISTEN=0.0.0.0:8080
 EXPOSE 8080
