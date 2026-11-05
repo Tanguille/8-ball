@@ -15,10 +15,8 @@ async fn serve(
             ),
         )
         .unwrap();
-    let endpoint = eightball::backend::Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
     let service = std::sync::Arc::new(eightball::service::Service::new(
         config,
-        [("d3".into(), endpoint)].into(),
         eightball::store::Store::open(database_path).await.unwrap(),
     ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -77,7 +75,7 @@ async fn authenticated_http_client_survives_server_restart() {
 async fn bearer_allows_non_loopback_host_header() {
     let mock = MockServer::start().await;
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let (url, token, task) = serve(&mock, &directory.path().join("db.sqlite")).await;
+    let (url, ..) = serve(&mock, &directory.path().join("db.sqlite")).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/mcp"))
         .header("Host", "8ball.example")
@@ -87,8 +85,5 @@ async fn bearer_allows_non_loopback_host_header() {
         .send()
         .await
         .unwrap();
-    assert_ne!(response.status(), 403);
     assert!(response.status().is_success(), "{}", response.status());
-    token.cancel();
-    task.abort();
 }

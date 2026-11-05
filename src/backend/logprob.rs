@@ -11,7 +11,7 @@ pub async fn ask(
     futures::future::try_join_all(questions.iter().map(|question| async move {
         let (prompt, labels) = prompt(question, state)?;
         let mut body = serde_json::json!({
-            "model": endpoint.model,
+            "model": endpoint.config.model,
             "max_tokens": 1,
             "temperature": 0,
             "logprobs": true,
@@ -21,7 +21,7 @@ pub async fn ask(
                 {"role": "user", "content": prompt}
             ]
         });
-        if let Some(extra) = &endpoint.extra_body {
+        if let Some(extra) = &endpoint.config.extra_body {
             let extra = serde_json::to_value(extra).map_err(|e| BackendError(e.to_string()))?;
             body.as_object_mut()
                 .expect("request is object")

@@ -85,7 +85,7 @@ fn argmax(probabilities: &[f64]) -> usize {
 
 /// probabilities[0] is P(yes) for noul.
 #[must_use]
-pub fn verdict(kind: &Kind, labels: &[String], probabilities: &[f64], bands: Bands) -> String {
+pub fn verdict(kind: &Kind, probabilities: &[f64], bands: Bands) -> String {
     match (kind, bands) {
         (Kind::Noul { .. }, Bands::Noul { yes_at, no_at }) => {
             let yes = probabilities[0];
@@ -100,12 +100,12 @@ pub fn verdict(kind: &Kind, labels: &[String], probabilities: &[f64], bands: Ban
         }
         (_, Bands::Level { min_confidence }) => {
             if confidence(kind, probabilities) >= min_confidence {
-                labels[argmax(probabilities)].clone()
+                kind.labels()[argmax(probabilities)].clone()
             } else {
                 "unsure".into()
             }
         }
-        // A band of the wrong shape (stored for another kind) never decides.
+        // Noul bands on a choice or score question never decide.
         _ => "unsure".into(),
     }
 }
@@ -157,7 +157,6 @@ pub struct Report {
     pub warnings: Vec<String>,
 }
 
-/// target must be in [0.5, 0.99]; otherwise Err.
 pub fn calibrate(
     kind: &Kind,
     examples: &[Example],
@@ -205,7 +204,7 @@ pub fn calibrate(
     let mut decided = 0;
     let mut correct = 0;
     for example in examples {
-        let result = verdict(kind, &labels, &example.probs, bands);
+        let result = verdict(kind, &example.probs, bands);
         if result != "unsure" {
             decided += 1;
             if result == example.label {

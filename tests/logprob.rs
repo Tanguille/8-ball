@@ -31,7 +31,7 @@ async fn endpoint(tokens: &[(&str, f64)], extra: &str) -> (Endpoint, MockServer)
     ))
     .unwrap();
 
-    (Endpoint::new("chat", &endpoint_config, None).unwrap(), mock)
+    (Endpoint::new("chat", &endpoint_config, None), mock)
 }
 #[tokio::test]
 async fn case_and_space_variants_add_mass() {
@@ -152,7 +152,7 @@ async fn invalid_logprobs_are_rejected_even_for_non_labels() {
             let endpoint_config: EndpointConfig =
                 toml::from_str(&format!("url='{}'\nkind='logprob'\nmodel='m'", mock.uri()))
                     .unwrap();
-            let endpoint = Endpoint::new("chat", &endpoint_config, None).unwrap();
+            let endpoint = Endpoint::new("chat", &endpoint_config, None);
             assert!(
                 endpoint.ask("hi", &[question("noul")]).await.is_err(),
                 "accepted {token} logprob {bad}"

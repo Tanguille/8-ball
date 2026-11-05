@@ -3,7 +3,7 @@ use wiremock::{MockServer, matchers};
 
 use eightball::{
     question::Question,
-    service::{AskRequest, Service},
+    service::{AskRequest, Decision, Service},
     store::Store,
     verdict,
 };
@@ -32,36 +32,23 @@ async fn fixture() -> (Service, Store, MockServer, tempfile::TempDir) {
             ),
         )
         .unwrap();
-    let endpoint = eightball::backend::Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
-    (
-        Service::new(config, [("d3".into(), endpoint)].into(), store.clone()),
-        store,
-        mock,
-        directory,
-    )
+    (Service::new(config, store.clone()), store, mock, directory)
 }
 fn request(state: &str) -> AskRequest {
     serde_json::from_value(json!({"spec":"greeting","state":state})).unwrap()
 }
+async fn ask_one(service: &Service, request: AskRequest) -> Decision {
+    service.ask(request).await.unwrap().results.remove(0)
+}
 #[tokio::test]
 async fn repeated_ask_reuses_answer_and_row_id() {
     let (service, _store, mock, _dir) = fixture().await;
-    let first = service
-        .ask(request("hello"))
-        .await
-        .unwrap()
-        .results
-        .remove(0);
-    let second = service
-        .ask(request("hello"))
-        .await
-        .unwrap()
-        .results
-        .remove(0);
+    let first = ask_one(&service, request("hello")).await;
+    let second = ask_one(&service, request("hello")).await;
     assert!(first.id > 0);
     assert!(!first.cached);
     assert!(second.cached);
@@ -79,18 +66,8 @@ async fn repeated_ask_reuses_answer_and_row_id() {
 #[tokio::test]
 async fn cache_hashes_exactly_the_fitted_state() {
     let (service, _store, mock, _dir) = fixture().await;
-    let first = service
-        .ask(request("abcde first middle z0123"))
-        .await
-        .unwrap()
-        .results
-        .remove(0);
-    let second = service
-        .ask(request("abcde different middle z0123"))
-        .await
-        .unwrap()
-        .results
-        .remove(0);
+    let first = ask_one(&service, request("abcde first middle z0123")).await;
+    let second = ask_one(&service, request("abcde different middle z0123")).await;
     assert!(second.cached);
     assert_eq!(first.id, second.id);
     let requests = mock.received_requests().await.unwrap();
@@ -158,20 +135,19 @@ async fn spec_uses_bands_but_ad_hoc_uses_defaults() {
         )
         .await
         .unwrap();
-    let spec = service.ask(request("hi")).await.unwrap().results.remove(0);
+    let spec = ask_one(&service, request("hi")).await;
     assert!(spec.calibrated);
     assert_eq!(spec.verdict, "unsure");
-    let adhoc = service
-        .ask(AskRequest {
+    let adhoc = ask_one(
+        &service,
+        AskRequest {
             state: "hi".into(),
             spec: None,
             questions: vec![question],
             endpoint: None,
-        })
-        .await
-        .unwrap()
-        .results
-        .remove(0);
+        },
+    )
+    .await;
     assert!(!adhoc.calibrated);
     assert!(!adhoc.cached);
     assert_eq!(adhoc.verdict, "yes");
@@ -184,28 +160,18 @@ async fn cache_ids_and_labels_stay_in_the_requested_scope() {
         "state":"hello", "questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]
     }))
     .unwrap();
-    let ad = service.ask(adhoc).await.unwrap().results.remove(0);
-    let named = service
-        .ask(request("hello"))
-        .await
-        .unwrap()
-        .results
-        .remove(0);
+    let ad = ask_one(&service, adhoc).await;
+    let named = ask_one(&service, request("hello")).await;
     assert!(!named.cached);
     assert_ne!(ad.id, named.id);
     service.label(named.id, "yes".into()).await.unwrap();
     let copy_request: AskRequest =
         serde_json::from_value(json!({"spec":"greeting-copy","state":"hello"})).unwrap();
-    let copy = service
-        .ask(copy_request.clone())
-        .await
-        .unwrap()
-        .results
-        .remove(0);
+    let copy = ask_one(&service, copy_request.clone()).await;
     assert!(!copy.cached);
     assert_ne!(named.id, copy.id);
     service.label(copy.id, "no".into()).await.unwrap();
-    let again = service.ask(copy_request).await.unwrap().results.remove(0);
+    let again = ask_one(&service, copy_request).await;
     assert!(again.cached);
     assert_eq!(again.id, copy.id);
     let question: Question =

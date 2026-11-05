@@ -30,7 +30,7 @@ async fn decisions_props_and_fingerprint() {
         )
         .mount(&server)
         .await;
-    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri(), ""), None).unwrap();
+    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri(), ""), None);
     let info = endpoint.info().await.unwrap();
     assert_eq!(info.kind, BackendKind::Systemone);
     assert_eq!(info.concurrency, 4);
@@ -46,8 +46,7 @@ async fn text_architecture_and_model_detect_logprob() {
         json!({"data":[{"id":"m","architecture":{"output_modalities":["text"]}}]}),
     )
     .await;
-    let endpoint =
-        Endpoint::new("chat", &endpoint_config(&server.uri(), "model='m'"), None).unwrap();
+    let endpoint = Endpoint::new("chat", &endpoint_config(&server.uri(), "model='m'"), None);
     let info = endpoint.info().await.unwrap();
     assert_eq!(info.kind, BackendKind::Logprob);
     assert_eq!(info.fingerprint, "m");
@@ -56,7 +55,7 @@ async fn text_architecture_and_model_detect_logprob() {
 async fn missing_architecture_requires_explicit_kind() {
     let server = MockServer::start().await;
     models(&server, json!({"data":[{"id":"m"}]})).await;
-    let endpoint = Endpoint::new("old", &endpoint_config(&server.uri(), ""), None).unwrap();
+    let endpoint = Endpoint::new("old", &endpoint_config(&server.uri(), ""), None);
     assert!(
         endpoint
             .info()
@@ -73,8 +72,7 @@ async fn explicit_kind_skips_models() {
         "rerank",
         &endpoint_config(&server.uri(), "kind='rerank'\nconcurrency=1"),
         None,
-    )
-    .unwrap();
+    );
     let info = endpoint.info().await.unwrap();
     assert_eq!(info.kind, BackendKind::Rerank);
     assert_eq!(info.concurrency, 1);
@@ -102,7 +100,7 @@ async fn failed_detection_is_not_cached() {
         json!({"data":[{"id":"m","architecture":{"output_modalities":["decisions"]}}]}),
     )
     .await;
-    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri(), ""), None).unwrap();
+    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri(), ""), None);
     assert!(endpoint.info().await.is_err());
     assert_eq!(endpoint.info().await.unwrap().kind, BackendKind::Systemone);
 }
@@ -129,7 +127,6 @@ async fn detection_gets_send_bearer() {
         "d3",
         &endpoint_config(&server.uri(), ""),
         Some("secret".into()),
-    )
-    .unwrap();
+    );
     assert_eq!(endpoint.info().await.unwrap().concurrency, 1);
 }

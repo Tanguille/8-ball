@@ -1,18 +1,16 @@
-use crate::backend::BackendError;
+use crate::{backend::BackendError, config::EmbedderConfig};
 
 pub struct Embedder {
-    url: String,
-    model: String,
+    config: EmbedderConfig,
     api_key: Option<String>,
     client: reqwest::Client,
 }
 
 impl Embedder {
     #[must_use]
-    pub fn new(config: &crate::config::EmbedderConfig, api_key: Option<String>) -> Self {
+    pub fn new(config: &EmbedderConfig, api_key: Option<String>) -> Self {
         Self {
-            url: config.url.clone(),
-            model: config.model.clone(),
+            config: config.clone(),
             api_key,
             client: reqwest::Client::new(),
         }
@@ -25,9 +23,9 @@ impl Embedder {
         for batch in texts.chunks(8) {
             let request = self
                 .client
-                .post(format!("{}/v1/embeddings", self.url))
+                .post(format!("{}/v1/embeddings", self.config.url))
                 .timeout(std::time::Duration::from_secs(10))
-                .json(&serde_json::json!({"model":self.model,"input":batch}));
+                .json(&serde_json::json!({"model":self.config.model,"input":batch}));
             let response: serde_json::Value =
                 crate::backend::authed(request, self.api_key.as_deref())
                     .send()

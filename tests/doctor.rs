@@ -1,5 +1,3 @@
-use std::process::Stdio;
-
 use wiremock::{MockServer, matchers};
 
 use eightball::service::Service;
@@ -26,22 +24,12 @@ async fn service(default: &str) -> (Service, MockServer, tempfile::TempDir) {
             ),
         )
         .unwrap();
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, endpoint_config)| {
-            (
-                name.clone(),
-                eightball::backend::Endpoint::new(name, endpoint_config, None).unwrap(),
-            )
-        })
-        .collect();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
 
-    (Service::new(config, endpoints, store), mock, directory)
+    (Service::new(config, store), mock, directory)
 }
 #[tokio::test]
 async fn reports_healthy_probe_and_dead_error() {
@@ -83,8 +71,6 @@ async fn cli_exit_depends_on_default_endpoint() {
         });
         let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args(["doctor", "--url", &url])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
             .output()
             .await
             .unwrap();

@@ -3,7 +3,7 @@ pub mod config;
 pub mod evaluate;
 pub mod http;
 pub mod mcp;
-pub mod metrics;
+mod metrics;
 pub mod question;
 pub mod service;
 pub mod store;

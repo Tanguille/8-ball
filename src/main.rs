@@ -1,10 +1,4 @@
-use std::{
-    fs,
-    io::{Read, Write},
-    os::unix::fs::OpenOptionsExt,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use rmcp::ServiceExt;
@@ -139,12 +133,19 @@ impl Remote {
     }
 
     async fn send(&self, request: reqwest::RequestBuilder) -> anyhow::Result<Value> {
-        response_json(
-            eightball::backend::authed(request, self.api_key.as_deref())
-                .send()
-                .await?,
-        )
-        .await
+        let response = eightball::backend::authed(request, self.api_key.as_deref())
+            .send()
+            .await?;
+        let status = response.status();
+        let body: Value = response.json().await?;
+        if !status.is_success() {
+            anyhow::bail!(
+                "HTTP {status}: {}",
+                body["error"].as_str().unwrap_or("request failed")
+            );
+        }
+
+        Ok(body)
     }
 }
 
@@ -359,19 +360,6 @@ fn make_question(
     }
 }
 
-async fn response_json(response: reqwest::Response) -> anyhow::Result<Value> {
-    let status = response.status();
-    let body: Value = response.json().await?;
-    if !status.is_success() {
-        anyhow::bail!(
-            "HTTP {status}: {}",
-            body["error"].as_str().unwrap_or("request failed")
-        );
-    }
-
-    Ok(body)
-}
-
 async fn ask(
     AskArgs {
         kind,
@@ -385,22 +373,18 @@ async fn ask(
         remote,
     }: AskArgs,
 ) -> anyhow::Result<i32> {
-    let (questions, noul) = if spec.is_some() {
-        (Vec::new(), None)
+    let questions = if spec.is_some() {
+        Vec::new()
     } else {
         let (Some(kind), Some(instructions)) = (kind, instructions) else {
             anyhow::bail!("give --spec or <kind> <instructions>");
         };
-        let question = make_question(&kind, instructions, options, levels);
-        let noul = matches!(question.kind, Kind::Noul { .. });
-        (vec![question], Some(noul))
+        vec![make_question(&kind, instructions, options, levels)]
     };
     let state = if let Some(state) = state {
         state
     } else {
-        let mut text = String::new();
-        std::io::stdin().read_to_string(&mut text)?;
-        text
+        std::io::read_to_string(std::io::stdin())?
     };
     let body = remote
         .post(
@@ -416,14 +400,7 @@ async fn ask(
     } else if verdict == "unsure" {
         3
     } else {
-        let noul = if verdict != "no" {
-            false
-        } else if let Some(noul) = noul {
-            noul
-        } else {
-            body["results"][0]["type"] == "noul"
-        };
-        i32::from(noul && verdict == "no")
+        i32::from(verdict == "no" && body["results"][0]["type"] == "noul")
     })
 }
 
@@ -432,21 +409,6 @@ async fn build_service(
     db: Option<PathBuf>,
 ) -> anyhow::Result<Arc<Service>> {
     let config = Config::load(&config.unwrap_or_else(config::default_config_path))?;
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, configuration)| {
-            let key = configuration
-                .api_key_env
-                .as_ref()
-                .and_then(|name| std::env::var(name).ok());
-
-            Ok((
-                name.clone(),
-                eightball::backend::Endpoint::new(name, configuration, key)?,
-            ))
-        })
-        .collect::<Result<indexmap::IndexMap<_, _>, eightball::backend::BackendError>>()?;
     let store =
         eightball::store::Store::open(&db.unwrap_or_else(|| {
             config::xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
@@ -455,7 +417,7 @@ async fn build_service(
     let pruned = store.prune(config.retention_days).await?;
     tracing::info!("pruned {pruned} old decisions");
 
-    Ok(Arc::new(Service::new(config, endpoints, store)))
+    Ok(Arc::new(Service::new(config, store)))
 }
 
 async fn doctor(remote: &Remote) -> anyhow::Result<i32> {
@@ -483,9 +445,7 @@ async fn triage(args: TriageArgs) -> anyhow::Result<i32> {
         .instructions
         .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
     let context = args.context_file.map(fs::read_to_string).transpose()?;
-    let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
-    let items: Vec<Value> = serde_json::from_str(&input)?;
+    let items: Vec<Value> = serde_json::from_str(&std::io::read_to_string(std::io::stdin())?)?;
     let body = args
         .remote
         .post(
@@ -503,9 +463,7 @@ async fn triage(args: TriageArgs) -> anyhow::Result<i32> {
 
 async fn evaluate(mut args: EvaluateArgs) -> anyhow::Result<i32> {
     args.remote.timeout_ms.get_or_insert(25_000);
-    let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
-    let cases = eightball::evaluate::parse(&input)?;
+    let cases = eightball::evaluate::parse(&std::io::read_to_string(std::io::stdin())?)?;
     let client = args.remote.client()?;
     let mut observations = Vec::with_capacity(cases.len());
     for case in cases {

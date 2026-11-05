@@ -1,6 +1,6 @@
 use std::{
-    io::{BufRead, BufReader, Read},
-    process::{Command, Stdio},
+    io::{BufRead, Read},
+    process::Command,
 };
 
 use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
@@ -11,7 +11,6 @@ use eightball::{
     config::Config,
     question::Question,
     service::{AskRequest, Service},
-    store::Store,
     verdict,
 };
 
@@ -38,7 +37,7 @@ fn endpoint(name: &str, config: &eightball::config::EndpointConfig) -> Endpoint 
         .as_deref()
         .and_then(|name| std::env::var(name).ok());
 
-    Endpoint::new(name, config, key).unwrap()
+    Endpoint::new(name, config, key)
 }
 fn d3() -> Endpoint {
     endpoint("d3", &dev_config().endpoints["d3"])
@@ -163,42 +162,11 @@ async fn live_systemone_long_state_fits() {
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_cli_ask() {
-    struct ChildGuard(std::process::Child);
-    impl Drop for ChildGuard {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
     require(9931).await;
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let database_path = directory.path().join("db.sqlite");
-    let mut child = ChildGuard(
-        Command::new(env!("CARGO_BIN_EXE_8ball"))
-            .args([
-                "serve",
-                "--db",
-                database_path.to_str().unwrap(),
-                "--config",
-                "dev/config.toml",
-                "--listen",
-                "127.0.0.1:0",
-            ])
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap(),
-    );
-    let stderr = child.0.stderr.take().unwrap();
-    let mut url = None;
-    for line in BufReader::new(stderr).lines() {
-        let line = line.unwrap();
-        if let Some((_, address)) = line.split_once("listening on ") {
-            url = Some(format!("http://{}", address.trim()));
-            break;
-        }
-    }
-    let output = assert_cmd::cargo::cargo_bin_cmd!("8ball")
+    let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml");
+    let server = live_server(&config, &directory.path().join("db.sqlite"), None);
+    let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
             "noul",
@@ -207,7 +175,7 @@ async fn live_cli_ask() {
             "hi there",
             "--exit-code",
             "--url",
-            &url.expect("listening address"),
+            &server.url,
         ])
         .output()
         .unwrap();
@@ -373,17 +341,8 @@ async fn live_embed() {
 async fn live_triage_with_prefilter() {
     require(9931).await;
     require(9932).await;
-    let config = dev_config();
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, endpoint_config)| (name.clone(), endpoint(name, endpoint_config)))
-        .collect();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    let service = Service::new(config, endpoints, store);
+    let service = calibration_service(dev_config(), &directory.path().join("db.sqlite")).await;
     let request: eightball::service::TriageRequest = serde_json::from_value(json!({"items":[
         "The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.",
         "A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."
@@ -407,17 +366,11 @@ async fn live_doctor() {
     for port in [9931, 9932, 9933, 9934] {
         require(port).await;
     }
-    let config = dev_config();
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, endpoint_config)| (name.clone(), endpoint(name, endpoint_config)))
-        .collect();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&directory.path().join("db.sqlite"))
+    let report = calibration_service(dev_config(), &directory.path().join("db.sqlite"))
         .await
-        .unwrap();
-    let report = Service::new(config, endpoints, store).doctor().await;
+        .doctor()
+        .await;
     eprintln!("doctor: {report:?}");
     for endpoint in &report.endpoints {
         assert!(endpoint.error.is_none());
@@ -442,22 +395,9 @@ async fn live_cache_skips_model() {
         "greeting".into(),
         toml::from_str("type='noul'\ninstructions='Is this message a greeting?'").unwrap(),
     );
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, endpoint_config)| (name.clone(), endpoint(name, endpoint_config)))
-        .collect();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    let service = Service::new(config, endpoints, store);
-    let request = AskRequest {
-        state: "hi there, how are you?".into(),
-        spec: Some("greeting".into()),
-        questions: vec![],
-        endpoint: None,
-    };
+    let service = calibration_service(config, &directory.path().join("db.sqlite")).await;
+    let request = spec_request("hi there, how are you?", "greeting");
     let first = service.ask(request.clone()).await.unwrap();
     let start = std::time::Instant::now();
     let second = service.ask(request).await.unwrap();
@@ -469,12 +409,15 @@ async fn live_cache_skips_model() {
 }
 
 async fn calibration_service(config: Config, path: &std::path::Path) -> Service {
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, endpoint_config)| (name.clone(), endpoint(name, endpoint_config)))
-        .collect();
-    Service::new(config, endpoints, Store::open(path).await.unwrap())
+    Service::new(config, eightball::store::Store::open(path).await.unwrap())
+}
+fn spec_request(state: &str, spec: &str) -> AskRequest {
+    AskRequest {
+        state: state.into(),
+        spec: Some(spec.into()),
+        questions: vec![],
+        endpoint: None,
+    }
 }
 fn fixture_rows(spec: &str) -> Vec<(String, String)> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -508,15 +451,7 @@ async fn fit_fixture(service: &Service, spec: &str) -> eightball::service::Calib
         if index % 3 == 0 {
             continue;
         }
-        let result = service
-            .ask(AskRequest {
-                state: state.clone(),
-                spec: Some(spec.into()),
-                questions: vec![],
-                endpoint: None,
-            })
-            .await
-            .unwrap();
+        let result = service.ask(spec_request(&state, spec)).await.unwrap();
         assert_eq!(result.results.len(), 1);
         let decision = &result.results[0];
         assert_eq!(decision.question, spec);
@@ -559,15 +494,7 @@ async fn live_calibrate_holdout() {
             if index % 3 != 0 {
                 continue;
             }
-            let result = service
-                .ask(AskRequest {
-                    state: state.clone(),
-                    spec: Some(spec.into()),
-                    questions: vec![],
-                    endpoint: None,
-                })
-                .await
-                .unwrap();
+            let result = service.ask(spec_request(&state, spec)).await.unwrap();
             let result = &result.results[0];
             assert!(result.calibrated);
             eprintln!("{spec} holdout {state:?}: label={label}, result={result:?}");
@@ -612,12 +539,7 @@ async fn live_question_edit_invalidates() {
     std::fs::write(&path, edited).unwrap();
     let changed = calibration_service(Config::load(&path).unwrap(), &database_path).await;
     let result = changed
-        .ask(AskRequest {
-            state: "hi there".into(),
-            spec: Some("greeting".into()),
-            questions: vec![],
-            endpoint: None,
-        })
+        .ask(spec_request("hi there", "greeting"))
         .await
         .unwrap();
     assert!(!result.results[0].calibrated);
@@ -671,7 +593,7 @@ fn live_server(
         .arg("--db")
         .arg(database_path)
         .args(["--listen", "127.0.0.1:0"])
-        .stderr(Stdio::piped());
+        .stderr(std::process::Stdio::piped());
     if let Some(key) = key {
         command.args(["--api-key", key]);
     }
@@ -681,7 +603,7 @@ fn live_server(
         stderr: None,
     };
     let mut errors = String::new();
-    let mut reader = BufReader::new(server.child.stderr.take().unwrap());
+    let mut reader = std::io::BufReader::new(server.child.stderr.take().unwrap());
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line).unwrap() == 0 {
@@ -710,7 +632,7 @@ async fn live_mcp_handler_ask() {
         calibration_service(dev_config(), &directory.path().join("db.sqlite")).await,
     );
     let (server_io, client_io) = tokio::io::duplex(16_384);
-    let task = tokio::spawn(async move {
+    tokio::spawn(async move {
         eightball::mcp::Mcp::new(service)
             .serve(server_io)
             .await
@@ -737,7 +659,6 @@ async fn live_mcp_handler_ask() {
         "yes"
     );
     client.cancel().await.unwrap();
-    task.abort();
 }
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]

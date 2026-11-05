@@ -1,6 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 
 use sqlx::{Connection, SqliteConnection};
+use tempfile::TempDir;
 
 use eightball::{
     store::{NewDecision, Store},
@@ -17,8 +18,24 @@ async fn fixture(path: &std::path::Path) -> SqliteConnection {
     .unwrap()
 }
 
-fn temp() -> tempfile::TempDir {
+fn temp() -> TempDir {
     tempfile::Builder::new().prefix("8ball-").tempdir().unwrap()
+}
+async fn opened() -> (TempDir, std::path::PathBuf, Store) {
+    let directory = temp();
+    let path = directory.path().join("db.sqlite");
+    let store = Store::open(&path).await.unwrap();
+
+    (directory, path, store)
+}
+async fn insert(store: &Store, decision: NewDecision) -> i64 {
+    store.insert_many(vec![decision]).await.unwrap()[0]
+}
+async fn cached(store: &Store, state_hash: &str) -> Option<(i64, eightball::backend::Probs)> {
+    store
+        .cached("model-question", state_hash, Some("greeting"))
+        .await
+        .unwrap()
 }
 fn decision(state_hash: &str) -> NewDecision {
     NewDecision {
@@ -63,25 +80,12 @@ async fn file_is_private_and_migrations_are_idempotent() {
 }
 #[tokio::test]
 async fn insert_and_cache_lookup() {
-    let directory = temp();
-    let store = Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    let id = store.insert(decision("first")).await.unwrap();
-    let (cached_id, answer) = store
-        .cached("model-question", "first", Some("greeting"))
-        .await
-        .unwrap()
-        .unwrap();
+    let (_directory, _, store) = opened().await;
+    let id = insert(&store, decision("first")).await;
+    let (cached_id, answer) = cached(&store, "first").await.unwrap();
     assert_eq!(cached_id, id);
     assert!((answer[0] - 0.9).abs() < 1e-9);
-    assert!(
-        store
-            .cached("model-question", "other", Some("greeting"))
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(cached(&store, "other").await.is_none());
     assert!(
         store
             .cached("other-model", "first", Some("greeting"))
@@ -92,15 +96,9 @@ async fn insert_and_cache_lookup() {
 }
 #[tokio::test]
 async fn labels_can_be_replaced_and_are_scoped() {
-    let directory = temp();
-    let store = Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    let id = store.insert(decision("first")).await.unwrap();
-    assert_eq!(
-        store.set_label(id, "yes").await.unwrap(),
-        Some((Some("greeting".into()), "question".into()))
-    );
+    let (_directory, _, store) = opened().await;
+    let id = insert(&store, decision("first")).await;
+    assert!(store.set_label(id, "yes").await.unwrap());
     let rows = store.labelled("greeting", "question").await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].label, "yes");
@@ -117,41 +115,25 @@ async fn labels_can_be_replaced_and_are_scoped() {
             .unwrap()
             .is_empty()
     );
-    assert!(store.set_label(99_999, "yes").await.unwrap().is_none());
+    assert!(!store.set_label(99_999, "yes").await.unwrap());
 }
 #[tokio::test]
 async fn pruning_preserves_labelled_rows() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let store = Store::open(&path).await.unwrap();
-    store.insert(decision("first")).await.unwrap();
-    let labelled = store.insert(decision("second")).await.unwrap();
+    let (_directory, path, store) = opened().await;
+    insert(&store, decision("first")).await;
+    let labelled = insert(&store, decision("second")).await;
     store.set_label(labelled, "yes").await.unwrap();
     sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
         .execute(&mut fixture(&path).await)
         .await
         .unwrap();
     assert_eq!(store.prune(0).await.unwrap(), 1);
-    assert!(
-        store
-            .cached("model-question", "first", Some("greeting"))
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        store
-            .cached("model-question", "second", Some("greeting"))
-            .await
-            .unwrap()
-            .is_some()
-    );
+    assert!(cached(&store, "first").await.is_none());
+    assert!(cached(&store, "second").await.is_some());
 }
 #[tokio::test]
 async fn calibration_upsert_keeps_latest_bands() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let store = Store::open(&path).await.unwrap();
+    let (_directory, path, store) = opened().await;
     store
         .put_calibration(
             "cid",
@@ -193,33 +175,20 @@ async fn calibration_upsert_keeps_latest_bands() {
 }
 #[tokio::test]
 async fn batch_insert_returns_each_row_id() {
-    let directory = temp();
-    let store = Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
+    let (_directory, _, store) = opened().await;
     let ids = store
         .insert_many(vec![decision("one"), decision("two")])
         .await
         .unwrap();
     assert_eq!(ids.len(), 2);
     assert_ne!(ids[0], ids[1]);
-    assert_eq!(
-        store
-            .cached("model-question", "two", Some("greeting"))
-            .await
-            .unwrap()
-            .unwrap()
-            .0,
-        ids[1]
-    );
+    assert_eq!(cached(&store, "two").await.unwrap().0, ids[1]);
 }
 
 #[tokio::test]
 async fn pruned_ids_never_label_replacement_rows() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let store = Store::open(&path).await.unwrap();
-    let old = store.insert(decision("old")).await.unwrap();
+    let (_directory, path, store) = opened().await;
+    let old = insert(&store, decision("old")).await;
     sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
         .execute(&mut fixture(&path).await)
         .await
@@ -227,9 +196,9 @@ async fn pruned_ids_never_label_replacement_rows() {
     assert_eq!(store.prune(0).await.unwrap(), 1);
     drop(store);
     let reopened = Store::open(&path).await.unwrap();
-    let new = reopened.insert(decision("replacement")).await.unwrap();
+    let new = insert(&reopened, decision("replacement")).await;
     assert!(new > old, "pruned id {old} was reused as {new}");
-    assert!(reopened.set_label(old, "yes").await.unwrap().is_none());
+    assert!(!reopened.set_label(old, "yes").await.unwrap());
     assert!(
         reopened
             .labelled("greeting", "question")
@@ -272,15 +241,15 @@ async fn existing_database_migrates_without_losing_labels_or_ids() {
     let rows = store.labelled("greeting", "question").await.unwrap();
     assert_eq!(rows[0].id, id);
     assert_eq!(rows[0].label, "yes");
-    let old = store.insert(decision("old")).await.unwrap();
+    let old = insert(&store, decision("old")).await;
     sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
         .execute(&mut fixture(&path).await)
         .await
         .unwrap();
     store.prune(0).await.unwrap();
-    let new = store.insert(decision("new")).await.unwrap();
+    let new = insert(&store, decision("new")).await;
     assert!(new > old);
-    assert!(store.set_label(old, "no").await.unwrap().is_none());
+    assert!(!store.set_label(old, "no").await.unwrap());
 }
 
 const LEGACY_SCHEMA: &str  =  "
@@ -323,7 +292,7 @@ async fn existing_autoincrement_preserves_deleted_highwater_and_calibration() {
     drop(connection);
     for _ in 0..2 {
         let store = Store::open(&path).await.unwrap();
-        assert!(store.insert(decision("new")).await.unwrap() > 100);
+        assert!(insert(&store, decision("new")).await > 100);
         let (saved, report) = store.calibration("cid").await.unwrap().unwrap();
         assert_eq!(
             serde_json::to_value(saved).unwrap(),
@@ -335,9 +304,7 @@ async fn existing_autoincrement_preserves_deleted_highwater_and_calibration() {
 
 #[tokio::test]
 async fn batch_failure_rolls_back_all_rows() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let store = Store::open(&path).await.unwrap();
+    let (_directory, path, store) = opened().await;
     sqlx::raw_sql("CREATE TRIGGER reject_bad BEFORE INSERT ON decisions WHEN NEW.state_hash='bad' BEGIN SELECT RAISE(ABORT,'rejected'); END;")
         .execute(&mut fixture(&path).await)
         .await
@@ -348,24 +315,15 @@ async fn batch_failure_rolls_back_all_rows() {
             .await
             .is_err()
     );
-    assert!(
-        store
-            .cached("model-question", "good", Some("greeting"))
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(cached(&store, "good").await.is_none());
 }
 
 #[tokio::test]
 async fn cloned_store_serializes_concurrent_writes() {
-    let directory = temp();
-    let store = Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
+    let (_directory, _, store) = opened().await;
     let tasks = (0..20).map(|i| {
         let store = store.clone();
-        tokio::spawn(async move { store.insert(decision(&i.to_string())).await.unwrap() })
+        tokio::spawn(async move { insert(&store, decision(&i.to_string())).await })
     });
     let mut ids = futures::future::join_all(tasks)
         .await
@@ -379,13 +337,11 @@ async fn cloned_store_serializes_concurrent_writes() {
 
 #[tokio::test]
 async fn cache_preserves_null_scope_and_latest_row_and_rejects_bad_json() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let store = Store::open(&path).await.unwrap();
-    store.insert(decision("same")).await.unwrap();
+    let (_directory, path, store) = opened().await;
+    insert(&store, decision("same")).await;
     let mut anonymous = decision("same");
     anonymous.spec = None;
-    let id = store.insert(anonymous).await.unwrap();
+    let id = insert(&store, anonymous).await;
     assert_eq!(
         store
             .cached("model-question", "same", None)
@@ -395,16 +351,8 @@ async fn cache_preserves_null_scope_and_latest_row_and_rejects_bad_json() {
             .0,
         id
     );
-    let newest = store.insert(decision("same")).await.unwrap();
-    assert_eq!(
-        store
-            .cached("model-question", "same", Some("greeting"))
-            .await
-            .unwrap()
-            .unwrap()
-            .0,
-        newest
-    );
+    let newest = insert(&store, decision("same")).await;
+    assert_eq!(cached(&store, "same").await.unwrap().0, newest);
     sqlx::query("UPDATE decisions SET answer='invalid' WHERE id=?1")
         .bind(newest)
         .execute(&mut fixture(&path).await)
@@ -436,8 +384,8 @@ async fn concurrent_legacy_opens_preserve_rows_and_indexes() {
     let first_store = first_store.unwrap();
     let second_store = second_store.unwrap();
     assert_ne!(
-        first_store.insert(decision("a")).await.unwrap(),
-        second_store.insert(decision("b")).await.unwrap()
+        insert(&first_store, decision("a")).await,
+        insert(&second_store, decision("b")).await
     );
     assert_eq!(
         first_store.labelled("greeting", "question").await.unwrap()[0].id,

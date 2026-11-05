@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub default: String,
     #[serde(default = "default_retention")]
-    pub retention_days: u32, // default_retention() -> 90
+    pub retention_days: u32,
     pub endpoints: indexmap::IndexMap<String, EndpointConfig>,
     pub embedder: Option<EmbedderConfig>,
     #[serde(default)]
@@ -88,7 +88,7 @@ impl Config {
         Ok(config)
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), String> {
         if !self.endpoints.contains_key(&self.default) {
             return Err(format!("unknown default endpoint {}", self.default));
         }
