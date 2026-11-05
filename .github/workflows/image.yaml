@@ -9,7 +9,6 @@ on:
       - migrations/**
       - Cargo.toml
       - Cargo.lock
-      - rust-toolchain.toml
       - Dockerfile
       - .dockerignore
       - dev/image-smoke.sh
