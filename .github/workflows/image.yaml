@@ -45,3 +45,9 @@ jobs:
         run: |
           docker push "$IMAGE"
           docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
+      # Renovate cannot order sha- tags, so deployments pin latest@sha256 for digest updates.
+      - name: Publish latest
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker tag "$IMAGE" ghcr.io/tanguille/8-ball:latest
+          docker push ghcr.io/tanguille/8-ball:latest
