@@ -175,7 +175,7 @@ enum Command {
     Triage(TriageArgs),
     /// Replay labelled JSONL cases from stdin without changing calibration.
     Evaluate(EvaluateArgs),
-    /// Record triage decisions and always wake Hermes with every original candidate.
+    /// Record triage decisions and print every original candidate unfiltered.
     Observe(ObserveArgs),
     /// Inspect endpoint detection and health.
     Doctor {
@@ -559,7 +559,7 @@ async fn observe(mut args: ObserveArgs) -> anyhow::Result<i32> {
     if let Some(error) = error {
         context["decision_error"] = json!(error);
     }
-    // Keep verdicts out of Hermes' evidence so the observation does not bias its work.
+    // Keep verdicts out of the printed evidence so the observation does not bias its consumer.
     context["snapshot"] = snapshot;
     println!("{}", json!({"wakeAgent":true,"context":context}));
 
