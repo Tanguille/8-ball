@@ -343,7 +343,7 @@ Build with current stable Rust. `Cargo.lock` records the tested dependency versi
 
 ## Container image
 
-The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. Relevant branch pushes publish a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after the smoke test passes. The workflow summary records the digest to pin in deployments. The workflow targets the `linux/amd64` nodes of the homelab. It uses `GITHUB_TOKEN` and needs no publishing token.
+The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. A push to `main` that changes the Docker build inputs publishes a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after the smoke test passes. To build another branch, run `gh workflow run image.yaml --ref <branch>`. The workflow summary records the digest to pin in deployments. The workflow targets the `linux/amd64` nodes of the homelab. It uses `GITHUB_TOKEN` and needs no publishing token.
 
 New GHCR packages are private by default. Keep that visibility.
 
