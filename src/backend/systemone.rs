@@ -11,34 +11,20 @@ pub async fn ask(
     for question in requested_questions {
         let mut wire =
             json!({"type":question.kind.type_name(),"instructions":question.instructions});
-        match &question.kind {
-            Kind::Noul {
-                criteria: Some(criteria),
-            } => wire["criteria"] = serde_json::to_value(criteria).expect("criteria serializes"),
-            Kind::Noul { criteria: None } => {}
-            Kind::Choice { criteria } => {
-                wire["criteria"] = Value::Object(
-                    criteria
-                        .iter()
-                        .map(|(name, description)| {
-                            (
-                                name.clone(),
-                                if description.is_empty() {
-                                    Value::Null
-                                } else {
-                                    json!(description)
-                                },
-                            )
-                        })
-                        .collect(),
-                );
+        if let Some(criteria) = json!(question.kind).get("criteria") {
+            wire["criteria"] = criteria.clone();
+        }
+        if let Kind::Choice { criteria } = &question.kind {
+            for (name, description) in criteria {
+                if description.is_empty() {
+                    wire["criteria"][name] = Value::Null;
+                }
             }
-            Kind::Score { criteria } => wire["criteria"] = json!(criteria),
         }
         questions.insert(question.id.clone(), wire);
     }
     let mut body = json!({"state":state,"questions":questions});
-    if let Some(model) = &endpoint.model {
+    if let Some(model) = &endpoint.config.model {
         body["model"] = json!(model);
     }
     let response = endpoint.post_json("/v1/systemone", &body).await?;

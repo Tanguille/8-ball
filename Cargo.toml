@@ -9,9 +9,6 @@ publish = false
 name = "8ball"
 path = "src/main.rs"
 
-[lib]
-path = "src/lib.rs"
-
 [lints.rust]
 unused_qualifications = "warn"
 
@@ -29,7 +26,6 @@ missing_panics_doc = "allow"
 lto = "thin"
 codegen-units = 1
 strip = true
-
 
 [dependencies]
 anyhow = "1.0.104"
@@ -53,7 +49,6 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [dev-dependencies]
-assert_cmd = "2.2.2"
 rmcp = { version = "3.8.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 tempfile = "3.27.0"
 wiremock = "0.6.5"

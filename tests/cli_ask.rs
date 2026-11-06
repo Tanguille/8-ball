@@ -76,7 +76,7 @@ async fn noul_exit_codes() {
     for (probabilities, code, want) in [(0.97, 0, "yes"), (0.02, 1, "no"), (0.5, 3, "unsure")] {
         let mock = mock(probabilities).await;
         let server = serve(&mock);
-        let output = assert_cmd::cargo::cargo_bin_cmd!("8ball")
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args([
                 "ask",
                 "noul",
@@ -144,7 +144,7 @@ async fn choice_prints_billing() {
         .mount(&mock)
         .await;
     let server = serve(&mock);
-    let output = assert_cmd::cargo::cargo_bin_cmd!("8ball")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
             "choice",
@@ -174,7 +174,7 @@ async fn dead_server_exits_four() {
     let mut server = serve(&mock);
     server.child.kill().unwrap();
     server.child.wait().unwrap();
-    let output = assert_cmd::cargo::cargo_bin_cmd!("8ball")
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
             "noul",

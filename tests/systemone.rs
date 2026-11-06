@@ -42,7 +42,7 @@ async fn three_questions_one_request() {
         "q2":{"type":"choice","choice":"billing","probabilities":{"billing":0.9,"shipping":0.1},"confidence":0.8},
         "q3":{"type":"score","score":1.2,"probabilities":{"0":0.1,"1":0.6,"2":0.3},"confidence":0.5}
     }}))).await;
-    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None).unwrap();
+    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None);
     let got = endpoint.ask("hello", &test_questions).await.unwrap();
     for (actual, expected) in
         got.iter()
@@ -82,7 +82,7 @@ async fn long_state_is_fitted() {
     .await;
     let mut config = endpoint_config(&server.uri());
     config.max_state_chars = Some(10);
-    let endpoint = Endpoint::new("d3", &config, None).unwrap();
+    let endpoint = Endpoint::new("d3", &config, None);
     let sent = endpoint.fitted("abcdefghijklmnopqrstuvwxyz0123");
     assert_eq!(sent, "abcde\n…\nz0123");
     endpoint.ask(&sent, &[question()]).await.unwrap();
@@ -111,7 +111,7 @@ async fn http_400_is_error_with_body() {
         ResponseTemplate::new(400).set_body_json(json!({"error":"too long"})),
     )
     .await;
-    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None).unwrap();
+    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None);
     let err = endpoint
         .ask("hi", &[question()])
         .await
@@ -123,7 +123,7 @@ async fn http_400_is_error_with_body() {
 async fn http_501_is_not_decision_model() {
     let server = MockServer::start().await;
     mount(&server, ResponseTemplate::new(501)).await;
-    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None).unwrap();
+    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None);
     assert!(
         endpoint
             .ask("hi", &[question()])
@@ -146,7 +146,7 @@ async fn bearer_only_when_set() {
         if key.is_some() {
             config.api_key_env = Some("EIGHTBALL_TEST_KEY".into());
         }
-        let endpoint = Endpoint::new("d3", &config, key.clone()).unwrap();
+        let endpoint = Endpoint::new("d3", &config, key.clone());
         endpoint.ask("hi", &[question()]).await.unwrap();
         let requests: Vec<_> = server
             .received_requests()
@@ -202,7 +202,7 @@ async fn concurrency_one_serializes() {
         });
         let mut config = endpoint_config(&url);
         config.concurrency = Some(concurrency);
-        let endpoint = Endpoint::new("d3", &config, None).unwrap();
+        let endpoint = Endpoint::new("d3", &config, None);
         let test_questions = [question()];
         let (a, b) = tokio::join!(
             endpoint.ask("hi", &test_questions),
@@ -235,7 +235,7 @@ async fn invalid_backend_probabilities_are_rejected() {
         } else {
             serde_json::from_value(json!({"id":"q","type":"choice","instructions":"Which?","criteria":{"a":"","b":""}})).unwrap()
         };
-        let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None).unwrap();
+        let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None);
         assert!(
             endpoint.ask("hi", &[question]).await.is_err(),
             "accepted {value}"

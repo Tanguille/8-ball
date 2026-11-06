@@ -1,6 +1,6 @@
 use std::{fs, os::unix::fs::OpenOptionsExt};
 
-use sqlx::{Connection, SqlSafeStr};
+use sqlx::SqlSafeStr;
 
 use crate::{
     backend::Probs,
@@ -69,9 +69,8 @@ impl Store {
             .max_connections(1)
             .connect_with(options)
             .await?;
-        let mut connection = pool.acquire().await?;
         // Lock before inspecting the schema so concurrent legacy opens cannot race the rebuild.
-        let mut transaction = connection.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
         let schema: Option<String> = sqlx::query_scalar(
             "SELECT sql FROM sqlite_schema WHERE type='table' AND name='decisions'",
         )
@@ -103,21 +102,10 @@ impl Store {
             .await
             .map_err(|e| StoreError(e.to_string()))?;
         transaction.commit().await?;
-        drop(connection);
 
         Ok(Self { pool })
     }
 
-    pub async fn insert(&self, decision: NewDecision) -> Result<i64, StoreError> {
-        Ok(self
-            .insert_many(vec![decision])
-            .await?
-            .into_iter()
-            .next()
-            .expect("one inserted decision"))
-    }
-
-    /// Store all decisions in one transaction.
     pub async fn insert_many(&self, decisions: Vec<NewDecision>) -> Result<Vec<i64>, StoreError> {
         let mut transaction = self.pool.begin().await?;
         let mut ids = Vec::with_capacity(decisions.len());
@@ -174,21 +162,15 @@ impl Store {
         )
     }
 
-    /// Returns (spec, `question_hash`) of the row, None if no row.
-    pub async fn set_label(
-        &self,
-        id: i64,
-        label: &str,
-    ) -> Result<Option<(Option<String>, String)>, StoreError> {
-        Ok(
-            sqlx::query_as(
-                "UPDATE decisions SET label=?1 WHERE id=?2 RETURNING spec,question_hash",
-            )
+    /// Returns false when no row has this id.
+    pub async fn set_label(&self, id: i64, label: &str) -> Result<bool, StoreError> {
+        let result = sqlx::query("UPDATE decisions SET label=?1 WHERE id=?2")
             .bind(label)
             .bind(id)
-            .fetch_optional(&self.pool)
-            .await?,
-        )
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn labelled(

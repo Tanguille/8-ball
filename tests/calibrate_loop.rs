@@ -4,9 +4,8 @@ use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
 use eightball::{
-    backend::Endpoint,
     config::Config,
-    service::{AskRequest, Service},
+    service::{AskRequest, Decision, Service},
     store::Store,
     verdict,
 };
@@ -16,14 +15,8 @@ struct App {
     model: MockServer,
     directory: tempfile::TempDir,
     url: String,
-    task: tokio::task::JoinHandle<()>,
     config: Config,
     store: Store,
-}
-impl Drop for App {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
 }
 async fn app() -> App {
     let model = MockServer::start().await;
@@ -67,16 +60,11 @@ async fn app() -> App {
     let store = Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, settings)| (name.clone(), Endpoint::new(name, settings, None).unwrap()))
-        .collect();
-    let service = Arc::new(Service::new(config.clone(), endpoints, store.clone()));
+    let service = Arc::new(Service::new(config.clone(), store.clone()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let served = service.clone();
-    let task = tokio::spawn(async move {
+    tokio::spawn(async move {
         axum::serve(
             listener,
             eightball::http::router(served, None, &tokio_util::sync::CancellationToken::new()),
@@ -89,7 +77,6 @@ async fn app() -> App {
         model,
         directory,
         url,
-        task,
         config,
         store,
     }
@@ -110,6 +97,14 @@ fn request(spec: &str, state: &str) -> AskRequest {
         endpoint: None,
     }
 }
+async fn ask(service: &Service, spec: &str, state: &str) -> Decision {
+    service
+        .ask(request(spec, state))
+        .await
+        .unwrap()
+        .results
+        .remove(0)
+}
 async fn posts(app: &App) -> usize {
     app.model
         .received_requests()
@@ -129,13 +124,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
         } else {
             format!("invoice message {i}")
         };
-        let decision = app
-            .service
-            .ask(request("greeting", &state))
-            .await
-            .unwrap()
-            .results
-            .remove(0);
+        let decision = ask(&app.service, "greeting", &state).await;
         assert_eq!(
             post(
                 &app,
@@ -158,11 +147,8 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     let dry: Value = result.json().await.unwrap();
     assert_eq!(dry["stored"], false);
     assert!(
-        !app.service
-            .ask(request("greeting", "hello dry run"))
+        !ask(&app.service, "greeting", "hello dry run")
             .await
-            .unwrap()
-            .results[0]
             .calibrated
     );
     let before_stored = posts(&app).await;
@@ -179,33 +165,21 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     assert!(result["report"]["coverage"].as_f64().unwrap() > 0.9);
     assert_eq!(posts(&app).await, before_stored);
     assert!(
-        app.service
-            .ask(request("greeting", "hello new state"))
+        ask(&app.service, "greeting", "hello new state")
             .await
-            .unwrap()
-            .results[0]
             .calibrated
     );
     let mut config = app.config.clone();
     config.specs["greeting"].instructions.push_str(" clearly");
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, settings)| (name.clone(), Endpoint::new(name, settings, None).unwrap()))
-        .collect();
     let changed = Service::new(
         config,
-        endpoints,
         Store::open(&app.directory.path().join("db.sqlite"))
             .await
             .unwrap(),
     );
     assert!(
-        !changed
-            .ask(request("greeting", "hello new state"))
+        !ask(&changed, "greeting", "hello new state")
             .await
-            .unwrap()
-            .results[0]
             .calibrated
     );
     assert_eq!(
@@ -247,32 +221,15 @@ async fn label_validation_rejects_unknown_adhoc_old_and_invalid_values() {
         ("team", "a", "c"),
         ("urgency", "1", "2"),
     ] {
-        let id = app
-            .service
-            .ask(request(spec, "hello label"))
-            .await
-            .unwrap()
-            .results[0]
-            .id;
+        let id = ask(&app.service, spec, "hello label").await.id;
         let result = app.service.label(id, good.into()).await.unwrap();
         assert_eq!(result.label, if spec == "greeting" { "yes" } else { good });
         assert!(app.service.label(id, bad.into()).await.is_err());
     }
-    let id = app
-        .service
-        .ask(request("greeting", "hello old"))
-        .await
-        .unwrap()
-        .results[0]
-        .id;
+    let id = ask(&app.service, "greeting", "hello old").await.id;
     let mut config = app.config.clone();
     config.specs["greeting"].instructions.push_str(" now");
-    let endpoints = config
-        .endpoints
-        .iter()
-        .map(|(name, settings)| (name.clone(), Endpoint::new(name, settings, None).unwrap()))
-        .collect();
-    let changed = Service::new(config, endpoints, app.store.clone());
+    let changed = Service::new(config, app.store.clone());
     assert!(
         changed
             .label(id, "yes".into())
@@ -286,20 +243,14 @@ async fn label_validation_rejects_unknown_adhoc_old_and_invalid_values() {
 async fn conflicting_labels_are_excluded() {
     let app = app().await;
     let state = "hello conflict";
-    let id = app
-        .service
-        .ask(request("greeting", state))
-        .await
-        .unwrap()
-        .results[0]
-        .id;
+    let id = ask(&app.service, "greeting", state).await.id;
     app.service.label(id, "yes".into()).await.unwrap();
     let question: eightball::question::Question =
         serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
             .unwrap();
     let other = app
         .store
-        .insert(eightball::store::NewDecision {
+        .insert_many(vec![eightball::store::NewDecision {
             spec: Some("greeting".into()),
             question_hash: verdict::question_hash(&question),
             calibration_id: "previous-model".into(),
@@ -308,9 +259,9 @@ async fn conflicting_labels_are_excluded() {
             answer: vec![0.9, 0.1],
             verdict: "yes".into(),
             endpoint: "d3".into(),
-        })
+        }])
         .await
-        .unwrap();
+        .unwrap()[0];
     app.service.label(other, "no".into()).await.unwrap();
     let result = app
         .service

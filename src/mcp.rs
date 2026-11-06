@@ -7,7 +7,6 @@ use crate::service::Service;
 #[derive(Clone)]
 pub struct Mcp {
     service: Arc<Service>,
-    instructions: Arc<str>,
     tool_router: rmcp::handler::server::router::tool::ToolRouter<Self>,
 }
 
@@ -15,11 +14,8 @@ pub struct Mcp {
 impl Mcp {
     #[must_use]
     pub fn new(service: Arc<Service>) -> Self {
-        let instructions = build_instructions(&service).into();
-
         Self {
             service,
-            instructions,
             tool_router: Self::tool_router(),
         }
     }
@@ -86,7 +82,7 @@ impl rmcp::ServerHandler for Mcp {
                 .enable_tools()
                 .build(),
         )
-        .with_instructions(self.instructions.to_string())
+        .with_instructions(build_instructions(&self.service))
     }
 }
 

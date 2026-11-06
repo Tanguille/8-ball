@@ -16,7 +16,7 @@ pub async fn ask(
 
     futures::future::try_join_all(questions.iter().map(|question| async move {
         let mut body = json!({"query":question.instructions,"documents":[state]});
-        if let Some(model) = &endpoint.model {
+        if let Some(model) = &endpoint.config.model {
             body["model"] = json!(model);
         }
         let response = endpoint.post_json("/v1/rerank", &body).await?;

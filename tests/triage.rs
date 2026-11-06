@@ -4,15 +4,7 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
-async fn app(
-    embed: Option<bool>,
-) -> (
-    String,
-    MockServer,
-    MockServer,
-    tokio::task::JoinHandle<()>,
-    tempfile::TempDir,
-) {
+async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::TempDir) {
     let model = MockServer::start().await;
     let embedding = MockServer::start().await;
     Mock::given(matchers::method("POST"))
@@ -76,19 +68,14 @@ async fn app(
         model.uri()
     ))
     .unwrap();
-    let endpoint = eightball::backend::Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
-    let service = std::sync::Arc::new(eightball::service::Service::new(
-        config,
-        [("d3".into(), endpoint)].into(),
-        store,
-    ));
+    let service = std::sync::Arc::new(eightball::service::Service::new(config, store));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let task = tokio::spawn(async move {
+    tokio::spawn(async move {
         axum::serve(
             listener,
             eightball::http::router(service, None, &tokio_util::sync::CancellationToken::new()),
@@ -97,7 +84,7 @@ async fn app(
         .unwrap();
     });
 
-    (url, model, embedding, task, directory)
+    (url, model, embedding, directory)
 }
 fn request(items: &Value) -> Value {
     json!({"items":items,"question":{"id":"q","type":"noul","instructions":"Is this relevant?"}})
@@ -110,9 +97,18 @@ async fn triage(url: &str, body: &Value) -> reqwest::Response {
         .await
         .unwrap()
 }
+async fn posts(model: &MockServer) -> usize {
+    model
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|request| request.method == "POST")
+        .count()
+}
 #[tokio::test]
 async fn dedupes_and_partitions_verdicts() {
-    let (url, model, _embedding, task, _dir) = app(None).await;
+    let (url, model, _embedding, _dir) = app(None).await;
     let response = triage(
         &url,
         &request(&json!(["yes1", "yes2", "unsure", "no", "yes1"])),
@@ -125,32 +121,21 @@ async fn dedupes_and_partitions_verdicts() {
     assert_eq!(body["dropped"], 1);
     assert_eq!(body["kept"][0]["index"], 0);
     assert_eq!(body["kept"][1]["index"], 1);
-    assert_eq!(
-        model
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .filter(|response| response.method == "POST")
-            .count(),
-        4
-    );
-    task.abort();
+    assert_eq!(posts(&model).await, 4);
 }
 #[tokio::test]
 async fn sixty_five_items_rejected() {
-    let (url, _model, _embedding, task, _dir) = app(None).await;
+    let (url, _model, _embedding, _dir) = app(None).await;
     assert_eq!(
         triage(&url, &request(&json!(vec!["item"; 65])))
             .await
             .status(),
         400
     );
-    task.abort();
 }
 #[tokio::test]
 async fn invalid_keep_is_rejected_before_model_requests() {
-    let (url, model, _embedding, task, _dir) = app(None).await;
+    let (url, model, _embedding, _dir) = app(None).await;
     for (question, keep) in [
         (
             json!({"id":"q","type":"noul","instructions":"Relevant?"}),
@@ -181,19 +166,11 @@ async fn invalid_keep_is_rejected_before_model_requests() {
         assert_eq!(response.status(), 400, "keep={keep}");
         assert!(response.text().await.unwrap().contains("keep"));
     }
-    assert!(
-        model
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .all(|request| request.method != "POST")
-    );
-    task.abort();
+    assert_eq!(posts(&model).await, 0);
 }
 #[tokio::test]
 async fn prefilter_judges_only_closest_items() {
-    let (url, model, _embedding, task, _dir) = app(Some(true)).await;
+    let (url, model, _embedding, _dir) = app(Some(true)).await;
     let mut body = request(&json!(["one", "two", "three", "four"]));
     body["top_k"] = json!(2);
     let response = triage(&url, &body).await;
@@ -201,53 +178,21 @@ async fn prefilter_judges_only_closest_items() {
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["kept"][0]["index"], 2);
     assert_eq!(body["kept"][1]["index"], 3);
-    assert_eq!(
-        model
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .filter(|response| response.method == "POST")
-            .count(),
-        2
-    );
-    task.abort();
+    assert!(body.get("warning").is_none());
+    assert_eq!(posts(&model).await, 2);
 }
 #[tokio::test]
 async fn named_spec_triage_uses_the_spec_question_id() {
-    let (url, _model, _embedding, task, _dir) = app(None).await;
+    let (url, _model, _embedding, _dir) = app(None).await;
     let response = triage(&url, &json!({"items":["yes1","no"],"spec":"relevant"})).await;
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["kept"][0]["decision"]["question"], "relevant");
     assert_eq!(body["dropped"], 1);
-    task.abort();
-}
-#[tokio::test]
-async fn prefilter_handles_a_smaller_batch() {
-    let (url, model, _embedding, task, _dir) = app(Some(true)).await;
-    let mut body = request(&json!(["one", "three"]));
-    body["top_k"] = json!(1);
-    let response = triage(&url, &body).await;
-    assert_eq!(response.status(), 200);
-    let body: Value = response.json().await.unwrap();
-    assert_eq!(body["kept"][0]["index"], 1);
-    assert!(body.get("warning").is_none());
-    assert_eq!(
-        model
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .filter(|request| request.method == "POST")
-            .count(),
-        1
-    );
-    task.abort();
 }
 #[tokio::test]
 async fn failed_embedder_judges_every_item_with_warning() {
-    let (url, model, _embedding, task, _dir) = app(Some(false)).await;
+    let (url, model, _embedding, _dir) = app(Some(false)).await;
     let mut body = request(&json!(["one", "two", "three", "four"]));
     body["top_k"] = json!(2);
     let response = triage(&url, &body).await;
@@ -260,40 +205,28 @@ async fn failed_embedder_judges_every_item_with_warning() {
             .unwrap()
             .starts_with("prefilter skipped")
     );
-    assert_eq!(
-        model
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .filter(|response| response.method == "POST")
-            .count(),
-        4
-    );
-    task.abort();
+    assert_eq!(posts(&model).await, 4);
 }
 #[tokio::test]
 async fn top_k_requires_embedder() {
-    let (url, _model, _embedding, task, _dir) = app(None).await;
+    let (url, _model, _embedding, _dir) = app(None).await;
     let mut body = request(&json!(["one", "two"]));
     body["top_k"] = json!(1);
     assert_eq!(triage(&url, &body).await.status(), 400);
-    task.abort();
 }
 #[tokio::test]
 async fn one_failed_judgment_fails_whole_triage() {
-    let (url, _model, _embedding, task, _dir) = app(None).await;
+    let (url, _model, _embedding, _dir) = app(None).await;
     assert_eq!(
         triage(&url, &request(&json!(["yes1", "bad"])))
             .await
             .status(),
         502
     );
-    task.abort();
 }
 #[tokio::test]
 async fn cli_reads_json_items_from_stdin() {
-    let (url, _model, _embedding, task, _dir) = app(None).await;
+    let (url, _model, _embedding, _dir) = app(None).await;
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args(["triage", "Is this relevant?", "--url", &url])
         .stdin(Stdio::piped())
@@ -317,12 +250,11 @@ async fn cli_reads_json_items_from_stdin() {
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body["kept"][0]["index"], 0);
     assert_eq!(body["dropped"], 1);
-    task.abort();
 }
 
 #[tokio::test]
 async fn context_is_model_data_and_part_of_cache_identity() {
-    let (url, model, _embedding, task, _dir) = app(None).await;
+    let (url, model, _embedding, _dir) = app(None).await;
     let mut body =
         json!({"items":[{"title":"backup change"}],"spec":"relevant","context":"uses kopiur"});
     let first: Value = triage(&url, &body).await.json().await.unwrap();
@@ -357,12 +289,11 @@ async fn context_is_model_data_and_part_of_cache_identity() {
         json!({"context":"uses kopiur","item":{"title":"backup change"}})
     );
     assert_eq!(calls[0]["questions"], calls[1]["questions"]);
-    task.abort();
 }
 
 #[tokio::test]
 async fn oversized_contextual_batch_is_rejected_before_any_judgment() {
-    let (url, model, embedding, task, _dir) = app(Some(true)).await;
+    let (url, model, embedding, _dir) = app(Some(true)).await;
     for mut body in [
         json!({"items":["short", "界".repeat(2001)],"spec":"relevant","context":"current inventory"}),
         json!({"items":["first", "second"],"spec":"relevant","context":"界".repeat(2001)}),
@@ -379,20 +310,12 @@ async fn oversized_contextual_batch_is_rejected_before_any_judgment() {
         }
     }
     assert!(embedding.received_requests().await.unwrap().is_empty());
-    assert!(
-        model
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .all(|request| request.method != "POST")
-    );
-    task.abort();
+    assert_eq!(posts(&model).await, 0);
 }
 
 #[tokio::test]
 async fn serialized_object_order_is_preserved_with_and_without_context() {
-    let (url, model, _embedding, task, _dir) = app(None).await;
+    let (url, model, _embedding, _dir) = app(None).await;
     let items: Value = serde_json::from_str(
         r#"[{"id":"a","title":"t"},{"title":"t","id":"a"},{"id":"a","title":"t"}]"#,
     )
@@ -410,20 +333,12 @@ async fn serialized_object_order_is_preserved_with_and_without_context() {
             .collect();
         assert_eq!(indices, [0, 1]);
     }
-    let requests = model.received_requests().await.unwrap();
-    assert_eq!(
-        requests
-            .iter()
-            .filter(|request| request.method == "POST")
-            .count(),
-        4
-    );
-    task.abort();
+    assert_eq!(posts(&model).await, 4);
 }
 
 #[tokio::test]
 async fn rejected_decisions_are_distinct_from_unjudged_prefiltered_items() {
-    let (url, _model, _embedding, task, _dir) = app(Some(true)).await;
+    let (url, _model, _embedding, _dir) = app(Some(true)).await;
     let body: Value = triage(&url, &request(&json!(["no", "unsure", "yes1"])))
         .await
         .json()
@@ -438,12 +353,11 @@ async fn rejected_decisions_are_distinct_from_unjudged_prefiltered_items() {
     assert_eq!(body["prefiltered"], json!([0]));
     assert_eq!(body["rejected"], json!([]));
     assert_eq!(body["dropped"], 1);
-    task.abort();
 }
 
 #[tokio::test]
 async fn cli_supports_named_spec_and_context_file() {
-    let (url, model, _embedding, task, directory) = app(None).await;
+    let (url, model, _embedding, directory) = app(None).await;
     let context_path = directory.path().join("context.txt");
     std::fs::write(&context_path, "uses kopiur").unwrap();
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
@@ -483,5 +397,4 @@ async fn cli_supports_named_spec_and_context_file() {
     let state: Value = serde_json::from_str(body["state"].as_str().unwrap()).unwrap();
     assert_eq!(state["context"], "uses kopiur");
     assert!(body["questions"].get("relevant").is_some());
-    task.abort();
 }

@@ -57,20 +57,16 @@ impl Metrics {
     }
 
     pub(crate) fn record_decision(&self, endpoint: String, spec: Option<String>, verdict: &str) {
-        let verdict = if spec.is_none() {
-            if verdict == "unsure" {
-                "unsure".into()
-            } else {
-                "decided".into()
-            }
+        let verdict = if spec.is_some() || verdict == "unsure" {
+            verdict
         } else {
-            verdict.into()
+            "decided"
         };
         self.decisions
             .get_or_create(&DecisionLabels {
                 endpoint,
                 spec: spec.unwrap_or_default(),
-                verdict,
+                verdict: verdict.into(),
             })
             .inc();
     }

@@ -11,47 +11,32 @@ x-llama: &llama
   volumes:
     - ${HOME}/.cache/8ball-models:/cache
   restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 120          # the first start downloads the model
 
 services:
   d3:
     <<: *llama
-    ports: ["127.0.0.1:9931:9931"]
-    command: ["--host", "0.0.0.0", "--port", "9931", "-m", "/cache/vllm-d3-nano-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/resolve/50dea2057df10c4b393559a155ab3bf0bc7532c6/vllm-d3-nano-Q8_0.gguf",
+    ports: ["127.0.0.1:9931:8080"]
+    command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/vllm-d3-nano-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/resolve/50dea2057df10c4b393559a155ab3bf0bc7532c6/vllm-d3-nano-Q8_0.gguf",
               "-c", "8192", "-ub", "2048", "-np", "2"]
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9931/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 120          # the first start downloads the model
   embed:
     <<: *llama
-    ports: ["127.0.0.1:9932:9932"]
-    command: ["--host", "0.0.0.0", "--port", "9932", "-m", "/cache/embeddinggemma-2-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/6ea3e3a309d12a4779cfda98b8c19800d2d5da71/embeddinggemma-2-Q8_0.gguf",
+    ports: ["127.0.0.1:9932:8080"]
+    command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/embeddinggemma-2-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/6ea3e3a309d12a4779cfda98b8c19800d2d5da71/embeddinggemma-2-Q8_0.gguf",
               "--embedding", "--pooling", "mean", "--cache-ram", "0", "-c", "8192", "-b", "8192", "-ub", "8192", "-np", "1",
               "--alias", "embeddinggemma-2"]
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9932/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 120
   rerank:
     <<: *llama
-    ports: ["127.0.0.1:9933:9933"]
-    command: ["--host", "0.0.0.0", "--port", "9933", "-m", "/cache/bge-reranker-v2-m3-Q8_0.gguf", "-mu", "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/3093af03b1a635e67b084b1d8c03c5f5e020fd05/bge-reranker-v2-m3-Q8_0.gguf",
+    ports: ["127.0.0.1:9933:8080"]
+    command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/bge-reranker-v2-m3-Q8_0.gguf", "-mu", "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/3093af03b1a635e67b084b1d8c03c5f5e020fd05/bge-reranker-v2-m3-Q8_0.gguf",
               "--reranking", "--embedding", "--pooling", "rank", "--cache-ram", "0", "-fa", "off", "-c", "2048", "-ub", "2048", "-np", "1",
               "--alias", "bge-reranker-v2-m3"]
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9933/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 120
   chat:
     <<: *llama
-    ports: ["127.0.0.1:9934:9934"]
-    command: ["--host", "0.0.0.0", "--port", "9934", "-m", "/cache/Qwen3.5-0.8B-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF/resolve/807dfd9a6fadbf703207aac3bfb0b2b3040d077c/Qwen3.5-0.8B-Q8_0.gguf",
+    ports: ["127.0.0.1:9934:8080"]
+    command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/Qwen3.5-0.8B-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF/resolve/807dfd9a6fadbf703207aac3bfb0b2b3040d077c/Qwen3.5-0.8B-Q8_0.gguf",
               "-c", "4096", "-np", "2", "--reasoning-budget", "0", "--alias", "qwen3.5-0.8b"]
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9934/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 120

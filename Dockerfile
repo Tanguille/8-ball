@@ -3,7 +3,6 @@ FROM rust:1-alpine AS build
 RUN apk add --no-cache musl-dev
 WORKDIR /src
 COPY . .
-ENV CARGO_TARGET_DIR=/src/target
 RUN cargo build --release --locked && cp target/release/8ball /8ball
 
 FROM gcr.io/distroless/static:nonroot

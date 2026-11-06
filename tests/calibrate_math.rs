@@ -55,7 +55,6 @@ fn overlap_gives_unsure() {
     assert_eq!(
         verdict::verdict(
             &noul(),
-            &noul().labels(),
             &[0.5, 0.5],
             Bands::Noul {
                 yes_at: 0.3,
