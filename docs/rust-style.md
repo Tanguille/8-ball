@@ -1,27 +1,30 @@
 # Rust Code Style
 
-Applies to production code and tests. 8-ball-specific conventions take precedence where noted.
+This guide applies to production code and tests. 8-ball conventions take precedence where noted.
 
 ## General Conventions
 
-- Follow standard Rust conventions (rustfmt auto-formats)
-- Use sqlx for database queries
-- Enable clippy pedantic, nursery and style lints; run checks with `-D warnings`.
-- In `format!` / `format_args!`, prefer **inline names in braces** (`{var}`) when the value is already in a variable, so the string is self-explanatory. Example: `format!("IN ({placeholders})")` rather than `format!("IN ({})", placeholders)`. Do not introduce a variable only to use it in braces; keep the argument form when the value is an expression (e.g. `format!("IN ({})", join(ids, ","))`).
+- Follow standard Rust conventions. rustfmt formats the code automatically.
+- Use sqlx for database queries.
+- Enable clippy pedantic, nursery, and style lints. Run clippy with `-D warnings`.
+- If a value is in a variable, prefer an inline name (`{var}`) in `format!` and `format_args!`. The string then explains itself. For example, write `format!("IN ({placeholders})")`, not `format!("IN ({})", placeholders)`.
+- Do not add a variable only to use it in braces.
+- If the value is an expression, keep the argument form, for example `format!("IN ({})", join(ids, ","))`.
 
 ### Identifiers
 
-- Prefer **full words** (`model_id`, `total`, `user`, `chunk`) over single-letter names.
-- **Exception:** `e` for an error value in `if let Err(e)`, `Result::map_err(|e| ...)`, and similar is fine.
-- **Narrow exception:** trivial **loop indices** in very short loops (`for i in …`, `enumerate` with `i` / `j`) when conventional; still prefer a word if the index carries meaning beyond position.
-- Avoid one-letter names for domain data (`n`, `x`, `t`, `m`) unless a longer name would be genuinely unwieldy (rare).
+- Prefer full words (`model_id`, `total`, `user`, `chunk`) over single-letter names.
+- You can use `e` for an error value in `if let Err(e)`, `Result::map_err(|e| ...)`, and similar code.
+- In very short loops, you can use conventional loop indices (`for i in …`, `enumerate` with `i` / `j`). If the index means more than position, prefer a word.
+- Avoid one-letter names for domain data (`n`, `x`, `t`, `m`). The rare exception is a longer name that is unwieldy.
 
 ## Control flow and whitespace
 
-- Prefer a **blank line** between preceding logic and a **`return`** (including `return Ok(...)`, `return Err(...)`, or early exit from a branch), so the exit path is easy to scan. Apply the same spacing before the **final expression** in a function when it follows a multi-line or non-trivial block (even if you omit the `return` keyword).
-- Omit the extra line when it would hurt readability (e.g. a one-line guard `if !ready { return; }` at the top of a function, or a very short `match` arm).
+- Prefer a blank line between preceding logic and a `return`, so that the exit path is easy to scan. This includes `return Ok(...)`, `return Err(...)`, and an early exit from a branch.
+- If the final expression of a function follows a multi-line or non-trivial block, put the same blank line before it. This rule applies with or without the `return` keyword.
+- If the extra line hurts readability, omit it. Examples are a one-line guard `if !ready { return; }` at the top of a function and a very short `match` arm.
 
-**Good:**
+Good:
 
 ```rust
 fn sum_ids(ids: &[u64]) -> u64 {
@@ -34,50 +37,50 @@ fn sum_ids(ids: &[u64]) -> u64 {
 }
 ```
 
-## Types and invariants (“tight typing”)
+## Types and invariants ("tight typing")
 
-Prefer types that match the **domain**: if a value cannot meaningfully be negative, prefer an **unsigned** integer (`u32`, `u64`, `usize`) or a **newtype** / wrapper that enforces validation at construction.
+Prefer types that match the domain. If a value cannot meaningfully be negative, prefer an unsigned integer (`u32`, `u64`, `usize`). A newtype or wrapper that enforces validation at construction is equally good.
 
-- **Counts, lengths, sizes, non-negative offsets**: prefer `usize` for indexing and in-memory sizes; `u32`/`u64` for stable wire or storage sizes when the domain is non-negative.
-- **Signed types** (`i32`, `i64`): use when the domain includes negative values or API/schema compatibility requires them (e.g. SQLite `INTEGER`) — document why if it looks “loose”. Represent nullable foreign keys with `Option`, not a negative sentinel.
-- **Boundaries**: external formats (DB columns, HTTP query params, serde) often fix the type; validate at the edge and convert explicitly rather than scattering `as u64` / silent casts. Watch for `clippy::cast_possible_wrap` / sign-loss when mixing signed and unsigned.
+- Counts, lengths, sizes, and non-negative offsets: Prefer `usize` for indexing and in-memory sizes. For stable wire or storage sizes in a non-negative domain, prefer `u32` or `u64`.
+- Signed types (`i32`, `i64`): If the domain includes negative values, or if API or schema compatibility requires them (as SQLite `INTEGER` does), use them. If the type looks loose, document why. Represent nullable foreign keys with `Option`, not a negative sentinel.
+- Boundaries: External formats (database columns, HTTP query parameters, serde) often fix the type. Make sure that values are valid at the edge. Convert explicitly, and do not scatter `as u64` or silent casts. Prefer explicit conversions (`try_from`, `checked_*`, `unsigned_abs`) at domain boundaries. If you mix signed and unsigned types, watch for `clippy::cast_possible_wrap` and sign loss.
 
-For critical ranges (e.g. “must be 1..=100”), consider a **small type with a constructor** (`fn new(x: i32) -> Option<Self>`) so call sites cannot hold an invalid value ([Rust book: custom types for validation](https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html#custom-types-for-validation)).
+For critical ranges (for example, "must be 1..=100"), consider a small type with a constructor (`fn new(x: i32) -> Option<Self>`). Call sites then cannot hold an invalid value. See [Rust book: custom types for validation](https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html#custom-types-for-validation).
 
-**Existing code:** tighten types in **new** code and at **clear boundaries** (new endpoints, DB mappers). Avoid unrelated mass migrations of `i64`/`i32` across the codebase in a single change set.
+In existing code, tighten types in new code and at clear boundaries (new endpoints, database mappers). Avoid unrelated mass migrations of `i64` or `i32` across the codebase in one change set.
 
 ## Strings
 
-Rust’s main UTF-8 text types are **`String`** (owned), **`&str`** (borrowed), and **`Cow<'_, str>`** when you may borrow or allocate. See the [Rust book on strings](https://doc.rust-lang.org/book/ch08-02-strings.html) for indexing and UTF-8 pitfalls.
+The main UTF-8 text types in Rust are `String` (owned), `&str` (borrowed), and `Cow<'_, str>` (borrowed or allocated). See the [Rust book on strings](https://doc.rust-lang.org/book/ch08-02-strings.html) for indexing and UTF-8 pitfalls.
 
 ### Choosing parameter types
 
-| Situation                                                                                                            | Prefer                                                                                                                                                       |
-| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Read-only, borrowed text in **most** internal helpers                                                                | **`&str`** — simplest; `&String` and `&str` both coerce for callers ([`Deref`](https://doc.rust-lang.org/std/ops/trait.Deref.html) to `str`).                |
-| **Public / shared** API that should accept `String`, `&str`, `Cow<str>`, etc. without awkward `&` at every call site | **`impl AsRef<str>`** — call `s.as_ref()` once in the body. See [`AsRef`](https://doc.rust-lang.org/std/convert/trait.AsRef.html).                           |
-| Multiple string parameters each needing `AsRef<str>`                                                                 | Separate type parameters, e.g. `S1: AsRef<str>, S2: AsRef<str>`, or use `&str` if callers can pass `&` — otherwise the compiler may unify one type for both. |
-| **Own** or **consume** the text (store, mutate, move on)                                                             | **`String`** or **`impl Into<String>`** (accepts `String` and `&str` with allocation cost for the latter).                                                   |
-| Sometimes borrow, sometimes allocate (e.g. optional default)                                                         | **`Cow<'_, str>`**.                                                                                                                                          |
+| Situation | Prefer |
+| --- | --- |
+| Read-only, borrowed text in most internal helpers | `&str`. It is the simplest type. `&String` and `&str` both coerce for callers ([`Deref`](https://doc.rust-lang.org/std/ops/trait.Deref.html) to `str`). |
+| Public or shared API that accepts `String`, `&str`, `Cow<str>`, and similar types without `&` at every call site | `impl AsRef<str>`. Call `s.as_ref()` once in the body. See [`AsRef`](https://doc.rust-lang.org/std/convert/trait.AsRef.html). |
+| Multiple string parameters that each need `AsRef<str>` | Separate type parameters, for example `S1: AsRef<str>, S2: AsRef<str>`. If callers can pass `&`, use `&str`. With one shared type parameter, the compiler can unify one type for both. |
+| Own or consume the text (store, mutate, move on) | `String` or `impl Into<String>`. `impl Into<String>` accepts `String` and `&str`, with an allocation cost for `&str`. |
+| Sometimes borrow, sometimes allocate (for example, an optional default) | `Cow<'_, str>`. |
 
-**`impl AsRef<str>` is not the default everywhere:** it adds generic noise and monomorphization; many codebases use **`&str`** for most functions and reserve **`AsRef<str>`** for crate boundaries or helpers called with mixed owned/borrowed strings. Use whichever matches call sites without extra ceremony.
+`impl AsRef<str>` is not the default everywhere, because it adds generic noise and monomorphization. Many codebases use `&str` for most functions. They reserve `AsRef<str>` for crate boundaries and for helpers called with mixed owned and borrowed strings. Use the type that matches the call sites without extra ceremony.
 
 ### Paths
 
-Use **`&Path`**, **`PathBuf`**, or **`impl AsRef<Path>`** for filesystem paths — not `AsRef<str>` (paths are not always valid UTF-8 on all platforms). See [`std::path::Path`](https://doc.rust-lang.org/std/path/struct.Path.html).
+Use `&Path`, `PathBuf`, or `impl AsRef<Path>` for filesystem paths. Do not use `AsRef<str>`, because paths are not always valid UTF-8 on all platforms. See [`std::path::Path`](https://doc.rust-lang.org/std/path/struct.Path.html).
 
 ## Imports
 
-Where multiple items are imported from the same path, use a single `use` statement with a braced list instead of multiple separate lines (one `use` per path prefix).
+If you import multiple items from the same path, use one `use` statement with a braced list. Use one `use` per path prefix.
 
-**Good:**
+Good:
 
 ```rust
 use std::path::{Path, PathBuf};
 use service::{AppState, Configuration};
 ```
 
-**Avoid:**
+Avoid:
 
 ```rust
 use std::path::Path;
@@ -86,11 +89,11 @@ use service::AppState;
 use service::Configuration;
 ```
 
-`cargo fmt` does not merge imports; this is a project convention. For very long braced lists (e.g. 10+ items), split by logical subpath for readability.
+`cargo fmt` does not merge imports. This is a project convention. If a braced list is very long (for example, 10 or more items), split it by logical subpath.
 
 ### What to import
 
-Bring in the **module** for free functions, and the **type** itself for types:
+Import the module for free functions. Import the type itself for types:
 
 ```rust
 use std::fs;                 // fs::read_dir(..), fs::write(..)
@@ -99,9 +102,9 @@ use std::time::Duration;     // Duration::from_secs(5)
 
 ### Import only what you use more than once
 
-Import a path only when the name appears **more than once** in the file. A path used a single time stays **fully qualified at the call site** — an import costs a line at the top plus a lookup for the reader, and only pays for itself when the name is reused.
+If a name appears more than once in the file, import its path. If you use a path one time, keep it fully qualified at the call site. An import costs a line at the top and a lookup for the reader. Only a reused name pays for that cost.
 
-**Good:**
+Good:
 
 ```rust
 use std::fs;
@@ -113,7 +116,7 @@ let cache = fs::read_to_string(&cache_path)?;
 let db_path = std::path::Path::new("model.sqlite");
 ```
 
-**Avoid:**
+Avoid:
 
 ```rust
 use std::path::Path;
@@ -123,9 +126,9 @@ let db_path = Path::new("model.sqlite"); // the only use in the file
 
 ### No renamed imports
 
-Do not rename with `as` in a `use`. When two items share a name, qualify one at the **use site** instead:
+Do not rename with `as` in a `use`. If two items share a name, qualify one at the use site:
 
-**Good:**
+Good:
 
 ```rust
 use std::fs;
@@ -135,30 +138,30 @@ let handle = File::create(&path).await?;      // tokio
 let meta = fs::File::create(&meta_path)?;     // std, qualified by its module
 ```
 
-**Avoid:**
+Avoid:
 
 ```rust
 use std::fs::{self, File as StdFile};
 use tokio::fs::File;
 ```
 
-The single exception is `use some::Trait as _;`, which imports a trait for method resolution without binding a name. That is not a rename, and it cannot be written at the call site. Traits required for method resolution may be imported even when used only once.
+The only exception is `use some::Trait as _;`, which imports a trait for method resolution without binding a name. That is not a rename, and you cannot write it at the call site. You can import a trait that method resolution requires, and one use is enough.
 
 ### Placement
 
-All `use` statements belong at the **top of the file**. Do not add or widen a `use` inside a nested module or function body just to shorten a path — if a nested scope (a `#[cfg(test)] mod tests`, an inner `mod get`) would need its own import, leave the path fully qualified there.
+Put all `use` statements at the top of the file. Do not add or widen a `use` inside a nested module or function body to shorten a path. If a nested scope (`#[cfg(test)] mod tests`, inner `mod get`) needs its own import, keep the path fully qualified there.
 
 ### Order
 
-List `use` statements in this order (top to bottom), with a single blank line between groups. Omit any group that does not appear in the file.
+List `use` statements in this order, from top to bottom. Put one blank line between groups. Omit any group that does not appear in the file.
 
-1. **std** – standard library (`use std::...`)
-2. **External** – third-party / crates.io crates (e.g. `serde`, `tokio`, `axum`)
-3. **Crates** – the `eightball` library in the binary and integration tests, or other workspace member crates if introduced
-4. **crate** – current crate (`use crate::...`)
-5. **super** – parent module (`use super::...`)
+1. std: The standard library (`use std::...`)
+2. External: Third-party crates.io crates (for example, `serde`, `tokio`, `axum`)
+3. Crates: The `eightball` library in the binary and integration tests, or any added workspace member crates
+4. crate: The current crate (`use crate::...`)
+5. super: The parent module (`use super::...`)
 
-Example (one `use` per path, single `use crate::...` with braced list):
+This example has one `use` per path and one `use crate::...` with a braced list:
 
 ```rust
 use std::path::PathBuf;
@@ -175,53 +178,34 @@ use super::BackendError;
 
 ### Module declarations
 
-Follow the [Rust style guide](https://doc.rust-lang.org/beta/style-guide/items.html): `use` statements and module declarations (`mod foo;`) must come before other items. Put **imports before module declarations**.
+Follow the [Rust style guide](https://doc.rust-lang.org/beta/style-guide/items.html). `use` statements and module declarations (`mod foo;`) must come before other items. Put imports before module declarations.
 
-- In each file: first all `use` statements (in the [import order](#order) above), then all `mod` declarations, then the rest of the file (types, functions, re-exports, etc.).
-- Sort module declarations **alphabetically** (version-sort). Keep `#[cfg(...)]` attached to the `mod` it applies to, with layout determined by rustfmt; sort only by the module name when comparing.
-- **Feature-gated items** follow the same order: cfg-gated `use` in the use section, cfg-gated `mod` in the mod section, cfg-gated `pub use` or code in the rest. Do not group by feature at the expense of use-before-mod.
-- Do not move or reorder `#[macro_use]` or other attribute-annotated mods if that could change semantics.
+- In each file, put all `use` statements first, in the [import order](#order) above. Then put all `mod` declarations. Then put the rest of the file (types, functions, re-exports, and other items).
+- Sort module declarations alphabetically (version-sort). Keep `#[cfg(...)]` attached to the `mod` that it applies to. rustfmt determines the layout. Sort only by the module name.
+- Feature-gated items follow the same order. Put a cfg-gated `use` in the `use` section. Put a cfg-gated `mod` in the `mod` section. Put a cfg-gated `pub use` or code in the rest. Do not group by feature at the expense of use-before-mod.
+- If a move can change semantics, do not move or reorder `#[macro_use]` or other attribute-annotated mods.
 
 ### Module file layout
 
-Prefer the **module-name-as-filename** layout over top-level `mod.rs` files ([Rust book](https://doc.rust-lang.org/book/ch07-05-separating-modules-into-different-files.html)):
+Prefer the module-name-as-filename layout over top-level `mod.rs` files ([Rust book](https://doc.rust-lang.org/book/ch07-05-separating-modules-into-different-files.html)). For a module `foo`, use `foo.rs` in the same directory as the parent, not `foo/mod.rs`. Put the submodules of `foo` in the `foo/` directory. For example, `mod bar;` in `foo` uses `foo/bar.rs`. The compiler looks up child modules there, not as siblings of `foo.rs`.
 
-- For a module `foo`, use **`foo.rs`** (same directory as the parent), not **`foo/mod.rs`**.
-- Submodules of `foo` live in the **`foo/`** directory (e.g. `foo/bar.rs` when `foo` contains `mod bar;`). The compiler looks up child modules there, not as siblings of `foo.rs`.
+This layout prevents many files named `mod.rs` and keeps the module tree easy to follow. 8-ball always uses this layout. Do not add `mod.rs`.
 
-This avoids many files named `mod.rs` and keeps the module tree easier to follow. 8-ball always uses this layout; do not introduce `mod.rs`.
-
-Example:
-
-- **Prefer:** `src/api.rs` and `src/api/blob_api.rs`, `src/api/model_api.rs`, …
-- **Avoid:** `src/api/mod.rs` and `src/api/blob_api.rs`, … (same children, but parent is the redundant `mod.rs`).
+For example, prefer `src/backend.rs` with `src/backend/embed.rs` and `src/backend/rerank.rs`. Avoid `src/backend/mod.rs` with the same children, because the parent is then the redundant `mod.rs`.
 
 ## Error Handling
 
-Preserve the existing module-specific `thiserror` error types and use `?` for propagation. Use `anyhow` only in `main.rs`. Do not add a generic application error wrapper for style consistency.
+Keep the existing module-specific `thiserror` error types. Use `?` for propagation. Use `anyhow` only in `main.rs`. Do not add a generic application error wrapper for style consistency.
 
-Keep SQLite row ids as `i64` because they mirror SQLite INTEGER values. Preserve existing wire types, serialized field names, error messages, and public API names during style-only changes.
+Keep SQLite row ids as `i64`, because they mirror SQLite INTEGER values. During style-only changes, keep existing types, wire types, serialized field names, error messages, and public API names.
 
 ## 8-ball conventions
 
-- Rust 2024 with the stable toolchain.
-- Comments explain non-obvious constraints, not syntax.
-- Tracing writes to stderr; stdout carries JSON results and MCP JSON-RPC only.
-- Verify crate APIs in the local Cargo registry source before using them.
-- Behavior changes require failing regression tests first. Style-only edits use existing tests to prove behavior is unchanged; do not add tests for whitespace or local names.
-- Never weaken live-test assertions to accommodate a refactor.
-
-## Commands
-
-Run from the repository root:
-
-```sh
-cargo fmt --all
-cargo clippy --all-targets -- -D warnings
-cargo nextest run
-# When live verification is required:
-dev/models.sh up
-cargo nextest run --test live --run-ignored only --no-capture
-```
-
-Prefer explicit conversions (`try_from`, `checked_*`, `unsigned_abs`) at domain boundaries. Preserve existing types during style-only changes; introduce no lint suppressions merely to satisfy the style guide.
+- Use Rust 2024 with the stable toolchain.
+- Write comments for non-obvious constraints, not syntax.
+- Tracing writes to stderr. stdout carries JSON results and MCP JSON-RPC only.
+- Ids are SQLite INTEGER rowids, not UUIDs, because people type them by hand, as in `8ball label 42 yes`.
+- Before you use a crate API, make sure that it matches the local Cargo registry source.
+- For a behavior change, write a failing regression test first.
+- For a style-only edit, use existing tests to prove that behavior is unchanged. Do not add tests for whitespace or local names.
+- Do not add lint suppressions only to satisfy this guide.

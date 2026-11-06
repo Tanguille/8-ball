@@ -1,30 +1,25 @@
 use std::time::Duration;
 
-use crate::config::BackendKind;
+use crate::config::{BackendKind, EndpointConfig};
 
 pub mod embed;
-pub mod logprob;
-pub mod rerank;
-pub mod systemone;
+mod logprob;
+mod rerank;
+mod systemone;
 
 /// One probability per label of the question, in `Kind::labels()` order, summing to 1.
 pub type Probs = Vec<f64>;
 
 pub struct Endpoint {
-    pub name: String,
-    url: String,
-    kind: Option<BackendKind>,
-    model: Option<String>,
+    name: String,
+    config: EndpointConfig,
     api_key: Option<String>,
-    extra_body: Option<toml::Table>,
-    max_state_chars: Option<usize>,
     client: reqwest::Client,
-    concurrency: Option<usize>,
-    info: tokio::sync::OnceCell<(Info, tokio::sync::Semaphore)>,
+    info: tokio::sync::OnceCell<Info>,
 }
 
 // Decision models answer in under 1 s; 20 s only absorbs a cold model load.
-pub const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
+const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -37,50 +32,25 @@ impl From<reqwest::Error> for BackendError {
 }
 
 impl Endpoint {
-    pub fn new(
-        name: &str,
-        config: &crate::config::EndpointConfig,
-        api_key: Option<String>,
-    ) -> Result<Self, BackendError> {
-        if config.concurrency == Some(0) {
-            return Err(BackendError(format!(
-                "endpoint {name}: concurrency must be positive"
-            )));
-        }
-
-        Ok(Self {
+    #[must_use]
+    pub fn new(name: &str, config: &EndpointConfig, api_key: Option<String>) -> Self {
+        Self {
             name: name.into(),
-            url: config.url.clone(),
-            kind: config.kind,
-            model: config.model.clone(),
+            config: config.clone(),
             api_key,
-            extra_body: config.extra_body.clone(),
-            max_state_chars: config.max_state_chars,
             client: reqwest::Client::new(),
-            concurrency: config.concurrency,
             info: tokio::sync::OnceCell::new(),
-        })
+        }
     }
 
     pub async fn info(&self) -> Result<&Info, BackendError> {
-        Ok(&self.detected().await?.0)
-    }
-
-    async fn detected(&self) -> Result<&(Info, tokio::sync::Semaphore), BackendError> {
-        self.info
-            .get_or_try_init(|| async {
-                let info = self.detect().await?;
-                let permits = tokio::sync::Semaphore::new(info.concurrency);
-
-                Ok((info, permits))
-            })
-            .await
+        self.info.get_or_try_init(|| self.detect()).await
     }
 
     async fn get_info_json(&self, path: &str) -> Result<serde_json::Value, BackendError> {
         let request = self
             .client
-            .get(format!("{}{path}", self.url))
+            .get(format!("{}{path}", self.config.url))
             .timeout(Duration::from_secs(5));
 
         Ok(authed(request, self.api_key.as_deref())
@@ -97,13 +67,16 @@ impl Endpoint {
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, BackendError> {
         let permit = self
-            .detected()
+            .info()
             .await?
-            .1
+            .permits
             .acquire()
             .await
             .map_err(|e| BackendError(e.to_string()))?;
-        let request = self.client.post(format!("{}{path}", self.url)).json(body);
+        let request = self
+            .client
+            .post(format!("{}{path}", self.config.url))
+            .json(body);
         let response = authed(request, self.api_key.as_deref()).send().await?;
         let status = response.status();
         let text = response.text().await?;
@@ -128,7 +101,7 @@ impl Endpoint {
             .await
             .unwrap_or(serde_json::Value::Null);
         let mut models = serde_json::Value::Null;
-        let kind = if let Some(kind) = self.kind {
+        let kind = if let Some(kind) = self.config.kind {
             kind
         } else {
             models = self.get_info_json("/v1/models").await.map_err(|e| {
@@ -146,7 +119,7 @@ impl Endpoint {
                 })
             }) {
                 BackendKind::Systemone
-            } else if self.model.is_some()
+            } else if self.config.model.is_some()
                 && data.is_some_and(|data| {
                     data.iter().any(|model| model.get("architecture").is_some())
                 })
@@ -161,10 +134,11 @@ impl Endpoint {
         };
         let fingerprint = properties["model_path"].as_str().map_or_else(
             || {
-                self.model
+                self.config
+                    .model
                     .as_deref()
                     .or_else(|| models["data"][0]["id"].as_str())
-                    .unwrap_or(&self.url)
+                    .unwrap_or(&self.config.url)
                     .into()
             },
             |path| {
@@ -175,6 +149,7 @@ impl Endpoint {
             },
         );
         let concurrency = self
+            .config
             .concurrency
             .or_else(|| {
                 properties["total_slots"]
@@ -187,6 +162,7 @@ impl Endpoint {
             kind,
             fingerprint,
             concurrency,
+            permits: tokio::sync::Semaphore::new(concurrency),
         })
     }
 
@@ -196,8 +172,8 @@ impl Endpoint {
         let kind = self
             .info
             .get()
-            .map_or(self.kind, |(info, _)| Some(info.kind));
-        let maximum = self.max_state_chars.or(match kind {
+            .map_or(self.config.kind, |info| Some(info.kind));
+        let maximum = self.config.max_state_chars.or(match kind {
             Some(BackendKind::Systemone | BackendKind::Rerank) => Some(2000),
             _ => None,
         });
@@ -225,7 +201,6 @@ impl Endpoint {
     }
 }
 
-/// Adds the bearer header only when a key is configured.
 pub fn authed(request: reqwest::RequestBuilder, key: Option<&str>) -> reqwest::RequestBuilder {
     match key {
         Some(key) => request.bearer_auth(key),
@@ -249,9 +224,10 @@ pub fn fit(state: &str, maximum: Option<usize>) -> String {
     format!("{head}\n…\n{tail}")
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug)]
 pub struct Info {
     pub kind: BackendKind,
     pub fingerprint: String,
     pub concurrency: usize,
+    permits: tokio::sync::Semaphore,
 }

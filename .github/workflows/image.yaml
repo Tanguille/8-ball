@@ -3,18 +3,14 @@ name: Container image
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     paths:
       - src/**
       - migrations/**
       - Cargo.toml
       - Cargo.lock
-      - rust-toolchain.toml
       - Dockerfile
       - .dockerignore
-      - dev/image-smoke.sh
-      - examples/hermes/config.toml
-      - .github/workflows/image.yaml
   workflow_dispatch:
 
 permissions:

@@ -1,6 +1,49 @@
-use rmcp::{ServiceExt, model::CallToolRequestParams};
+use rmcp::{RoleClient, ServiceExt, model::CallToolRequestParams, service::RunningService};
 use serde_json::json;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+async fn check_client(client: RunningService<RoleClient, ()>, healthy: bool) {
+    let tools = client.list_all_tools().await.unwrap();
+    let mut names: Vec<_> = tools.iter().map(|text| text.name.as_ref()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["decision_ask", "decision_triage"]);
+    assert!(
+        client
+            .peer_info()
+            .unwrap()
+            .instructions
+            .as_deref()
+            .unwrap()
+            .contains("greeting")
+    );
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("decision_ask").with_arguments(
+                json!({"state":"hi","spec":"greeting"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    if healthy {
+        assert_eq!(
+            result.structured_content.unwrap()["results"][0]["verdict"],
+            "yes"
+        );
+    } else {
+        assert_eq!(result.is_error, Some(true));
+        assert!(
+            result
+                .content
+                .iter()
+                .filter_map(|content| content.as_text())
+                .any(|text| text.text.contains("Fail open"))
+        );
+    }
+    client.cancel().await.unwrap();
+}
 
 #[tokio::test]
 async fn handler_registers_tools_instructions_and_fail_open_results() {
@@ -23,12 +66,9 @@ async fn handler_registers_tools_instructions_and_fail_open_results() {
                 ),
             )
             .unwrap();
-        let endpoint =
-            eightball::backend::Endpoint::new("d3", &config.endpoints["d3"], None).unwrap();
         let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
         let service = std::sync::Arc::new(eightball::service::Service::new(
             config,
-            [("d3".into(), endpoint)].into(),
             eightball::store::Store::open(&directory.path().join("db.sqlite"))
                 .await
                 .unwrap(),
@@ -44,46 +84,7 @@ async fn handler_registers_tools_instructions_and_fail_open_results() {
                 .unwrap();
         });
         let client = ().serve(client_io).await.unwrap();
-        let tools = client.list_all_tools().await.unwrap();
-        let mut names: Vec<_> = tools.iter().map(|text| text.name.as_ref()).collect();
-        names.sort_unstable();
-        assert_eq!(names, ["decision_ask", "decision_triage"]);
-        assert!(
-            client
-                .peer_info()
-                .unwrap()
-                .instructions
-                .as_deref()
-                .unwrap()
-                .contains("greeting")
-        );
-        let result = client
-            .call_tool(
-                CallToolRequestParams::new("decision_ask").with_arguments(
-                    json!({"state":"hi","spec":"greeting"})
-                        .as_object()
-                        .unwrap()
-                        .clone(),
-                ),
-            )
-            .await
-            .unwrap();
-        if status == 200 && probability < 1.0 {
-            assert_eq!(
-                result.structured_content.as_ref().unwrap()["results"][0]["verdict"],
-                "yes"
-            );
-        } else {
-            assert_eq!(result.is_error, Some(true));
-            assert!(
-                result
-                    .content
-                    .iter()
-                    .filter_map(|content| content.as_text())
-                    .any(|text| text.text.contains("Fail open"))
-            );
-        }
-        client.cancel().await.unwrap();
+        check_client(client, status == 200 && probability < 1.0).await;
         task.abort();
     }
 }
@@ -120,45 +121,6 @@ async fn binary_stdio_lists_tools_and_preserves_fail_open_errors() {
             ().serve(rmcp::transport::TokioChildProcess::new(command).unwrap())
                 .await
                 .unwrap();
-        let tools = client.list_all_tools().await.unwrap();
-        let mut names: Vec<_> = tools.iter().map(|text| text.name.as_ref()).collect();
-        names.sort_unstable();
-        assert_eq!(names, ["decision_ask", "decision_triage"]);
-        assert!(
-            client
-                .peer_info()
-                .unwrap()
-                .instructions
-                .as_deref()
-                .unwrap()
-                .contains("greeting")
-        );
-        let result = client
-            .call_tool(
-                CallToolRequestParams::new("decision_ask").with_arguments(
-                    json!({"state":"hi","spec":"greeting"})
-                        .as_object()
-                        .unwrap()
-                        .clone(),
-                ),
-            )
-            .await
-            .unwrap();
-        if status == 200 {
-            assert_eq!(
-                result.structured_content.unwrap()["results"][0]["verdict"],
-                "yes"
-            );
-        } else {
-            assert_eq!(result.is_error, Some(true));
-            assert!(
-                result
-                    .content
-                    .iter()
-                    .filter_map(|content| content.as_text())
-                    .any(|text| text.text.contains("Fail open"))
-            );
-        }
-        client.cancel().await.unwrap();
+        check_client(client, status == 200).await;
     }
 }

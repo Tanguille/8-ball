@@ -1,6 +1,6 @@
 # 8-ball
 
-8-ball makes cheap typed judgments through small decision models: yes/no, pick one, or a level. It exposes REST, HTTP MCP, stdio MCP and a CLI, with optional labelled calibration and a SQLite answer cache. Use clear verdicts to gate or triage work; on `unsure` or an error, do the normal work.
+8-ball gets cheap typed judgments from small decision models. A question is `noul` (yes or no), `choice` (pick one option), or `score` (pick a level). The verdict is the answer to a question. 8-ball offers REST, HTTP MCP, stdio MCP, and a CLI, with a SQLite answer cache and optional labeled calibration. Use a clear verdict to gate or triage work. If the verdict is `unsure` or an error occurs, do the normal work.
 
 ## Quickstart: local
 
@@ -37,7 +37,7 @@ In another terminal:
 8ball ask --spec greeting --state "hey there"
 ```
 
-The dev stack downloads about 4.5 GB to `~/.cache/8ball-models`. Use `EIGHTBALL_DEV_NGL=0 dev/models.sh up` for CPU inference. Stop it with `dev/models.sh down`.
+The dev stack downloads about 4.5 GB to `~/.cache/8ball-models`. For CPU inference, use `EIGHTBALL_DEV_NGL=0 dev/models.sh up`. To stop the stack, use `dev/models.sh down`. On rootless Podman with SELinux enforcing, `dev/models.sh up` fails, because the containers cannot write to the model cache.
 
 ## Quickstart: shared server
 
@@ -48,26 +48,72 @@ export EIGHTBALL_API_KEY=your-server-token
 8ball ask --spec greeting --state hi
 ```
 
-Use the server root without a trailing slash. Remote CLI commands accept `--timeout-ms` and refuse HTTP redirects. The deadline defaults to 25,000 ms for `observe` and `evaluate`; other commands have no deadline unless specified. On the server, `EIGHTBALL_API_KEY` enables bearer authentication for REST and MCP; health and metrics remain public. The client uses the same variable for its header.
+Use the server root without a trailing slash.
 
 ## Commands
 
-- `serve`: run REST and HTTP MCP on `127.0.0.1:8080`; use `--config`, `--db` or `--listen` to override paths/address.
-- `mcp`: serve MCP over stdin/stdout; logs go to stderr.
-- `ask`: ask an ad-hoc noul/choice/score question or a named `--spec`; read state from `--state` or stdin.
-- `triage`: judge a JSON array from stdin with a question or `--spec`, optional `--context-file` shared evidence, and `--top-k` embedding prefiltering.
-- `observe`: record a snapshot’s triage decisions in a private file and emit Hermes wake-up JSON while preserving every candidate.
-- `evaluate`: replay labelled JSONL cases against a named spec; report misses, abstentions, errors and latency without changing calibration.
-- `label <id> <value>`: label a saved decision belonging to a current named spec.
-- `calibrate <spec>`: fit bands from labelled states; `--dry-run` reports without saving.
-- `doctor`: inspect endpoint detection, health, model fingerprints and spec calibration.
-- `config check <path>`: validate TOML without starting the service.
+A spec is a named question in the configuration. The state is the text to judge. An endpoint is a configured model server. Its `kind` is the backend, which sets how 8-ball talks to that server. All commands except `serve`, `mcp`, and `config check` call a running server and refuse HTTP redirects.
 
-`results[].id` is a saved decision row id for labelling; `results[].question` is the caller's question id; `results[].type` is `noul`, `choice`, or `score`. Repeated identical requests within the same spec reuse a row; ad-hoc and different named specs have separate rows. Invalid backend probabilities return a backend error.
+| Command | Purpose |
+| --- | --- |
+| `serve` | Run REST and HTTP MCP. |
+| `mcp` | Serve MCP over stdin and stdout. |
+| `ask [<kind> <instructions>]` | Ask one ad-hoc question or a `--spec`. `--state` gives the state. The default is stdin. `--exit-code` enables exit codes 1 and 3. |
+| `triage [<instructions>]` | Judge a JSON array from stdin with one question or a `--spec`, not both. `--type` sets the question type (default `noul`). `--context-file` names a UTF-8 file with shared evidence for every item. `--top-k` judges only the items most similar to the question and needs `[embedder]`. |
+| `observe` | Record the triage decisions of a snapshot in a private file. Print JSON with `wakeAgent: true` and every candidate. It requires `--spec`, `--input` (JSON with `context` text and at most 64 `items`), and `--observations` (a new JSONL file, never overwritten). |
+| `evaluate` | Replay labeled JSONL cases from stdin against a required `--spec`. Report misses, `unsure` verdicts, errors, and latency. Calibration does not change. |
+| `label <id> <value>` | Label a saved decision of a current spec. The value is `yes`, `no`, an option name, or a level index. |
+| `calibrate <spec>` | Fit bands (decision thresholds) from labeled states. `--precision` takes 0.5 to 0.99 and defaults to 0.95. `--dry-run` reports without a save. |
+| `doctor` | Report endpoint detection, health, model fingerprints, and spec calibration. |
+| `config check [<path>]` | Make sure that a TOML file is valid, without a server. `<path>` defaults to the [configuration path](#configuration-reference), not `EIGHTBALL_CONFIG`. |
 
-## Config reference
+| Shared flag | Commands | Purpose |
+| --- | --- | --- |
+| `--endpoint <name>` | `ask`, `triage`, `evaluate`, `observe` | Override the endpoint. |
+| `--option <name[=description]>`, `--level <text>` | `ask`, `triage` | Add a choice option or a score level, lowest first. Both repeat. |
+| `--keep <value>` | `triage`, `evaluate` | Keep `yes` (default), `no`, an option name, or a minimum level index. The default works for noul only, so choice and score questions need `--keep`. |
+| `--timeout-ms <ms>` | All that call a server | Total request deadline, at least 1. The default is 25,000 for `observe` and `evaluate`, otherwise none. |
 
-Default: `$XDG_CONFIG_HOME/8ball/config.toml`, otherwise `$HOME/.config/8ball/config.toml`. Flags override environment defaults. Unknown fields and invalid questions are rejected.
+[Environment variables](#environment-variables) lists the other flags. `8ball --version` prints the version.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Success. With `--exit-code`, the verdict is `yes`, an option, or a level. |
+| 1 | With `--exit-code`, the noul verdict is `no`. |
+| 2 | The argument parser rejected the arguments. |
+| 3 | With `--exit-code`, the verdict is `unsure`. |
+| 4 | Any other error, for example `ask` with neither `--spec` nor `<kind> <instructions>`. For `doctor`, the default endpoint failed. For `evaluate`, a case failed. |
+
+`observe` exits 0 after input, model, and write errors. Its JSON reports them.
+
+`results[].id` is the saved row id for `label`. `results[].question` is the question id of the caller. `results[].type` is the question type. An identical request within a spec reuses a row. Ad-hoc questions and different specs have separate rows. Invalid backend probabilities return a backend error.
+
+## HTTP routes
+
+If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authorization: Bearer <key>`. A missing or wrong key returns 401. Without a key, `/mcp` accepts only the hosts `localhost`, `127.0.0.1`, and `::1`.
+
+| Route | Protected | Purpose |
+| --- | --- | --- |
+| `POST /v1/ask`, `POST /v1/triage` | Yes | Take the input of `decision_ask` and `decision_triage`. |
+| `POST /v1/label`, `POST /v1/calibrate` | Yes | Take the CLI arguments as JSON: `id`, `value`, `spec`, `precision`, `dry_run`. |
+| `GET /v1/doctor` | Yes | Return the `doctor` report. |
+| `/mcp` | Yes | Serve HTTP MCP. |
+| `GET /healthz` | No | Return `ok`. |
+| `GET /metrics` | No | Return the OpenMetrics counters `eightball_decisions_total` and `eightball_backend_errors_total`. |
+| `POST /register`, `GET /.well-known/{*rest}` | No | Return 404, because 8-ball does not use OAuth. |
+
+Service and authentication errors are JSON with an `error` field. Rejected request bodies and rejected `/mcp` hosts return plain text.
+
+## MCP tools
+
+| Tool | Purpose |
+| --- | --- |
+| `decision_ask` | Ask typed questions about `state`. It takes `spec` or `questions`, and an optional `endpoint`. |
+| `decision_triage` | Judge at most 64 `items` with one `spec` or `question`. It also takes optional `context`, `keep`, `top_k`, and `endpoint`. |
+
+## Configuration reference
+
+The default path is `$XDG_CONFIG_HOME/8ball/config.toml`, otherwise `$HOME/.config/8ball/config.toml`. 8-ball rejects unknown fields at the top level, in `[endpoints.*]`, and in `[embedder]`. It ignores unknown fields in `[specs.*]`, but rejects invalid questions.
 
 ```toml
 default = "d3"            # required: name of the endpoint used when none is given
@@ -75,7 +121,7 @@ retention_days = 90       # optional (default 90): unlabelled decisions older th
 
 [endpoints.d3]
 url = "http://127.0.0.1:9931"   # required: server root. A trailing "/v1" or "/" is removed.
-kind = "systemone"              # optional: "systemone" | "logprob" | "rerank". Omitted = auto-detect (chunk 2).
+kind = "systemone"              # optional: "systemone" | "logprob" | "rerank". Omitted = auto-detect.
 concurrency = 1                 # optional: max parallel requests. Omitted = /props total_slots, else 2.
 model = "qwen-3.8-fast"         # optional: sent as "model". Required for kind logprob.
 api_key_env = "TYPESAFE_KEY"    # optional: NAME of an env var whose value is sent as "Authorization: Bearer <value>"
@@ -95,58 +141,65 @@ instructions = "Is this message a greeting?"
 # endpoint = "d3"                                            # optional, else `default`
 ```
 
-Choice option order and score level order matter. Rerank supports noul only. Auto-detection reads `/props` and `/v1/models`; explicit logprob endpoints require `model`. The default database path is `$XDG_STATE_HOME/8ball/8ball.db`, otherwise `$HOME/.local/state/8ball/8ball.db`.
+`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. Auto-detection reads `/props` and `/v1/models`. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
 
 ## Environment variables
 
-| Variable | Purpose |
-| --- | --- |
-| `EIGHTBALL_CONFIG` | Server/stdio config path |
-| `EIGHTBALL_LISTEN` | Server listen address (default `127.0.0.1:8080`) |
-| `EIGHTBALL_DB` | SQLite database path |
-| `EIGHTBALL_API_KEY` | Server bearer key and client bearer credential |
-| `EIGHTBALL_URL` | CLI server root (default `http://127.0.0.1:8080`) |
+A flag overrides its variable.
 
-Endpoint `api_key_env` names a separate variable for authenticating to that model backend.
+| Variable | Flag | Purpose |
+| --- | --- | --- |
+| `EIGHTBALL_CONFIG` | `--config` | Configuration path for `serve` and `mcp` |
+| `EIGHTBALL_LISTEN` | `--listen` | `serve` listen address (default `127.0.0.1:8080`, image default `0.0.0.0:8080`) |
+| `EIGHTBALL_DB` | `--db` | SQLite path for `serve` and `mcp` (default `$XDG_STATE_HOME/8ball/8ball.db`, otherwise `$HOME/.local/state/8ball/8ball.db`) |
+| `EIGHTBALL_API_KEY` | `--api-key` | Bearer key for the server and the client |
+| `EIGHTBALL_URL` | `--url` | CLI server root (default `http://127.0.0.1:8080`) |
+| `RUST_LOG` | None | Filter for the logs on stderr (default `info`) |
 
 ## Calibration
 
-Save a question as a reviewed config spec, then label real decisions using their numeric row ids.
-Aim for at least 20 examples per side before running `8ball calibrate <spec>`.
-Bands select which answers are decisive at the requested precision; the rest are `unsure`.
-A dry run leaves stored bands untouched; reports are in-sample, so evaluate a separate holdout.
-Changing the question or model invalidates its calibration identity; ad-hoc questions always use defaults.
+Bands select the decisive verdicts at the requested precision. The other verdicts are `unsure`.
+
+To calibrate a spec:
+
+1. Save the question as a reviewed spec in the configuration.
+2. Label at least 20 real decisions per side with their numeric row ids.
+3. Run `8ball calibrate <spec>`.
+
+Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model invalidates its calibration identity. Ad-hoc questions always use the default bands.
 
 ## Hermes observation pilot
 
-[Contextual triage and evaluation](docs/hermes-triage.md) includes a GitOps digest pre-check example that records decisions while passing every candidate to Hermes, plus a held-out replay workflow. It does not modify or deploy Hermes.
+[Contextual triage and evaluation](docs/hermes-triage.md) has a GitOps digest pre-check example and a holdout replay workflow. The example records decisions and passes every candidate to Hermes. It does not modify or deploy Hermes. Deployment, shared MCP registration and Hermes gates are untested and deferred.
 
 ## Thinking chat models
 
-The logprob backend needs reasoning disabled for a one-token answer. Set `extra_body = { reasoning_effort = "none" }`, or for Qwen on vLLM use `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. The pinned local Qwen server also starts with `--reasoning-budget 0`.
+The logprob backend needs a one-token answer, so you must disable reasoning. Set `extra_body = { reasoning_effort = "none" }`. For Qwen on vLLM, set `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. The pinned local Qwen server also starts with `--reasoning-budget 0`.
 
 ## Privacy
 
-Storage uses SQLx with bundled SQLite; no database server or SQLx CLI is required. Startup applies embedded migrations automatically, including upgrades from the original v1 database, preserving decisions, labels, calibrations and existing id counters. Back up an existing database with SQLite-aware backup tooling before upgrading so committed data in the WAL is included. SQLite remains the only supported database; PostgreSQL and persistent vector search are future work.
+Storage uses SQLx with bundled SQLite, so you need no database server or SQLx CLI. Startup applies embedded migrations and keeps decisions, labels, calibrations, and id counters, including from the original v1 database. Before an upgrade, back up an existing database with a SQLite-aware tool. This backup includes committed data in the WAL (the SQLite write-ahead log). SQLite is the only supported database. PostgreSQL and persistent vector search are future work.
 
-The database stores the raw text of every successful decision and is created with mode 0600. Unlabelled rows older than `retention_days` are deleted at startup; labelled rows remain. The intended cluster deployment uses kopiur to copy the PVC to R2; cluster deployment and backups are outside this local build. Model requests go to your configured endpoints, and harness prompts also go to the harness's configured model provider.
+The database stores the raw text of every successful decision, with file mode 0600. `retention_days` never deletes labeled rows. The intended cluster deployment uses kopiur to copy the PVC to R2. Cluster deployment and backups are outside this repository. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
 
-[Privacy Policy](README.md#privacy) describes this local plugin's data handling. Review a shared server operator's policy before sending private data.
+[Privacy Policy](README.md#privacy) describes how this local plugin handles data. Before you send private data to a shared server, read the policy of its operator.
 
-Run the integration commands below from the repository root. `EIGHTBALL_URL` configures the CLI and Claude plugin; the other MCP clients require the explicit URL edits described in their sections.
+## MCP clients
 
-## Claude Code
+Run the commands in this section from the repository root. `EIGHTBALL_URL` configures the CLI and the Claude plugin. The other clients need the URL edits in their sections.
 
-**Install**
+### Claude Code
+
+To install:
 
 ```sh
 claude plugin marketplace add .
 claude plugin install 8-ball@8-ball
 ```
 
-The plugin uses `EIGHTBALL_URL` and `EIGHTBALL_API_KEY`. With a local keyless server, the empty bearer header is accepted.
+The plugin also uses `EIGHTBALL_API_KEY`. A local server with no key accepts the empty bearer header.
 
-**Verify**
+To test:
 
 ```sh
 claude -p --plugin-dir ./plugin \
@@ -155,24 +208,24 @@ claude -p --plugin-dir ./plugin \
 curl -s http://127.0.0.1:8080/metrics
 ```
 
-Tested on 2026-11-03 with Claude Code 2.1.317: actual plugin tool call, reported verdict and increased decision counter. Strict standalone `--mcp-config plugin/.mcp.json` uses the `mcp__8ball__` prefix instead.
+We tested this on 2026-11-03 with Claude Code 2.1.317. The plugin tool call reported a verdict and increased the decision counter. Strict standalone `--mcp-config plugin/.mcp.json` uses the `mcp__8ball__` prefix instead.
 
-**Uninstall**
+To uninstall:
 
 ```sh
 claude plugin uninstall 8-ball@8-ball
 ```
 
-## Codex
+### Codex
 
-**Install**
+To install:
 
 ```sh
 codex plugin marketplace add .
 codex plugin add 8-ball@8-ball
 ```
 
-For a shared server, edit `plugin/.mcp.codex.json`'s URL before installation: Codex does not expand environment variables in URLs. The key is read from `EIGHTBALL_API_KEY`.
+For a shared server, edit the URL in `plugin/.mcp.codex.json` before installation, because Codex does not expand environment variables in URLs. The key comes from `EIGHTBALL_API_KEY`.
 
 Fallback:
 
@@ -181,7 +234,7 @@ codex mcp add 8ball --url http://127.0.0.1:8080/mcp --bearer-token-env-var EIGHT
 ln -s "$PWD/plugin/skills/8-ball" ~/.agents/skills/8-ball
 ```
 
-**Verify**
+To test:
 
 ```sh
 codex exec --ephemeral \
@@ -190,67 +243,59 @@ codex exec --ephemeral \
   'Call decision_ask with {"state":"disk 98% full on /var","questions":[{"id":"urgent","type":"noul","instructions":"Is this alert urgent?"}]}, then report the verdict.'
 ```
 
-The one-tool approval override applies only to this synthetic local test; normal installed sessions can approve calls interactively. [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) documents per-tool approval settings.
+The one-tool approval override applies only to this synthetic local test. Normal installed sessions can approve calls interactively. [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) documents approval for each tool.
 
-Tested on 2026-11-03 with Codex CLI 0.166.0: HTTP MCP tool call completed, reported `unsure`, and increased the decision counter. This tested the per-run MCP fallback; persistent marketplace installation was not performed.
+We tested this on 2026-11-03 with Codex CLI 0.166.0 and the per-run MCP fallback, not a persistent marketplace installation. The HTTP MCP tool call reported `unsure` and increased the decision counter.
 
-**Uninstall**
+To uninstall:
 
 ```sh
 codex plugin remove 8-ball@8-ball
 ```
 
-For the fallback, run `codex mcp remove 8ball` and remove only the skill symlink you created.
+For the fallback, run `codex mcp remove 8ball`. Then remove only the skill symlink that you created.
 
-## Cursor
+### Cursor
 
-**Install**
+To install, use `.cursor-plugin/marketplace.json` in the Cursor plugin marketplace. Or copy the `mcpServers.8ball` entry from `plugin/.mcp.cursor.json` into `~/.cursor/mcp.json`. For a shared server, adjust its URL. The key uses `${env:EIGHTBALL_API_KEY}`.
 
-Use this repository's `.cursor-plugin/marketplace.json` in Cursor's plugin marketplace, or copy the `mcpServers.8ball` entry from `plugin/.mcp.cursor.json` into `~/.cursor/mcp.json`. Adjust its URL for a shared server; the key uses `${env:EIGHTBALL_API_KEY}`.
-
-**Verify**
+To test:
 
 ```sh
 cursor-agent --print --plugin-dir ./plugin --approve-mcps \
   "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."
 ```
 
-Untested: the installed Cursor Agent 2026.07.23-e383d2b accepts a per-run plugin, but the isolated test exited with authentication required before connecting. Pending user: `cursor-agent login`, then the command above. Check that a tool call occurs and the server's decision counter increases.
+This is untested. Cursor Agent 2026.07.23-e383d2b accepts a per-run plugin, but the isolated test exited with authentication required before it connected. To try it, run `cursor-agent login`, then the command above. Make sure that a tool call occurs and that the decision counter of the server increases.
 
-**Uninstall**
+To uninstall, remove the 8-ball plugin in the Cursor marketplace. Or remove only the copied `mcpServers.8ball` entry and any skill link that you added.
 
-Remove the 8-ball plugin in Cursor's marketplace, or remove only the copied `mcpServers.8ball` entry and any skill link you added.
+### qwen-code
 
-## qwen-code
-
-**Install**
-
-Untested: qwen-code is not installed; installing tools is outside this local run. Pending user:
+This is untested. To try it:
 
 ```sh
 npm install -g @qwen-code/qwen-code@latest
 qwen extensions install ./plugin
 ```
 
-**Verify**
+To test:
 
 ```sh
 qwen -p "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."
 ```
 
-Adjust `plugin/qwen-extension.json`'s `httpUrl` for a shared server. Its header reads `$EIGHTBALL_API_KEY`. The [extension format](https://qwenlm.github.io/qwen-code-docs/en/users/extension/introduction/) and [HTTP transport fields](https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp/) were checked; runtime behavior remains untested.
+For a shared server, adjust `httpUrl` in `plugin/qwen-extension.json`. Its header reads `$EIGHTBALL_API_KEY`. A review compared the plugin with the [extension format](https://qwenlm.github.io/qwen-code-docs/en/users/extension/introduction/) and [HTTP transport fields](https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp/). Runtime behavior is untested.
 
-**Uninstall**
+To uninstall:
 
 ```sh
 qwen extensions uninstall 8-ball
 ```
 
-## OpenCode v2
+### OpenCode v2
 
-**Install**
-
-Untested: this machine has v1; replacing it is outside this local run. Pending user: run `npm install -g @opencode/cli@latest` ([official v2 instructions](https://opencode.ai/v2/docs/)), then add the following to `~/.config/opencode/opencode.json`:
+This is untested on v2. To try it, run `npm install -g @opencode/cli@latest` ([official v2 instructions](https://opencode.ai/v2/docs/)), then add the following to `~/.config/opencode/opencode.json`:
 
 ```json
 {"mcp":{"servers":{"8ball":{"type":"remote","url":"http://127.0.0.1:8080/mcp","oauth":false,"headers":{"Authorization":"Bearer {env:EIGHTBALL_API_KEY}"}}}}}
@@ -260,32 +305,22 @@ Untested: this machine has v1; replacing it is outside this local run. Pending u
 ln -s "$PWD/plugin/skills/8-ball" ~/.agents/skills/8-ball
 ```
 
-[Official MCP docs](https://opencode.ai/v2/docs/mcp-servers) confirm `mcp.servers` and `oauth: false` for bearer-only authentication. Keep the default Code Mode initially.
+[Official MCP docs](https://opencode.ai/v2/docs/mcp-servers) show `mcp.servers` and `oauth: false` for bearer-only authentication. Start with the default Code Mode.
 
-**Verify**
+To test:
 
 ```sh
 opencode mcp list
 opencode run "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."
 ```
 
-Confirm a decision tool call and metric increase. If Code Mode cannot call it, try `"codemode": false` in that server entry and record the failure first.
+Make sure that a decision tool call occurs and that the metric increases. If Code Mode cannot call the tool, record the failure first. Then try `"codemode": false` in that server entry.
 
-**Uninstall**
+To uninstall, remove only `mcp.servers.8ball` from the configuration and the skill symlink that you created.
 
-Remove only `mcp.servers.8ball` from the config and the skill symlink you created.
-
-## Hermes
-
-Untested and deferred: deployment, shared MCP registration and Hermes gates are outside this local build. No Hermes configuration was changed.
-
-The directory-publication check for a hosted privacy-policy URL is deferred by the owner for this local build. Strict plugin validation passes; no public marketplace submission is claimed.
-
-## Development verification
+## Development checks
 
 Follow the [Rust style guide](docs/rust-style.md) for source and tests.
-
-Dependency updates use the cluster's Renovate operator and [.renovaterc.json5](.renovaterc.json5), with a pinned preset and a dashboard rerun checkbox. Activation requires the existing GitHub App installation to include this private repository, the config on the default branch, and the operator's discovery list to include `Tanguille/8-ball`. Updates require review; the local model image also requires dashboard approval so it can stay aligned with the cluster image.
 
 ```sh
 cargo fmt --all --check
@@ -294,13 +329,26 @@ cargo nextest run
 dev/models.sh status
 cargo nextest run --test live --run-ignored only
 docker build -t 8ball:dev .
-docker run --rm 8ball:dev --version
 bash dev/image-smoke.sh 8ball:dev
 claude plugin validate plugin --strict
 ```
 
-Build with current stable Rust; `Cargo.lock` records tested dependency versions. Latest versions reduce upgrade backlog but do not guarantee freedom from breaking changes.
+`claude plugin validate plugin --strict` passes. This repository claims no public marketplace submission. A hosted privacy-policy URL for directory publication is deferred.
 
-The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. Relevant branch pushes publish a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after testing startup, SQLite initialization, authentication, and triage with a read-only root filesystem. The workflow summary records the digest to pin in deployments. It targets the homelab's `linux/amd64` nodes and uses `GITHUB_TOKEN`; no publishing token needs configuring. New GHCR packages default to private; keep that visibility when managing package access.
+The live tests need `dev/models.sh up`. This script takes `up`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. They use the llama.cpp image and pinned models of the cluster. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
 
-Cluster pulls need a separate classic GitHub token with `read:packages`, stored in an image pull secret. The image contains the `8ball` CLI/server, not models or server configuration. Mount a TOML configuration read-only, provide writable storage for `EIGHTBALL_DB`, and set `EIGHTBALL_API_KEY`. The Hermes observation pilot preserves every candidate; publishing an image does not enable filtering or deploy it.
+Dependency updates use the Renovate operator of the cluster and [.renovaterc.json5](.renovaterc.json5), with a pinned preset and a dashboard rerun checkbox. Updates require review. The local model image also requires dashboard approval, so that it stays aligned with the cluster image.
+
+Build with current stable Rust. `Cargo.lock` records the tested dependency versions. Latest versions reduce the upgrade backlog, but they do not guarantee that no breaking changes occur.
+
+## Container image
+
+The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. A push to `main` that changes the Docker build inputs publishes a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after the smoke test passes. To build another branch, run `gh workflow run image.yaml --ref <branch>`. The workflow summary records the digest to pin in deployments. The workflow targets the `linux/amd64` nodes of the homelab. It uses `GITHUB_TOKEN` and needs no publishing token.
+
+New GHCR packages are private by default. Keep that visibility.
+
+Cluster pulls need a separate classic GitHub token with `read:packages`, stored in an image pull secret. The image contains the `8ball` CLI and server, not models or server configuration. Publishing an image does not enable filtering or deploy the Hermes observation pilot. To run the image:
+
+- Mount a TOML configuration read-only.
+- Provide writable storage for `EIGHTBALL_DB`.
+- Set `EIGHTBALL_API_KEY`.
