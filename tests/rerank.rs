@@ -19,7 +19,7 @@ async fn score_is_mapped_from_logit() {
         mock.uri()
     ))
     .unwrap();
-    let endpoint = Endpoint::new("rerank", &endpoint_config, None).unwrap();
+    let endpoint = Endpoint::new("rerank", &endpoint_config, None);
     let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"disk full"})).unwrap();
     let probabilities = endpoint.ask("disk at 98%", &[question]).await.unwrap();
@@ -41,7 +41,7 @@ async fn choice_is_rejected() {
     let mock = MockServer::start().await;
     let endpoint_config: EndpointConfig =
         toml::from_str(&format!("url='{}'\nkind='rerank'", mock.uri())).unwrap();
-    let endpoint = Endpoint::new("rerank", &endpoint_config, None).unwrap();
+    let endpoint = Endpoint::new("rerank", &endpoint_config, None);
     let question: Question = serde_json::from_value(
         json!({"id":"q","type":"choice","instructions":"team","criteria":{"a":"","b":""}}),
     )

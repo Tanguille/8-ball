@@ -1,14 +1,7 @@
 use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
-async fn app(
-    status: u16,
-) -> (
-    String,
-    MockServer,
-    tokio::task::JoinHandle<()>,
-    tempfile::TempDir,
-) {
+async fn app(status: u16) -> (String, MockServer, tempfile::TempDir) {
     let mock = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/systemone"))
@@ -23,23 +16,14 @@ async fn app(
         mock.uri()
     ))
     .unwrap();
-    let endpoints: indexmap::IndexMap<_, _> = [(
-        "d3".into(),
-        eightball::backend::Endpoint::new("d3", &endpoint_config.endpoints["d3"], None).unwrap(),
-    )]
-    .into();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
-    let service = std::sync::Arc::new(eightball::service::Service::new(
-        endpoint_config,
-        endpoints,
-        store,
-    ));
+    let service = std::sync::Arc::new(eightball::service::Service::new(endpoint_config, store));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let task = tokio::spawn(async move {
+    tokio::spawn(async move {
         axum::serve(
             listener,
             eightball::http::router(service, None, &tokio_util::sync::CancellationToken::new()),
@@ -48,11 +32,11 @@ async fn app(
         .unwrap();
     });
 
-    (url, mock, task, directory)
+    (url, mock, directory)
 }
 #[tokio::test]
 async fn noul_ask_returns_probabilities_and_verdict() {
-    let (url, _mock, task, _dir) = app(200).await;
+    let (url, _mock, _dir) = app(200).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/v1/ask"))
         .json(&json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}))
@@ -67,11 +51,10 @@ async fn noul_ask_returns_probabilities_and_verdict() {
     assert!(body["results"][0]["id"].as_i64().unwrap() > 0);
     assert_eq!(body["results"][0]["cached"], false);
     assert_eq!(body["results"][0]["calibrated"], false);
-    task.abort();
 }
 #[tokio::test]
 async fn backend_failure_is_502() {
-    let (url, _mock, task, _dir) = app(500).await;
+    let (url, _mock, _dir) = app(500).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/v1/ask"))
         .json(&json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}))
@@ -85,11 +68,10 @@ async fn backend_failure_is_502() {
             .unwrap()
             .contains("500")
     );
-    task.abort();
 }
 #[tokio::test]
 async fn empty_questions_is_400() {
-    let (url, _mock, task, _dir) = app(200).await;
+    let (url, _mock, _dir) = app(200).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/v1/ask"))
         .json(&json!({"state":"hi","questions":[]}))
@@ -97,13 +79,11 @@ async fn empty_questions_is_400() {
         .await
         .unwrap();
     assert_eq!(response.status(), 400);
-    task.abort();
 }
 #[tokio::test]
 async fn healthz_is_ok() {
-    let (url, _mock, task, _dir) = app(200).await;
+    let (url, _mock, _dir) = app(200).await;
     let response = reqwest::get(format!("{url}/healthz")).await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(response.text().await.unwrap(), "ok");
-    task.abort();
 }

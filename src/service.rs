@@ -5,12 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     backend::{Endpoint, embed::Embedder},
     config::{BackendKind, Config},
+    metrics::Metrics,
     question::{Kind, Question},
     store::{NewDecision, Store, StoreError},
     verdict::{self, Bands},
 };
-
-pub use crate::metrics::Metrics;
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Decision {
@@ -89,11 +88,11 @@ pub struct TriageItem {
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
     #[error("bad request: {0}")]
-    BadRequest(String), // REST 400
+    BadRequest(String),
     #[error("backend {endpoint}: {message}")]
-    Backend { endpoint: String, message: String }, // REST 502
+    Backend { endpoint: String, message: String },
     #[error("store: {0}")]
-    Store(String), // REST 500
+    Store(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -119,7 +118,7 @@ pub struct DoctorReport {
     pub specs: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct DoctorEndpoint {
     pub name: String,
     pub url: String,
@@ -153,14 +152,22 @@ pub struct Service {
 
 impl Service {
     #[must_use]
-    pub fn new(config: Config, endpoints: IndexMap<String, Endpoint>, store: Store) -> Self {
-        let embedder = config.embedder.as_ref().map(|configuration| {
-            let key = configuration
-                .api_key_env
-                .as_ref()
-                .and_then(|name| std::env::var(name).ok());
-            Embedder::new(configuration, key)
-        });
+    pub fn new(config: Config, store: Store) -> Self {
+        let key =
+            |variable: &Option<String>| variable.as_ref().and_then(|name| std::env::var(name).ok());
+        let endpoints = config
+            .endpoints
+            .iter()
+            .map(|(name, configuration)| {
+                let endpoint = Endpoint::new(name, configuration, key(&configuration.api_key_env));
+
+                (name.clone(), endpoint)
+            })
+            .collect();
+        let embedder = config
+            .embedder
+            .as_ref()
+            .map(|configuration| Embedder::new(configuration, key(&configuration.api_key_env)));
 
         Self {
             config,
@@ -220,7 +227,7 @@ impl Service {
             }
             value
         };
-        if self.store.set_label(id, &value).await?.is_none() {
+        if !self.store.set_label(id, &value).await? {
             return Err(ServiceError::BadRequest(format!("no decision {id}")));
         }
 
@@ -309,11 +316,7 @@ impl Service {
                 let mut report = DoctorEndpoint {
                     name: name.clone(),
                     url: self.config.endpoints[name].url.clone(),
-                    kind: None,
-                    fingerprint: None,
-                    concurrency: None,
-                    probe: None,
-                    error: None,
+                    ..Default::default()
                 };
                 let info = match endpoint.info().await {
                     Ok(info) => info,
@@ -343,8 +346,8 @@ impl Service {
                     report.probe = Some(match result {
                         Ok(probabilities) => serde_json::json!({
                             "verdict": verdict::verdict(
-                                &question.kind, &question.kind.labels(),
-                                &probabilities[0], Bands::default_for(&question.kind)
+                                &question.kind, &probabilities[0],
+                                Bands::default_for(&question.kind)
                             ),
                             "p_yes": probabilities[0][0],
                             "ms": milliseconds
@@ -697,7 +700,7 @@ impl Service {
             let bands =
                 calibration.map_or_else(|| Bands::default_for(&question.kind), |(bands, _)| bands);
             let labels = question.kind.labels();
-            let outcome = verdict::verdict(&question.kind, &labels, &probabilities, bands);
+            let outcome = verdict::verdict(&question.kind, &probabilities, bands);
             let fresh = (!cached).then(|| NewDecision {
                 spec: request.spec.clone(),
                 question_hash,

@@ -9,15 +9,23 @@ metadata:
 
 # 8-ball
 
-The server's MCP instructions carry the full usage rules; follow them. In short: act only on a clear verdict, treat `unsure` and errors as "do the normal thing", one judgment per question, all evidence in `state` (or shared `context` for triage).
+The MCP instructions of the server hold the full usage rules. Follow them. These are the main rules:
+
+- Act only on a clear verdict.
+- If the verdict is `unsure` or the call returns an error, do the normal work.
+- Ask one judgment per question.
+- Put all evidence in `state`, the text that the model judges. For triage, you can put shared evidence in `context`.
 
 ## Tools
-- `decision_ask`: `{state, spec}` for a named calibrated question, or `{state, questions: [{id, type, instructions, criteria}]}`.
-- `decision_triage`: `{items: [...≤64], spec | question, context?, keep?, top_k?}`.
 
-Triage includes `rejected` model decisions and `prefiltered` unjudged indices. Do not treat embedding exclusions as confident rejections. Contextual inputs must fit the endpoint state limit; errors mean continue the normal work.
+Call `decision_ask` with `{state, spec}` for a named calibrated question, or with `{state, questions: [{id, type, instructions, criteria}]}`.
+
+Call `decision_triage` with `{items: [...≤64], spec | question, context?, keep?, top_k?}`.
+
+The triage result includes `rejected` model decisions and `prefiltered` unjudged indices. Do not treat embedding exclusions as confident rejections. Contextual inputs must fit the endpoint state limit. If triage returns an error, continue the normal work.
 
 ## From a script
+
 ```python
 import json, os, urllib.request
 req = urllib.request.Request(
@@ -32,6 +40,7 @@ except Exception:
 ```
 
 ## Making a question reliable
-1. Add it as a spec in the server config (`[specs.<name>]`), reviewed like code.
-2. Use it, then label real decisions: `8ball label <id> yes|no|<option>|<level>`.
-3. `8ball calibrate <name>` once there are 20+ labelled examples per side. Results then report `calibrated: true`.
+
+1. Add the question as a spec in the server configuration (`[specs.<name>]`). Review the spec like code.
+2. Use the spec. Then label real decisions with `8ball label <id> yes|no|<option>|<level>`.
+3. If you have 20 or more labeled examples per side, run `8ball calibrate <name>`. Results then report `calibrated: true`.
