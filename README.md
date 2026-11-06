@@ -343,11 +343,11 @@ Build with current stable Rust. `Cargo.lock` records the tested dependency versi
 
 ## Container image
 
-The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. A push to `main` that changes the Docker build inputs publishes a private `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after the smoke test passes. To build another branch, run `gh workflow run image.yaml --ref <branch>`. The workflow summary records the digest to pin in deployments. The workflow targets the `linux/amd64` nodes of the homelab. It uses `GITHUB_TOKEN` and needs no publishing token.
+The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. A push to `main` that changes the Docker build inputs publishes a `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after the smoke test passes. It also moves `latest` to that image. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build does not move `latest`. The workflow summary records the digest. Pin deployments as `latest@sha256:<digest>`, because Renovate cannot order `sha-` tags. The workflow targets the `linux/amd64` nodes of the homelab. It uses `GITHUB_TOKEN` and needs no publishing token.
 
-New GHCR packages are private by default. Keep that visibility.
+The package is public, because the cluster and Renovate read it without credentials. Keep that visibility.
 
-Cluster pulls need a separate classic GitHub token with `read:packages`, stored in an image pull secret. The image contains the `8ball` CLI and server, not models or server configuration. Publishing an image does not enable filtering or deploy the Hermes observation pilot. To run the image:
+The image contains the `8ball` CLI and server, not models or server configuration. Publishing an image does not enable filtering or deploy the Hermes observation pilot. To run the image:
 
 - Mount a TOML configuration read-only.
 - Provide writable storage for `EIGHTBALL_DB`.
