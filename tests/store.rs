@@ -31,9 +31,13 @@ async fn opened() -> (TempDir, std::path::PathBuf, Store) {
 async fn insert(store: &Store, decision: NewDecision) -> i64 {
     store.insert_many(vec![decision]).await.unwrap()[0]
 }
-async fn cached(store: &Store, state_hash: &str) -> Option<(i64, eightball::backend::Probs)> {
+async fn cached(
+    store: &Store,
+    state_hash: &str,
+    spec: Option<&str>,
+) -> Option<(i64, eightball::backend::Probs)> {
     store
-        .cached("model-question", state_hash, Some("greeting"))
+        .cached("model-question", state_hash, spec)
         .await
         .unwrap()
 }
@@ -82,10 +86,10 @@ async fn file_is_private_and_migrations_are_idempotent() {
 async fn insert_and_cache_lookup() {
     let (_directory, _, store) = opened().await;
     let id = insert(&store, decision("first")).await;
-    let (cached_id, answer) = cached(&store, "first").await.unwrap();
+    let (cached_id, answer) = cached(&store, "first", Some("greeting")).await.unwrap();
     assert_eq!(cached_id, id);
     assert!((answer[0] - 0.9).abs() < 1e-9);
-    assert!(cached(&store, "other").await.is_none());
+    assert!(cached(&store, "other", Some("greeting")).await.is_none());
     assert!(
         store
             .cached("other-model", "first", Some("greeting"))
@@ -128,8 +132,8 @@ async fn pruning_preserves_labelled_rows() {
         .await
         .unwrap();
     assert_eq!(store.prune(0).await.unwrap(), 1);
-    assert!(cached(&store, "first").await.is_none());
-    assert!(cached(&store, "second").await.is_some());
+    assert!(cached(&store, "first", Some("greeting")).await.is_none());
+    assert!(cached(&store, "second", Some("greeting")).await.is_some());
 }
 #[tokio::test]
 async fn calibration_upsert_keeps_latest_bands() {
@@ -182,7 +186,10 @@ async fn batch_insert_returns_each_row_id() {
         .unwrap();
     assert_eq!(ids.len(), 2);
     assert_ne!(ids[0], ids[1]);
-    assert_eq!(cached(&store, "two").await.unwrap().0, ids[1]);
+    assert_eq!(
+        cached(&store, "two", Some("greeting")).await.unwrap().0,
+        ids[1]
+    );
 }
 
 #[tokio::test]
@@ -315,7 +322,7 @@ async fn batch_failure_rolls_back_all_rows() {
             .await
             .is_err()
     );
-    assert!(cached(&store, "good").await.is_none());
+    assert!(cached(&store, "good", Some("greeting")).await.is_none());
 }
 
 #[tokio::test]
@@ -342,17 +349,12 @@ async fn cache_preserves_null_scope_and_latest_row_and_rejects_bad_json() {
     let mut anonymous = decision("same");
     anonymous.spec = None;
     let id = insert(&store, anonymous).await;
-    assert_eq!(
-        store
-            .cached("model-question", "same", None)
-            .await
-            .unwrap()
-            .unwrap()
-            .0,
-        id
-    );
+    assert_eq!(cached(&store, "same", None).await.unwrap().0, id);
     let newest = insert(&store, decision("same")).await;
-    assert_eq!(cached(&store, "same").await.unwrap().0, newest);
+    assert_eq!(
+        cached(&store, "same", Some("greeting")).await.unwrap().0,
+        newest
+    );
     sqlx::query("UPDATE decisions SET answer='invalid' WHERE id=?1")
         .bind(newest)
         .execute(&mut fixture(&path).await)
