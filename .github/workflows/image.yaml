@@ -37,17 +37,23 @@ jobs:
         with:
           fetch-tags: true
           persist-credentials: false
-      # every release bumps the patch version. Bump minor or major by hand with a tag when that matters.
+      # Every release bumps the patch version. A v* tag on HEAD without a release (a hand-made minor or major bump,
+      # or a release that failed halfway) is released as is. Overlapping main runs queue in the concurrency group.
       - name: Version
         id: version
         if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if git tag --points-at HEAD --list 'v*' | grep -q .; then
-            echo "HEAD is already released"
-            exit 0
-          fi
+          head_tag=$(git tag --points-at HEAD --list 'v*' --sort=-v:refname | head -n1)
           last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
-          if [ -z "$last" ]; then
+          if [ -n "$head_tag" ]; then
+            if gh release view "$head_tag" > /dev/null 2>&1; then
+              echo "$head_tag is already released"
+              exit 0
+            fi
+            next=$head_tag
+          elif [ -z "$last" ]; then
             next=v0.1.0
           else
             IFS=. read -r major minor patch <<< "${last#v}"

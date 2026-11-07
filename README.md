@@ -347,7 +347,7 @@ The [container workflow](.github/workflows/image.yaml) builds the image, runs a 
 
 A push to `main` that changes code, the Docker build inputs, or the chart is a release. It moves `latest`, and gives the image, the chart and the Git tag the next patch version: `v0.1.0` first, then `v0.1.1`. The image is `ghcr.io/tanguille/8-ball:<version>`. The chart is `oci://ghcr.io/tanguille/charts/eightball`, with the version without the `v`. The GitHub release has generated notes.
 
-A push that changes only docs is not a release. For a minor or major version, push the tag `vX.Y.0` on the release commit by hand. The next release continues from that tag. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build publishes only the `sha-` image.
+A push that changes only docs is not a release. For a minor or major version, push the tag `vX.Y.0` on the last commit of `main`, then run `gh workflow run image.yaml --ref main`. That run releases the tag, and the next release continues from it. The same command finishes a release that failed halfway. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build publishes only the `sha-` image.
 
 The image and chart packages are public, because the cluster and Renovate read them without credentials. Keep that visibility.
 
@@ -368,7 +368,7 @@ These options are off by default:
 - `rawResources.prometheusRule.enabled` adds the `EightballBackendErrors` alert.
 - `grafanaDashboards.enabled` adds the dashboard as a ConfigMap with the label `grafana_dashboard: "1"` and the datasource input `DS_PROMETHEUS`.
 
-The chart expects a ConfigMap `<release>-config` with a `config.toml` key, and it creates a 1 GiB PVC for the database. Set `persistence.data.existingClaim` to use your own PVC.
+The chart expects a ConfigMap `<release>-config` with a `config.toml` key, and it creates a 1 GiB PVC for the database. `helm uninstall` keeps that PVC. Set `persistence.data.existingClaim` to use your own PVC.
 
 The image contains the `8ball` CLI and server, not models or server configuration. Publishing an image does not enable filtering or deploy the Hermes observation pilot. To run the image:
 

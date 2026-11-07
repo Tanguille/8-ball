@@ -86,6 +86,8 @@ persistence:
         readOnly: true
   # -- The SQLite database. Set existingClaim to attach a PVC you manage yourself.
   data:
+    # Keep the database when the release is uninstalled.
+    retain: true
     accessMode: ReadWriteOnce
     size: 1Gi
     globalMounts:
