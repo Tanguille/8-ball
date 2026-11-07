@@ -3,7 +3,7 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: {{ .Release.Name }}-rules
+  name: {{ .Release.Name }}
   labels:
     {{- include "eightball.labels" . | nindent 4 }}
     {{- with .Values.prometheusRule.labels }}
