@@ -1,7 +1,7 @@
 # Local copies of the cluster's llama.cpp servers for live tests. Same image digest and pinned models as
 # the deployed model servers; bump them together.
 x-llama: &llama
-  image: ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:421137599beb2135a9e1d664fa8991a3f4f5f953440a9d7622c7a61b63185fe8
+  image: ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:872d75298ff82b771a98d3654d933b3fea65ae4eaecbd155e7c143dba743e44b
   user: "${EIGHTBALL_DEV_UID}:${EIGHTBALL_DEV_GID}"
   devices:
     - /dev/dri:/dev/dri
