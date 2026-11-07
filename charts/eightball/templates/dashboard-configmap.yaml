@@ -1,0 +1,16 @@
+{{- /* The grafana-operator or the Grafana sidecar loads ConfigMaps labelled grafana_dashboard: "1". */}}
+{{- if .Values.grafanaDashboards.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    {{- include "eightball.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+  annotations:
+    grafana_dashboard_folder: {{ .Values.grafanaDashboards.folder | quote }}
+data:
+  eightball.json: |-
+    {{- .Files.Get "dashboards/eightball.json" | nindent 4 }}
+{{- end }}

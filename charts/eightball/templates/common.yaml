@@ -1,0 +1,10 @@
+---
+{{- include "bjw-s.common.loader.init" . }}
+
+{{- /* The common library rejects an empty image tag, so default it to the chart appVersion (the release tag). */}}
+{{- $image := .Values.controllers.eightball.containers.app.image }}
+{{- if and (not $image.tag) (not $image.digest) }}
+{{- $_ := set $image "tag" .Chart.AppVersion }}
+{{- end }}
+
+{{- include "bjw-s.common.loader.generate" . }}

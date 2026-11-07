@@ -1,0 +1,29 @@
+{{- if .Values.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-rules
+  labels:
+    {{- include "eightball.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: eightball.rules
+      rules:
+        {{- with .Values.prometheusRule.rules.backendErrors }}
+        {{- if .enabled }}
+        - alert: EightballBackendErrors
+          expr: |-
+            sum by (endpoint) (increase(eightball_backend_errors_total[{{ .window }}])) > {{ .threshold }}
+          for: {{ .for }}
+          annotations:
+            summary: >-
+              8-ball endpoint {{ "{{ $labels.endpoint }}" }} keeps failing; callers are failing open
+          labels:
+            severity: {{ .severity | quote }}
+        {{- end }}
+        {{- end }}
+{{- end }}

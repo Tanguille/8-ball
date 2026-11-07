@@ -1,0 +1,122 @@
+# This chart uses the bjw-s common library (5.3.0) and its values API:
+# https://bjw-s-labs.github.io/helm-charts/docs/common-library/
+# Release the chart as "eightball" to keep the Service name eightball.<namespace>.svc.
+
+controllers:
+  # The controller name is part of the immutable Deployment selector. Renaming it needs a delete and recreate.
+  eightball:
+    # The common library defaults to the Recreate strategy. SQLite has one writer, so keep one replica.
+    replicas: 1
+    pod:
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+    containers:
+      app:
+        image:
+          repository: ghcr.io/tanguille/8-ball
+          # -- Empty uses the chart appVersion, which is the release tag.
+          tag: ""
+          pullPolicy: IfNotPresent
+        env:
+          EIGHTBALL_CONFIG: /etc/eightball/config.toml
+          EIGHTBALL_DB: /data/8ball.db
+          # Set EIGHTBALL_API_KEY from a Secret before you expose /v1 or /mcp:
+          # EIGHTBALL_API_KEY:
+          #   valueFrom:
+          #     secretKeyRef:
+          #       name: eightball-secret
+          #       key: EIGHTBALL_API_KEY
+        probes:
+          liveness: &probes
+            enabled: true
+            custom: true
+            spec:
+              httpGet: &httpGet
+                path: /healthz
+                port: 8080
+              timeoutSeconds: 5
+          readiness: *probes
+          startup:
+            enabled: true
+            custom: true
+            spec:
+              httpGet: *httpGet
+              periodSeconds: 5
+              timeoutSeconds: 5
+              failureThreshold: 12
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 256Mi
+
+service:
+  app:
+    controller: eightball
+    ports:
+      http:
+        port: 8080
+        primary: true
+
+# -- /metrics is on the main port and needs no bearer key.
+serviceMonitor:
+  app:
+    enabled: false
+    service:
+      identifier: app
+    endpoints:
+      - port: http
+        path: /metrics
+        # 8-ball labels series with its model endpoint. Without this, the scrape target's endpoint label (the port name) replaces it.
+        honorLabels: true
+        interval: 30s
+        scrapeTimeout: 10s
+
+persistence:
+  # -- The 8-ball config.toml. Create a ConfigMap with a config.toml key, or change the name.
+  config:
+    enabled: true
+    type: configMap
+    name: "{{ .Release.Name }}-config"
+    globalMounts:
+      - path: /etc/eightball
+        readOnly: true
+  # -- The SQLite database. Set existingClaim to attach a PVC you manage yourself.
+  data:
+    enabled: true
+    type: persistentVolumeClaim
+    accessMode: ReadWriteOnce
+    size: 1Gi
+    globalMounts:
+      - path: /data
+
+# -- Render the bundled Grafana dashboard as a ConfigMap labelled grafana_dashboard: "1".
+grafanaDashboards:
+  enabled: false
+  folder: eightball
+
+# -- Render the bundled alerts as a PrometheusRule. Needs the monitoring.coreos.com CRDs.
+prometheusRule:
+  enabled: false
+  # -- Extra labels, for example the ruleSelector of your Prometheus.
+  labels: {}
+  rules:
+    # Callers fail open, so a dead backend looks like normal work plus extra cost, never like an outage.
+    backendErrors:
+      enabled: true
+      window: 15m
+      threshold: 3
+      for: 5m
+      severity: warning

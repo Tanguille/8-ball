@@ -180,7 +180,7 @@ The logprob backend needs a one-token answer, so you must disable reasoning. Set
 
 Storage uses SQLx with bundled SQLite, so you need no database server or SQLx CLI. Startup applies embedded migrations and keeps decisions, labels, calibrations, and id counters, including from the original v1 database. Before an upgrade, back up an existing database with a SQLite-aware tool. This backup includes committed data in the WAL (the SQLite write-ahead log). SQLite is the only supported database. PostgreSQL and persistent vector search are future work.
 
-The database stores the raw text of every successful decision, with file mode 0600. `retention_days` never deletes labeled rows. The intended cluster deployment uses kopiur to copy the PVC to R2. Cluster deployment and backups are outside this repository. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
+The database stores the raw text of every successful decision, with file mode 0600. `retention_days` never deletes labeled rows. The intended cluster deployment uses kopiur to copy the PVC to R2. The [Helm chart](#helm-chart) is in this repository. Backups are outside it. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
 
 [Privacy Policy](README.md#privacy) describes how this local plugin handles data. Before you send private data to a shared server, read the policy of its operator.
 
@@ -343,9 +343,36 @@ Build with current stable Rust. `Cargo.lock` records the tested dependency versi
 
 ## Container image
 
-The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. A push to `main` that changes the Docker build inputs publishes a `ghcr.io/tanguille/8-ball:sha-<full-commit>` image after the smoke test passes. It also moves `latest` to that image. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build does not move `latest`. The workflow summary records the digest. Pin deployments as `latest@sha256:<digest>`, because Renovate cannot order `sha-` tags. The workflow targets the `linux/amd64` nodes of the homelab. It uses `GITHUB_TOKEN` and needs no publishing token.
+The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. It uses `GITHUB_TOKEN` and needs no publishing token. The workflow targets the `linux/amd64` nodes of the homelab.
 
-The package is public, because the cluster and Renovate read it without credentials. Keep that visibility.
+A push to `main` that changes code, the Docker build inputs, or the chart is a release. The workflow then:
+
+1. Publishes `ghcr.io/tanguille/8-ball:sha-<full-commit>` and moves `latest` to it.
+2. Gives the release the next patch version, for example `v0.1.1` after `v0.1.0`. The first release is `v0.1.0`.
+3. Publishes the image as `ghcr.io/tanguille/8-ball:<version>`.
+4. Publishes the Helm chart as `oci://ghcr.io/tanguille/charts/eightball`, with the version without the `v`.
+5. Creates the Git tag and the GitHub release with generated notes.
+
+A push that changes only docs is not a release. For a minor or major version, push the tag `vX.Y.0` on the release commit by hand. The next release continues from that tag. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build publishes only the `sha-` image.
+
+The image and chart packages are public, because the cluster and Renovate read them without credentials. Keep that visibility.
+
+### Helm chart
+
+The [chart](charts/eightball) uses the bjw-s common library. Its values use the same format as app-template. The image tag defaults to the chart version. Install it with the release name `eightball`, so the Service is `eightball.<namespace>.svc`:
+
+```sh
+helm install eightball oci://ghcr.io/tanguille/charts/eightball --version 0.1.0 \
+  --set serviceMonitor.app.enabled=true --set prometheusRule.enabled=true --set grafanaDashboards.enabled=true
+```
+
+The chart expects a ConfigMap `<release>-config` with a `config.toml` key, and it creates a 1 GiB PVC for the database. Set `persistence.data.existingClaim` to use your own PVC.
+
+| Value | Default | Effect |
+| --- | --- | --- |
+| `serviceMonitor.app.enabled` | `false` | Scrapes `/metrics` on the main port. |
+| `prometheusRule.enabled` | `false` | Adds the `EightballBackendErrors` alert. `prometheusRule.rules.backendErrors` sets the window, threshold, hold time, and severity. |
+| `grafanaDashboards.enabled` | `false` | Adds the 8-ball dashboard as a ConfigMap with the label `grafana_dashboard: "1"`. The dashboard uses the datasource input `DS_PROMETHEUS`. |
 
 The image contains the `8ball` CLI and server, not models or server configuration. Publishing an image does not enable filtering or deploy the Hermes observation pilot. To run the image:
 
