@@ -7,7 +7,7 @@
   "editable": true,
   "graphTooltip": 1,
   "description": "8-ball decisions: how many, which spec asked, how often the model was unsure, and backend errors.",
-  "refresh": "1m",
+  "refresh": "5m",
   "schemaVersion": 39,
   "time": {
     "from": "now-7d",
@@ -74,7 +74,9 @@
           },
           "refId": "A",
           "expr": "sum(increase(eightball_decisions_total[$__range]))",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -139,7 +141,9 @@
           },
           "refId": "A",
           "expr": "sum(increase(eightball_decisions_total{verdict=\"unsure\"}[$__range])) / sum(increase(eightball_decisions_total[$__range]))",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -200,7 +204,9 @@
           },
           "refId": "A",
           "expr": "sum(increase(eightball_backend_errors_total[$__range])) or vector(0)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -257,7 +263,9 @@
           },
           "refId": "A",
           "expr": "count(sum by (spec) (increase(eightball_decisions_total{spec!=\"\"}[$__range])) > 0) or vector(0)",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {

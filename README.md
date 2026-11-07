@@ -345,13 +345,7 @@ Build with current stable Rust. `Cargo.lock` records the tested dependency versi
 
 The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. It uses `GITHUB_TOKEN` and needs no publishing token. The workflow targets the `linux/amd64` nodes of the homelab.
 
-A push to `main` that changes code, the Docker build inputs, or the chart is a release. The workflow then:
-
-1. Publishes `ghcr.io/tanguille/8-ball:sha-<full-commit>` and moves `latest` to it.
-2. Gives the release the next patch version, for example `v0.1.1` after `v0.1.0`. The first release is `v0.1.0`.
-3. Publishes the image as `ghcr.io/tanguille/8-ball:<version>`.
-4. Publishes the Helm chart as `oci://ghcr.io/tanguille/charts/eightball`, with the version without the `v`.
-5. Creates the Git tag and the GitHub release with generated notes.
+A push to `main` that changes code, the Docker build inputs, or the chart is a release. It moves `latest`, and gives the image, the chart and the Git tag the next patch version: `v0.1.0` first, then `v0.1.1`. The image is `ghcr.io/tanguille/8-ball:<version>`. The chart is `oci://ghcr.io/tanguille/charts/eightball`, with the version without the `v`. The GitHub release has generated notes.
 
 A push that changes only docs is not a release. For a minor or major version, push the tag `vX.Y.0` on the release commit by hand. The next release continues from that tag. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build publishes only the `sha-` image.
 
@@ -363,16 +357,18 @@ The [chart](charts/eightball) uses the bjw-s common library. Its values use the 
 
 ```sh
 helm install eightball oci://ghcr.io/tanguille/charts/eightball --version 0.1.0 \
-  --set serviceMonitor.app.enabled=true --set prometheusRule.enabled=true --set grafanaDashboards.enabled=true
+  --set serviceMonitor.app.enabled=true \
+  --set rawResources.prometheusRule.enabled=true \
+  --set grafanaDashboards.enabled=true
 ```
 
-The chart expects a ConfigMap `<release>-config` with a `config.toml` key, and it creates a 1 GiB PVC for the database. Set `persistence.data.existingClaim` to use your own PVC.
+These options are off by default:
 
-| Value | Default | Effect |
-| --- | --- | --- |
-| `serviceMonitor.app.enabled` | `false` | Scrapes `/metrics` on the main port. |
-| `prometheusRule.enabled` | `false` | Adds the `EightballBackendErrors` alert. `prometheusRule.rules.backendErrors` sets the window, threshold, hold time, and severity. |
-| `grafanaDashboards.enabled` | `false` | Adds the 8-ball dashboard as a ConfigMap with the label `grafana_dashboard: "1"`. The dashboard uses the datasource input `DS_PROMETHEUS`. |
+- `serviceMonitor.app.enabled` scrapes `/metrics`.
+- `rawResources.prometheusRule.enabled` adds the `EightballBackendErrors` alert.
+- `grafanaDashboards.enabled` adds the dashboard as a ConfigMap with the label `grafana_dashboard: "1"` and the datasource input `DS_PROMETHEUS`.
+
+The chart expects a ConfigMap `<release>-config` with a `config.toml` key, and it creates a 1 GiB PVC for the database. Set `persistence.data.existingClaim` to use your own PVC.
 
 The image contains the `8ball` CLI and server, not models or server configuration. Publishing an image does not enable filtering or deploy the Hermes observation pilot. To run the image:
 

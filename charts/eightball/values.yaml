@@ -4,9 +4,8 @@
 
 controllers:
   # The controller name is part of the immutable Deployment selector. Renaming it needs a delete and recreate.
+  # The library defaults to one replica and the Recreate strategy, which SQLite needs: it has one writer.
   eightball:
-    # The common library defaults to the Recreate strategy. SQLite has one writer, so keep one replica.
-    replicas: 1
     pod:
       securityContext:
         runAsUser: 65532
@@ -20,9 +19,8 @@ controllers:
       app:
         image:
           repository: ghcr.io/tanguille/8-ball
-          # -- Empty uses the chart appVersion, which is the release tag.
-          tag: ""
-          pullPolicy: IfNotPresent
+          # -- The chart appVersion is the release tag.
+          tag: "{{ .Chart.AppVersion }}"
         env:
           EIGHTBALL_CONFIG: /etc/eightball/config.toml
           EIGHTBALL_DB: /data/8ball.db
@@ -64,30 +62,23 @@ controllers:
 
 service:
   app:
-    controller: eightball
     ports:
       http:
         port: 8080
-        primary: true
 
 # -- /metrics is on the main port and needs no bearer key.
 serviceMonitor:
   app:
     enabled: false
-    service:
-      identifier: app
     endpoints:
       - port: http
-        path: /metrics
+        interval: 30s
         # 8-ball labels series with its model endpoint. Without this, the scrape target's endpoint label (the port name) replaces it.
         honorLabels: true
-        interval: 30s
-        scrapeTimeout: 10s
 
 persistence:
   # -- The 8-ball config.toml. Create a ConfigMap with a config.toml key, or change the name.
   config:
-    enabled: true
     type: configMap
     name: "{{ .Release.Name }}-config"
     globalMounts:
@@ -95,8 +86,6 @@ persistence:
         readOnly: true
   # -- The SQLite database. Set existingClaim to attach a PVC you manage yourself.
   data:
-    enabled: true
-    type: persistentVolumeClaim
     accessMode: ReadWriteOnce
     size: 1Gi
     globalMounts:
@@ -105,18 +94,25 @@ persistence:
 # -- Render the bundled Grafana dashboard as a ConfigMap labelled grafana_dashboard: "1".
 grafanaDashboards:
   enabled: false
-  folder: eightball
 
-# -- Render the bundled alerts as a PrometheusRule. Needs the monitoring.coreos.com CRDs.
-prometheusRule:
-  enabled: false
-  # -- Extra labels, for example the ruleSelector of your Prometheus.
-  labels: {}
-  rules:
-    # Callers fail open, so a dead backend looks like normal work plus extra cost, never like an outage.
-    backendErrors:
-      enabled: true
-      window: 15m
-      threshold: 3
-      for: 5m
-      severity: warning
+rawResources:
+  # -- The bundled alerts. Needs the monitoring.coreos.com CRDs.
+  prometheusRule:
+    enabled: false
+    forceRename: "{{ .Release.Name }}"
+    manifest:
+      apiVersion: monitoring.coreos.com/v1
+      kind: PrometheusRule
+      spec:
+        groups:
+          - name: eightball.rules
+            rules:
+              # Callers fail open, so a dead backend looks like normal work plus extra cost, never like an outage.
+              - alert: EightballBackendErrors
+                expr: sum by (endpoint) (increase(eightball_backend_errors_total[15m])) > 3
+                for: 5m
+                annotations:
+                  summary: >-
+                    8-ball endpoint {{ "{{ $labels.endpoint }}" }} keeps failing; callers are failing open
+                labels:
+                  severity: warning
