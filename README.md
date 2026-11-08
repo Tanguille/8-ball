@@ -1,6 +1,11 @@
 # 8-ball
 
+> [!WARNING]
+> 8-ball is in early development. Commands, APIs, configuration, and the database format can change without notice. Use it at your own risk.
+
 8-ball gets cheap typed judgments from small decision models. A question is `noul` (yes or no), `choice` (pick one option), or `score` (pick a level). The verdict is the answer to a question. 8-ball offers REST, HTTP MCP, stdio MCP, and a CLI, with a SQLite answer cache and optional labeled calibration. Use a clear verdict to gate or triage work. If the verdict is `unsure` or an error occurs, do the normal work.
+
+8-ball is a Rust server and CLI for small local LLMs. It uses System One decision models, rerankers, and chat models through logprobs on llama.cpp servers. The chat backend also works with other OpenAI-compatible servers, such as vLLM. AI agents in Claude Code, Codex, Cursor, qwen-code, and OpenCode can connect to it as an MCP server. A cheap model then answers simple classification questions before a large model does the work.
 
 ## Quickstart: local
 
