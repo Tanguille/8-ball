@@ -353,20 +353,17 @@ The image and chart packages are public, because the cluster and Renovate read t
 
 ### Helm chart
 
-The [chart](charts/eightball) uses the bjw-s common library. Its values use the same format as app-template. The image tag defaults to the chart version. Install it with the release name `eightball`, so the Service is `eightball.<namespace>.svc`:
+The [chart](charts/eightball) uses the bjw-s common library. Its values use the same format as app-template. The image tag defaults to the chart appVersion, which is the release tag. Install it with the release name `eightball`, so the Service is `eightball.<namespace>.svc`:
 
 ```sh
-helm install eightball oci://ghcr.io/tanguille/charts/eightball --version 0.1.0 \
-  --set serviceMonitor.app.enabled=true \
-  --set rawResources.prometheusRule.enabled=true \
-  --set grafanaDashboards.enabled=true
+helm install eightball oci://ghcr.io/tanguille/charts/eightball --version 0.1.0
 ```
 
-These options are off by default:
+These options are off by default. Set them to `true` to turn them on:
 
 - `serviceMonitor.app.enabled` scrapes `/metrics`.
 - `rawResources.prometheusRule.enabled` adds the `EightballBackendErrors` alert.
-- `grafanaDashboards.enabled` adds the dashboard as a ConfigMap with the label `grafana_dashboard: "1"` and the datasource input `DS_PROMETHEUS`.
+- `configMapsFromFolder.enabled` adds the dashboard as the ConfigMap `<release>-dashboard`, with the label `grafana_dashboard: "1"` and the datasource input `DS_PROMETHEUS`.
 
 The chart expects a ConfigMap `<release>-config` with a `config.toml` key, and it creates a 1 GiB PVC for the database. `helm uninstall` keeps that PVC. Set `persistence.data.existingClaim` to use your own PVC.
 

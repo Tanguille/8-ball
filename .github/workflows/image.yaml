@@ -22,7 +22,7 @@ permissions:
 concurrency:
   group: image-${{ github.ref }}
   # Never cancel a release halfway: the version is only claimed by the final tag, but the pushed image and chart are not rolled back.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: false
 
 jobs:
   image:
@@ -45,19 +45,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          head_tag=$(git tag --points-at HEAD --list 'v*' --sort=-v:refname | head -n1)
+          next=$(git tag --points-at HEAD --list 'v*' --sort=-v:refname | head -n1)
           last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
-          if [ -n "$head_tag" ]; then
-            if gh release view "$head_tag" > /dev/null 2>&1; then
-              echo "$head_tag is already released"
-              exit 0
-            fi
-            next=$head_tag
-          elif [ -z "$last" ]; then
+          if [ -z "$last" ]; then
             next=v0.1.0
-          else
+          elif [ -z "$next" ]; then
             IFS=. read -r major minor patch <<< "${last#v}"
             next="v$major.$minor.$((patch + 1))"
+          elif gh release view "$next" > /dev/null 2>&1; then
+            echo "$next is already released"
+            exit 0
           fi
           echo "version=$next" >> "$GITHUB_OUTPUT"
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
@@ -100,6 +97,6 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          # helm push reuses the docker/login-action credentials.
           helm push "$RUNNER_TEMP"/chart/eightball-*.tgz oci://ghcr.io/tanguille/charts
-          gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
+          gh release create "$VERSION" --target "$GITHUB_SHA" --generate-notes

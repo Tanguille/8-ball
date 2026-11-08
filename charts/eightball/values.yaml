@@ -1,4 +1,4 @@
-# This chart uses the bjw-s common library (5.3.0) and its values API:
+# This chart uses the bjw-s common library and its values API:
 # https://bjw-s-labs.github.io/helm-charts/docs/common-library/
 # Release the chart as "eightball" to keep the Service name eightball.<namespace>.svc.
 
@@ -31,20 +31,19 @@ controllers:
           #       name: eightball-secret
           #       key: EIGHTBALL_API_KEY
         probes:
-          liveness: &probes
+          # The probes use the port of the primary Service.
+          liveness: &probe
             enabled: true
-            custom: true
+            type: HTTP
+            path: /healthz
             spec:
-              httpGet: &httpGet
-                path: /healthz
-                port: 8080
               timeoutSeconds: 5
-          readiness: *probes
+          readiness: *probe
           startup:
             enabled: true
-            custom: true
+            type: HTTP
+            path: /healthz
             spec:
-              httpGet: *httpGet
               periodSeconds: 5
               timeoutSeconds: 5
               failureThreshold: 12
@@ -94,14 +93,23 @@ persistence:
       - path: /data
 
 # -- Render the bundled Grafana dashboard as a ConfigMap labelled grafana_dashboard: "1".
-grafanaDashboards:
+# escaped keeps the {{verdict}} legends from being read as Helm templates.
+configMapsFromFolder:
   enabled: false
+  basePath: dashboards
+  configMapsOverrides:
+    dashboards:
+      forceRename: "{{ .Release.Name }}-dashboard"
+      labels:
+        grafana_dashboard: "1"
+      fileAttributeOverrides:
+        eightball.json:
+          escaped: true
 
 rawResources:
   # -- The bundled alerts. Needs the monitoring.coreos.com CRDs.
   prometheusRule:
     enabled: false
-    forceRename: "{{ .Release.Name }}"
     manifest:
       apiVersion: monitoring.coreos.com/v1
       kind: PrometheusRule
