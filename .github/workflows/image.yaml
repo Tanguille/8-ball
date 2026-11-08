@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Container image
 
+# Every main push that changes code or the chart is a release: image, Helm chart and GitHub release share one version.
 on:
   push:
     branches: [main]
@@ -11,6 +12,8 @@ on:
       - Cargo.lock
       - Dockerfile
       - .dockerignore
+      - charts/**
+      - .github/workflows/image.yaml
   workflow_dispatch:
 
 permissions:
@@ -18,20 +21,54 @@ permissions:
 
 concurrency:
   group: image-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a release halfway: the version is only claimed by the final tag, but the pushed image and chart are not rolled back.
+  cancel-in-progress: false
 
 jobs:
   image:
     runs-on: ubuntu-26.04
     permissions:
-      contents: read
+      contents: write
       packages: write
     env:
       IMAGE: ghcr.io/tanguille/8-ball:sha-${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-tags: true
           persist-credentials: false
+      # Every release bumps the patch version. A v* tag on HEAD without a release (a hand-made minor or major bump,
+      # or a release that failed halfway) is released as is. Overlapping main runs queue in the concurrency group.
+      - name: Version
+        id: version
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          next=$(git tag --points-at HEAD --list 'v*' --sort=-v:refname | head -n1)
+          last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$last" ]; then
+            next=v0.1.0
+          elif [ -z "$next" ]; then
+            IFS=. read -r major minor patch <<< "${last#v}"
+            next="v$major.$minor.$((patch + 1))"
+          elif gh release view "$next" > /dev/null 2>&1; then
+            echo "$next is already released"
+            exit 0
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        if: steps.version.outputs.version
+        with:
+          version: v4.3.1
+      - name: Package chart
+        if: steps.version.outputs.version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          helm dependency build charts/eightball
+          helm lint charts/eightball
+          helm package charts/eightball --version "${VERSION#v}" --app-version "$VERSION" --destination "$RUNNER_TEMP/chart"
       - name: Build
         run: docker build --pull --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE" .
       - name: Smoke test
@@ -45,9 +82,21 @@ jobs:
         run: |
           docker push "$IMAGE"
           docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
-      # Renovate cannot order sha- tags, so deployments pin latest@sha256 for digest updates.
-      - name: Publish latest
+      - name: Publish latest and version
         if: github.ref == 'refs/heads/main'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          docker tag "$IMAGE" ghcr.io/tanguille/8-ball:latest
-          docker push ghcr.io/tanguille/8-ball:latest
+          for tag in latest ${VERSION:+"$VERSION"}; do
+            docker tag "$IMAGE" "ghcr.io/tanguille/8-ball:$tag"
+            docker push "ghcr.io/tanguille/8-ball:$tag"
+          done
+      - name: Release
+        if: steps.version.outputs.version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # helm push reuses the docker/login-action credentials.
+          helm push "$RUNNER_TEMP"/chart/eightball-*.tgz oci://ghcr.io/tanguille/charts
+          gh release create "$VERSION" --target "$GITHUB_SHA" --generate-notes

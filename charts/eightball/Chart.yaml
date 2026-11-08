@@ -1,0 +1,14 @@
+apiVersion: v2
+name: eightball
+description: Cheap typed judgments from small decision models (REST + MCP).
+type: application
+# CI sets version and appVersion from the release tag when it packages the chart.
+version: 0.0.0
+appVersion: v0.0.0
+home: https://github.com/Tanguille/8-ball
+sources:
+  - https://github.com/Tanguille/8-ball
+dependencies:
+  - name: common
+    repository: https://bjw-s-labs.github.io/helm-charts
+    version: 5.3.0
