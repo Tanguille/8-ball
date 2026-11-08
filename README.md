@@ -180,7 +180,7 @@ The logprob backend needs a one-token answer, so you must disable reasoning. Set
 
 Storage uses SQLx with bundled SQLite, so you need no database server or SQLx CLI. Startup applies embedded migrations and keeps decisions, labels, calibrations, and id counters, including from the original v1 database. Before an upgrade, back up an existing database with a SQLite-aware tool. This backup includes committed data in the WAL (the SQLite write-ahead log). SQLite is the only supported database. PostgreSQL and persistent vector search are future work.
 
-The database stores the raw text of every successful decision, with file mode 0600. `retention_days` never deletes labeled rows. The intended cluster deployment uses kopiur to copy the PVC to R2. The [Helm chart](#helm-chart) is in this repository. Backups are outside it. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
+The database stores the raw text of every successful decision, with file mode 0600. `retention_days` never deletes labeled rows. The [Helm chart](#helm-chart) is in this repository. Backups are outside it. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
 
 [Privacy Policy](README.md#privacy) describes how this local plugin handles data. Before you send private data to a shared server, read the policy of its operator.
 
@@ -335,21 +335,21 @@ claude plugin validate plugin --strict
 
 `claude plugin validate plugin --strict` passes. This repository claims no public marketplace submission. A hosted privacy-policy URL for directory publication is deferred.
 
-The live tests need `dev/models.sh up`. This script takes `up`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. They use the llama.cpp image and pinned models of the cluster. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
+The live tests need `dev/models.sh up`. This script takes `up`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. They use the same pinned llama.cpp image and models as the deployment. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
 
-Dependency updates use the Renovate operator of the cluster and [.renovaterc.json5](.renovaterc.json5), with a pinned preset and a dashboard rerun checkbox. Updates require review. The local model image also requires dashboard approval, so that it stays aligned with the cluster image.
+Renovate updates dependencies with [.renovaterc.json5](.renovaterc.json5), a pinned preset and a dashboard rerun checkbox. Updates require review. The local model image also requires dashboard approval, so that it stays aligned with the deployed image.
 
 Build with current stable Rust. `Cargo.lock` records the tested dependency versions. Latest versions reduce the upgrade backlog, but they do not guarantee that no breaking changes occur.
 
 ## Container image
 
-The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. It uses `GITHUB_TOKEN` and needs no publishing token. The workflow targets the `linux/amd64` nodes of the homelab.
+The [container workflow](.github/workflows/image.yaml) builds the image, runs a smoke test, and publishes to GHCR. It uses `GITHUB_TOKEN` and needs no publishing token. The workflow builds for `linux/amd64`.
 
 A push to `main` that changes code, the Docker build inputs, or the chart is a release. It moves `latest`, and gives the image, the chart and the Git tag the next patch version: `v0.1.0` first, then `v0.1.1`. The image is `ghcr.io/tanguille/8-ball:<version>`. The chart is `oci://ghcr.io/tanguille/charts/eightball`, with the version without the `v`. The GitHub release has generated notes.
 
 A push that changes only docs is not a release. For a minor or major version, push the tag `vX.Y.0` on the last commit of `main`, then run `gh workflow run image.yaml --ref main`. That run releases the tag, and the next release continues from it. The same command finishes a release that failed halfway. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build publishes only the `sha-` image.
 
-The image and chart packages are public, because the cluster and Renovate read them without credentials. Keep that visibility.
+The image and chart packages are public, so that deployments and Renovate can read them without credentials. Keep that visibility.
 
 ### Helm chart
 

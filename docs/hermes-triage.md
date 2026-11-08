@@ -36,7 +36,7 @@ Do not interpret a prefiltered item as a confident rejection. Items with identic
 
 ## Observe without filtering
 
-The collector (your code that gathers candidates) supplies a UTF-8 JSON snapshot with `context` and `items`. Each item includes its source ids and URLs. Fetch the current homelab inventory first. Keep the snapshot that each run used. Source collection and exact version and id comparisons stay in ordinary code.
+The collector (your code that gathers candidates) supplies a UTF-8 JSON snapshot with `context` and `items`. Each item includes its source ids and URLs. Fetch the current inventory first. Keep the snapshot that each run used. Source collection and exact version and id comparisons stay in ordinary code.
 
 ```sh
 umask 077
