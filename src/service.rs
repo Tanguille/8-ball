@@ -97,7 +97,7 @@ pub enum ServiceError {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct QuestionsRequest {
-    /// Default 50, at most 500.
+    /// 1 to 500, default 50.
     pub limit: Option<usize>,
 }
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -150,7 +150,7 @@ pub struct StoredDecision {
 pub struct ReviewRequest {
     /// A configured spec. Only its current version can be labelled.
     pub spec: String,
-    /// Default 50, at most 500.
+    /// 1 to 500, default 50.
     pub limit: Option<usize>,
 }
 /// Unlabelled decisions without the model's answer, so a label stays independent of it.
@@ -308,7 +308,7 @@ impl Service {
         &self,
         request: QuestionsRequest,
     ) -> Result<QuestionsResponse, ServiceError> {
-        let rows = self.store.questions(list_limit(request.limit)).await?;
+        let rows = self.store.questions(list_limit(request.limit)?).await?;
         let questions = rows
             .into_iter()
             .map(|row| {
@@ -384,7 +384,7 @@ impl Service {
                 request.spec.as_deref(),
                 &question_hash,
                 request.unlabelled,
-                list_limit(request.limit),
+                list_limit(request.limit)?,
             )
             .await?
             .into_iter()
@@ -425,7 +425,7 @@ impl Service {
                 Some(&request.spec),
                 &verdict::question_hash(&question),
                 true,
-                list_limit(request.limit),
+                list_limit(request.limit)?,
             )
             .await?
             .into_iter()
@@ -983,8 +983,11 @@ impl Service {
 }
 
 /// Default 50, at most 500: enough to review in one go without unbounded responses.
-fn list_limit(limit: Option<usize>) -> i64 {
-    i64::try_from(limit.unwrap_or(50).min(500)).expect("at most 500")
+fn list_limit(limit: Option<usize>) -> Result<i64, ServiceError> {
+    match limit.unwrap_or(50) {
+        0 => Err(ServiceError::BadRequest("limit must be at least 1".into())),
+        limit => Ok(i64::try_from(limit.min(500)).expect("at most 500")),
+    }
 }
 
 /// The stored form of a question: its JSON without the caller's id, which is not part of the hash.

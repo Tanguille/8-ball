@@ -152,7 +152,7 @@ async fn questions_review_and_label_close_the_loop() {
 }
 
 #[tokio::test]
-async fn unknown_spec_and_missing_filter_are_rejected() {
+async fn unknown_spec_missing_filter_and_zero_limit_are_rejected() {
     let (service, _url, _mock, _dir) = app().await;
     let missing = service
         .decisions(DecisionsRequest::default())
@@ -172,5 +172,13 @@ async fn unknown_spec_and_missing_filter_are_rejected() {
     assert!(
         unknown.to_string().contains("unknown spec nope"),
         "{unknown}"
+    );
+    let zero = service
+        .questions(QuestionsRequest { limit: Some(0) })
+        .await
+        .unwrap_err();
+    assert!(
+        zero.to_string().contains("limit must be at least 1"),
+        "{zero}"
     );
 }
