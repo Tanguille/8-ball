@@ -4,6 +4,7 @@ use crate::BackendError;
 
 pub async fn ask(
     endpoint: &crate::Endpoint,
+    info: &crate::Info,
     state: &str,
     questions: &[Question],
 ) -> Result<Vec<crate::Probs>, BackendError> {
@@ -22,7 +23,7 @@ pub async fn ask(
         for (key, value) in endpoint.config.extra_body.iter().flatten() {
             body[key] = value.clone();
         }
-        let response = endpoint.post_json("/v1/chat/completions", body).await?;
+        let response = endpoint.post_json(info, "/v1/chat/completions", body).await?;
         let entries = response["choices"][0]["logprobs"]["content"][0]["top_logprobs"]
             .as_array()
             .ok_or_else(|| BackendError("missing top_logprobs".into()))?;

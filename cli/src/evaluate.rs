@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Decision, TriageResponse};
+use service::{Decision, TriageResponse};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Case {
-    pub id: String,
+    id: String,
     pub item: serde_json::Value,
     pub context: Option<String>,
-    pub expected_keep: bool,
+    expected_keep: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -43,12 +43,12 @@ pub fn parse(input: &str) -> Result<Vec<Case>, DatasetError> {
 
 #[derive(Debug, Serialize)]
 pub struct Observation {
-    pub id: String,
-    pub expected_keep: bool,
-    pub would_keep: bool,
-    pub elapsed_ms: f64,
-    pub decision: Option<Decision>,
-    pub error: Option<String>,
+    id: String,
+    expected_keep: bool,
+    would_keep: bool,
+    elapsed_ms: f64,
+    decision: Option<Decision>,
+    error: Option<String>,
 }
 
 impl Observation {
@@ -101,9 +101,9 @@ fn single_decision(response: TriageResponse) -> Result<(bool, Decision), String>
 
 #[derive(Debug, Serialize)]
 pub struct Latency {
-    pub samples: usize,
-    pub p50_ms: Option<f64>,
-    pub p95_ms: Option<f64>,
+    samples: usize,
+    p50_ms: Option<f64>,
+    p95_ms: Option<f64>,
 }
 
 impl Latency {
@@ -123,21 +123,21 @@ impl Latency {
 
 #[derive(Debug, Serialize)]
 pub struct Report {
-    pub total: u32,
-    pub decided: u32,
-    pub unsure: u32,
+    total: u32,
+    decided: u32,
+    unsure: u32,
     pub errors: u32,
-    pub cached: u32,
-    pub would_skip: u32,
-    pub missed_useful: u32,
-    pub unnecessary_keeps: u32,
-    pub coverage: Option<f64>,
-    pub decision_accuracy: Option<f64>,
-    pub skip_precision: Option<f64>,
-    pub useful_recall: Option<f64>,
-    pub would_skip_fraction: Option<f64>,
-    pub uncached_latency: Latency,
-    pub cached_latency: Latency,
+    cached: u32,
+    would_skip: u32,
+    missed_useful: u32,
+    unnecessary_keeps: u32,
+    coverage: Option<f64>,
+    decision_accuracy: Option<f64>,
+    skip_precision: Option<f64>,
+    useful_recall: Option<f64>,
+    would_skip_fraction: Option<f64>,
+    uncached_latency: Latency,
+    cached_latency: Latency,
 }
 
 impl Report {
@@ -207,4 +207,63 @@ impl Report {
 
 fn ratio(numerator: u32, denominator: u32) -> Option<f64> {
     (denominator > 0).then(|| f64::from(numerator) / f64::from(denominator))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn latency_quantiles_separate_cached_requests_and_exclude_errors() {
+        let decision: service::Decision = serde_json::from_value(serde_json::json!({
+            "id":1,"question":"relevant","type":"noul","verdict":"yes",
+            "confidence":0.98,"probabilities":{"yes":0.98,"no":0.02},
+            "calibrated":false,"cached":false
+        }))
+        .unwrap();
+        let mut observations: Vec<_> = (1..=21)
+            .rev()
+            .map(|elapsed| super::Observation {
+                id: elapsed.to_string(),
+                expected_keep: true,
+                would_keep: true,
+                elapsed_ms: f64::from(elapsed),
+                decision: Some(decision.clone()),
+                error: None,
+            })
+            .collect();
+        let even = super::Report::from_observations(&observations[1..]);
+        assert_eq!(even.uncached_latency.samples, 20);
+        assert_eq!(even.uncached_latency.p50_ms, Some(10.0));
+        assert_eq!(even.uncached_latency.p95_ms, Some(19.0));
+        assert_eq!(even.cached_latency.samples, 0);
+        assert_eq!(even.cached_latency.p50_ms, None);
+        assert_eq!(even.cached_latency.p95_ms, None);
+        for elapsed in [200.0, 100.0] {
+            let mut cached = decision.clone();
+            cached.cached = true;
+            observations.push(super::Observation {
+                id: elapsed.to_string(),
+                expected_keep: true,
+                would_keep: true,
+                elapsed_ms: elapsed,
+                decision: Some(cached),
+                error: None,
+            });
+        }
+        observations.push(super::Observation {
+            id: "failed".into(),
+            expected_keep: true,
+            would_keep: true,
+            elapsed_ms: 99_999.0,
+            decision: None,
+            error: Some("request failed".into()),
+        });
+        let report = super::Report::from_observations(&observations);
+        assert_eq!(report.errors, 1);
+        assert_eq!(report.uncached_latency.samples, 21);
+        assert_eq!(report.uncached_latency.p50_ms, Some(11.0));
+        assert_eq!(report.uncached_latency.p95_ms, Some(20.0));
+        assert_eq!(report.cached_latency.samples, 2);
+        assert_eq!(report.cached_latency.p50_ms, Some(100.0));
+        assert_eq!(report.cached_latency.p95_ms, Some(200.0));
+    }
 }

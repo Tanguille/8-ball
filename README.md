@@ -194,7 +194,7 @@ If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authoriz
 | `GET /metrics` | No | Return OpenMetrics: `eightball_decisions_total` (with a `cached` label), `eightball_backend_errors_total`, `eightball_trimmed_states_total`, and the histogram `eightball_backend_request_duration_seconds`. |
 | `POST /register`, `GET /.well-known/{*rest}` | No | Return 404, because 8-ball does not use OAuth. |
 
-Service and authentication errors are JSON with an `error` field. Rejected request bodies and rejected `/mcp` hosts return plain text.
+Service, authentication, and host errors are JSON with an `error` field. Rejected request bodies return plain text.
 
 ## MCP tools
 

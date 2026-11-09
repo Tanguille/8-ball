@@ -13,7 +13,7 @@ struct DecisionLabels {
     endpoint: String,
     spec: String,
     verdict: String,
-    cached: String,
+    cached: bool,
 }
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct EndpointLabels {
@@ -103,11 +103,10 @@ impl Metrics {
         &self,
         endpoint: &str,
         spec: Option<&str>,
-        verdict: &str,
-        cached: bool,
+        decision: &crate::Decision,
     ) {
-        let verdict = if spec.is_some() || verdict == "unsure" {
-            verdict
+        let verdict = if spec.is_some() || decision.verdict == "unsure" {
+            decision.verdict.as_str()
         } else {
             "decided"
         };
@@ -116,7 +115,7 @@ impl Metrics {
                 endpoint: endpoint.into(),
                 spec: spec.unwrap_or_default().into(),
                 verdict: verdict.into(),
-                cached: cached.to_string(),
+                cached: decision.cached,
             })
             .inc();
     }

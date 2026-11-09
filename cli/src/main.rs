@@ -10,6 +10,8 @@ use domain::{
 };
 use service::Service;
 
+mod evaluate;
+
 #[derive(clap::Parser)]
 #[command(
     name = "8ball",
@@ -122,6 +124,12 @@ impl Remote {
     async fn post(&self, path: &str, body: &Value) -> anyhow::Result<Value> {
         self.send(self.client()?.post(self.at(path)).json(body))
             .await
+    }
+
+    async fn print(&self, path: &str, body: &Value) -> anyhow::Result<i32> {
+        println!("{}", self.post(path, body).await?);
+
+        Ok(0)
     }
 
     fn at(&self, path: &str) -> String {
@@ -297,24 +305,12 @@ async fn run() -> anyhow::Result<i32> {
         Command::Observe(args) => observe(args).await,
         Command::Doctor { remote } => doctor(&remote).await,
         Command::Label { id, value, remote } => {
-            println!(
-                "{}",
-                remote
-                    .post("/v1/label", &json!({"id":id,"value":value}))
-                    .await?
-            );
-
-            Ok(0)
+            remote
+                .print("/v1/label", &json!({"id":id,"value":value}))
+                .await
         }
         Command::Questions { limit, remote } => {
-            println!(
-                "{}",
-                remote
-                    .post("/v1/questions", &json!({"limit":limit}))
-                    .await?
-            );
-
-            Ok(0)
+            remote.print("/v1/questions", &json!({"limit":limit})).await
         }
         Command::Decisions {
             spec,
@@ -323,17 +319,12 @@ async fn run() -> anyhow::Result<i32> {
             limit,
             remote,
         } => {
-            println!(
-                "{}",
-                remote
-                    .post(
-                        "/v1/decisions",
-                        &json!({"spec":spec,"question":question,"unlabelled":unlabelled,"limit":limit})
-                    )
-                    .await?
-            );
-
-            Ok(0)
+            remote
+                .print(
+                    "/v1/decisions",
+                    &json!({"spec":spec,"question":question,"unlabelled":unlabelled,"limit":limit}),
+                )
+                .await
         }
         Command::Calibrate {
             spec,
@@ -341,17 +332,12 @@ async fn run() -> anyhow::Result<i32> {
             dry_run,
             remote,
         } => {
-            println!(
-                "{}",
-                remote
-                    .post(
-                        "/v1/calibrate",
-                        &json!({"spec":spec,"precision":precision,"dry_run":dry_run})
-                    )
-                    .await?
-            );
-
-            Ok(0)
+            remote
+                .print(
+                    "/v1/calibrate",
+                    &json!({"spec":spec,"precision":precision,"dry_run":dry_run}),
+                )
+                .await
         }
         Command::Config {
             action: ConfigAction::Check { path },
@@ -511,24 +497,21 @@ async fn triage(args: TriageArgs) -> anyhow::Result<i32> {
         .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
     let context = args.context_file.map(fs::read_to_string).transpose()?;
     let items: Vec<Value> = serde_json::from_str(&std::io::read_to_string(std::io::stdin())?)?;
-    let body = args
-        .remote
-        .post(
+
+    args.remote
+        .print(
             "/v1/triage",
             &json!({
                 "items":items, "context":context, "spec":args.spec,
                 "question":question, "keep":args.keep, "top_k":args.top_k, "endpoint":args.endpoint
             }),
         )
-        .await?;
-    println!("{body}");
-
-    Ok(0)
+        .await
 }
 
 async fn evaluate(mut args: EvaluateArgs) -> anyhow::Result<i32> {
     args.remote.timeout_ms.get_or_insert(25_000);
-    let cases = service::evaluate::parse(&std::io::read_to_string(std::io::stdin())?)?;
+    let cases = evaluate::parse(&std::io::read_to_string(std::io::stdin())?)?;
     let client = args.remote.client()?;
     let mut observations = Vec::with_capacity(cases.len());
     for case in cases {
@@ -546,13 +529,9 @@ async fn evaluate(mut args: EvaluateArgs) -> anyhow::Result<i32> {
         }
         .await
         .map_err(|e| format!("{e:#}"));
-        observations.push(service::evaluate::Observation::new(
-            case,
-            start.elapsed(),
-            response,
-        ));
+        observations.push(evaluate::Observation::new(case, start.elapsed(), response));
     }
-    let report = service::evaluate::Report::from_observations(&observations);
+    let report = evaluate::Report::from_observations(&observations);
     let code = if report.errors == 0 { 0 } else { 4 };
     println!(
         "{}",

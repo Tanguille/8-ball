@@ -5,6 +5,7 @@ use domain::{config::Config, verdict};
 use service::{Decision, Service};
 use store::Store;
 
+#[path = "../../service/tests/common.rs"]
 mod common;
 
 struct App {

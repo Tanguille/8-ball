@@ -5,6 +5,7 @@ use domain::question::Kind;
 
 pub async fn ask(
     endpoint: &crate::Endpoint,
+    info: &crate::Info,
     state: &str,
     requested_questions: &[domain::question::Question],
 ) -> Result<Vec<crate::Probs>, BackendError> {
@@ -22,7 +23,7 @@ pub async fn ask(
         questions.insert(question.id.clone(), wire);
     }
     let body = json!({"state":state,"questions":questions});
-    let response = endpoint.post_json("/v1/systemone", body).await?;
+    let response = endpoint.post_json(info, "/v1/systemone", body).await?;
 
     requested_questions
         .iter()

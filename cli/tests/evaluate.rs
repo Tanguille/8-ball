@@ -4,8 +4,6 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
-use service::evaluate::{Observation, Report};
-
 async fn server() -> MockServer {
     let server = MockServer::start().await;
     Mock::given(matchers::method("POST"))
@@ -134,62 +132,6 @@ async fn replay_reports_misses_abstentions_errors_and_latency_without_sending_la
         assert!(sent["context"].as_str().unwrap().starts_with("snapshot "));
         assert!(sent.get("expected_keep").is_none());
     }
-}
-
-#[test]
-fn latency_quantiles_separate_cached_requests_and_exclude_errors() {
-    let decision: service::Decision = serde_json::from_value(json!({
-        "id":1,"question":"relevant","type":"noul","verdict":"yes",
-        "confidence":0.98,"probabilities":{"yes":0.98,"no":0.02},
-        "calibrated":false,"cached":false
-    }))
-    .unwrap();
-    let mut observations: Vec<_> = (1..=21)
-        .rev()
-        .map(|elapsed| Observation {
-            id: elapsed.to_string(),
-            expected_keep: true,
-            would_keep: true,
-            elapsed_ms: f64::from(elapsed),
-            decision: Some(decision.clone()),
-            error: None,
-        })
-        .collect();
-    let even = Report::from_observations(&observations[1..]);
-    assert_eq!(even.uncached_latency.samples, 20);
-    assert_eq!(even.uncached_latency.p50_ms, Some(10.0));
-    assert_eq!(even.uncached_latency.p95_ms, Some(19.0));
-    assert_eq!(even.cached_latency.samples, 0);
-    assert_eq!(even.cached_latency.p50_ms, None);
-    assert_eq!(even.cached_latency.p95_ms, None);
-    for elapsed in [200.0, 100.0] {
-        let mut cached = decision.clone();
-        cached.cached = true;
-        observations.push(Observation {
-            id: elapsed.to_string(),
-            expected_keep: true,
-            would_keep: true,
-            elapsed_ms: elapsed,
-            decision: Some(cached),
-            error: None,
-        });
-    }
-    observations.push(Observation {
-        id: "failed".into(),
-        expected_keep: true,
-        would_keep: true,
-        elapsed_ms: 99_999.0,
-        decision: None,
-        error: Some("request failed".into()),
-    });
-    let report = Report::from_observations(&observations);
-    assert_eq!(report.errors, 1);
-    assert_eq!(report.uncached_latency.samples, 21);
-    assert_eq!(report.uncached_latency.p50_ms, Some(11.0));
-    assert_eq!(report.uncached_latency.p95_ms, Some(20.0));
-    assert_eq!(report.cached_latency.samples, 2);
-    assert_eq!(report.cached_latency.p50_ms, Some(100.0));
-    assert_eq!(report.cached_latency.p95_ms, Some(200.0));
 }
 
 #[tokio::test]

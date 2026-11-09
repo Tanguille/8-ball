@@ -1,13 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
-use domain::config::{BackendKind, EndpointConfig};
+use domain::{
+    Probs,
+    config::{BackendKind, EndpointConfig},
+};
 
 pub mod embed;
 mod logprob;
 mod rerank;
 mod systemone;
-
-pub use domain::Probs;
 
 pub struct Endpoint {
     name: String,
@@ -83,15 +84,16 @@ impl Endpoint {
             .await?)
     }
 
+    /// Takes the permit from the `info` that `ask` fetched, so each call does not lock `Endpoint::info` again.
     async fn post_json(
         &self,
+        info: &Info,
         path: &str,
         mut body: serde_json::Value,
     ) -> Result<serde_json::Value, BackendError> {
         if let Some(model) = &self.config.model {
             body["model"] = model.as_str().into();
         }
-        let info = self.info().await?;
         let permit = info
             .permits
             .acquire()
@@ -203,9 +205,9 @@ impl Endpoint {
             let info = self.info().await?;
 
             match info.kind {
-                BackendKind::Systemone => systemone::ask(self, state, questions).await,
-                BackendKind::Logprob => logprob::ask(self, state, questions).await,
-                BackendKind::Rerank => rerank::ask(self, state, questions).await,
+                BackendKind::Systemone => systemone::ask(self, &info, state, questions).await,
+                BackendKind::Logprob => logprob::ask(self, &info, state, questions).await,
+                BackendKind::Rerank => rerank::ask(self, &info, state, questions).await,
             }
         })
         .await

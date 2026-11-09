@@ -1,5 +1,6 @@
 use wiremock::{MockServer, matchers};
 
+#[path = "../../service/tests/common.rs"]
 mod common;
 
 async fn service(

@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
+#[path = "../../service/tests/common.rs"]
 mod common;
 
 async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::TempDir) {

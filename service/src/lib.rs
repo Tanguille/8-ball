@@ -1,6 +1,5 @@
 //! The decision service, and its REST, MCP and metrics front ends.
 
-pub mod evaluate;
 pub mod http;
 pub mod mcp;
 mod metrics;
@@ -286,9 +285,8 @@ impl Service {
                 "ad-hoc question: save it as a spec in the config first".into(),
             )
         })?;
-        let (questions, _) = self.resolve_questions(Some(&spec), &[], None)?;
-        let question = &questions[0];
-        if verdict::question_hash(question) != question_hash {
+        let question = self.spec_question(&spec)?;
+        if verdict::question_hash(&question) != question_hash {
             return Err(ServiceError::BadRequest(format!(
                 "decision {id} was made for an older version of spec {spec}"
             )));
@@ -323,20 +321,9 @@ impl Service {
                 let current = row
                     .spec
                     .as_deref()
-                    .and_then(|spec| self.spec_question(spec));
-                let labelable = current
-                    .as_ref()
-                    .is_some_and(|question| verdict::question_hash(question) == row.question_hash);
-                // Decisions from before the questions table still show the current spec text.
-                let question = row
-                    .question
-                    .as_deref()
-                    .and_then(parse_question)
-                    .or_else(|| {
-                        current
-                            .filter(|_| labelable)
-                            .map(|question| stored_question(&question))
-                    });
+                    .and_then(|spec| self.spec_question(spec).ok());
+                let (labelable, question) =
+                    shown_question(current, &row.question_hash, row.question);
                 QuestionSummary {
                     spec: row.spec,
                     question_hash: row.question_hash,
@@ -357,13 +344,11 @@ impl Service {
         &self,
         request: DecisionsRequest,
     ) -> Result<DecisionsResponse, ServiceError> {
-        let current = match request.spec.as_deref() {
-            Some(spec) => Some(
-                self.spec_question(spec)
-                    .ok_or_else(|| ServiceError::BadRequest(format!("unknown spec {spec}")))?,
-            ),
-            None => None,
-        };
+        let current = request
+            .spec
+            .as_deref()
+            .map(|spec| self.spec_question(spec))
+            .transpose()?;
         let question_hash = match (&request.question, &current) {
             (Some(hash), _) => hash.clone(),
             (None, Some(question)) => verdict::question_hash(question),
@@ -371,16 +356,10 @@ impl Service {
                 return Err(ServiceError::BadRequest("give spec or question".into()));
             }
         };
-        let labelable = current
-            .as_ref()
-            .is_some_and(|question| verdict::question_hash(question) == question_hash);
-        let question = self.store.question(&question_hash).await?.map_or_else(
-            || {
-                current
-                    .filter(|_| labelable)
-                    .map(|question| stored_question(&question))
-            },
-            |text| parse_question(&text),
+        let (labelable, question) = shown_question(
+            current,
+            &question_hash,
+            self.store.question(&question_hash).await?,
         );
         let labels = question
             .clone()
@@ -424,9 +403,7 @@ impl Service {
     }
 
     pub async fn review(&self, request: ReviewRequest) -> Result<ReviewResponse, ServiceError> {
-        let question = self
-            .spec_question(&request.spec)
-            .ok_or_else(|| ServiceError::BadRequest(format!("unknown spec {}", request.spec)))?;
+        let question = self.spec_question(&request.spec)?;
         let decisions = self
             .store
             .decisions(
@@ -451,11 +428,8 @@ impl Service {
         })
     }
 
-    /// The configured spec as a question, or None for an unknown spec.
-    fn spec_question(&self, spec: &str) -> Option<Question> {
-        self.resolve_questions(Some(spec), &[], None)
-            .ok()
-            .map(|(mut questions, _)| questions.remove(0))
+    fn spec_question(&self, spec: &str) -> Result<Question, ServiceError> {
+        Ok(self.resolve_questions(Some(spec), &[], None)?.0.remove(0))
     }
 
     pub async fn calibrate(
@@ -978,12 +952,8 @@ impl Service {
                 if !judgment.decision.cached {
                     judgment.decision.id = ids.next().expect("id for each fresh decision");
                 }
-                self.metrics.record_decision(
-                    endpoint,
-                    spec,
-                    &judgment.decision.verdict,
-                    judgment.decision.cached,
-                );
+                self.metrics
+                    .record_decision(endpoint, spec, &judgment.decision);
                 judgment.decision
             })
             .collect())
@@ -1006,6 +976,23 @@ fn stored_question(question: &Question) -> serde_json::Value {
     value
 }
 
-fn parse_question(text: &str) -> Option<serde_json::Value> {
-    serde_json::from_str(text).ok()
+/// Whether `label` accepts decisions of `question_hash` (it is the current spec version), and the question to show.
+fn shown_question(
+    current: Option<Question>,
+    question_hash: &str,
+    stored: Option<String>,
+) -> (bool, Option<serde_json::Value>) {
+    let labelable = current
+        .as_ref()
+        .is_some_and(|question| verdict::question_hash(question) == question_hash);
+    // Decisions from before the questions table still show the current spec text.
+    let question = stored
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .or_else(|| {
+            current
+                .filter(|_| labelable)
+                .map(|question| stored_question(&question))
+        });
+
+    (labelable, question)
 }

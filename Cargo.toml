@@ -16,8 +16,7 @@ pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 unnecessary_self_imports = "warn"
 assert_is_empty = "allow"
-# Every crate is internal to this workspace and fails with one error type throughout, so per-function error and
-# panic docs add nothing.
+# Internal crates only: per-function error and panic docs add nothing.
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 
@@ -28,16 +27,16 @@ service = { path = "service" }
 store = { path = "store" }
 
 anyhow = "1.0.104"
-axum = { version = "0.8.9", default-features = false }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 clap = "4.6.7"
 futures = "0.3.34"
-indexmap = "2.14.2"
+indexmap = { version = "2.14.2", features = ["serde"] }
 prometheus-client = "0.25.2"
-reqwest = { version = "0.13.5", default-features = false }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 rmcp = "3.8.0"
 # The version rmcp re-exports, so JsonSchema stays one trait across crates.
 schemars = "1.2.3"
-serde = "1.0.229"
+serde = { version = "1.0.229", features = ["derive"] }
 # JSON keeps key order everywhere: states and questions hash their serialized text.
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 sha2 = "0.11.1"
