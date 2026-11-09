@@ -24,7 +24,7 @@ async fn fixture() -> (Service, Store, MockServer, tempfile::TempDir) {
     let config: domain::config::Config =
         toml::from_str(
             &format!(
-                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'",
+                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc=false",
                 mock.uri(),
             ),
         )
@@ -125,6 +125,7 @@ async fn spec_uses_bands_but_ad_hoc_uses_defaults() {
             spec: None,
             questions: vec![question],
             endpoint: None,
+            learn: true,
         },
     )
     .await;

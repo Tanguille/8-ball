@@ -28,7 +28,7 @@ async fn app() -> (
         .mount(&mock)
         .await;
     let config = toml::from_str(&format!(
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'",
+        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc=false",
         mock.uri(),
     ))
     .unwrap();

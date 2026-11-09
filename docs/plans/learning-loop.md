@@ -202,7 +202,7 @@ All chunks run one after another in the same worktree. Two chunks in one tree wo
 - [x] Chunk 2: `store`: `remembered`, `labelled_count`, `labelled(Option)`, `metadata` with endpoint (depends on Chunk 1)
 
 #### Wave 3 (sequential) — Service
-- [ ] Chunk 3: `service` and `cli`: the learning loop (depends on Chunks 1 and 2)
+- [x] Chunk 3: `service` and `cli`: the learning loop (depends on Chunks 1 and 2)
 
 #### Wave 4 (sequential) — Docs
 - [ ] Chunk 4: README and the Hermes doc (depends on Chunk 3)
@@ -359,7 +359,7 @@ feat(store): find remembered labels, count labels, and return a decision's endpo
 ---
 
 ### Chunk 3: `service` and `cli`: the learning loop
-**Status:** Not Started
+**Status:** Complete
 **Wave:** 3
 **Estimated Context:** ~95k tokens
 **Complexity:** High
