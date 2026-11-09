@@ -235,7 +235,9 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                // rmcp logs every MCP session at info; a polling client buried everything else.
+                .unwrap_or_else(|_| "info,rmcp=warn".into()),
         )
         .init();
     let code = match run().await {

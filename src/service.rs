@@ -507,11 +507,14 @@ impl Service {
             .collect();
         if context.is_some() && !items.is_empty() {
             let backend = &self.endpoints[endpoint];
-            backend
+            let info = backend
                 .info()
                 .await
                 .map_err(|e| self.backend_error(endpoint, e))?;
-            if items.iter().any(|(_, text)| backend.fitted(text) != *text) {
+            if items
+                .iter()
+                .any(|(_, text)| backend.fitted(&info, text) != *text)
+            {
                 return Err(ServiceError::BadRequest(
                     "context and item exceed the endpoint state limit; shorten the evidence".into(),
                 ));
@@ -634,7 +637,11 @@ impl Service {
         let endpoint = &self.endpoints[name];
         let backend_error = |e| self.backend_error(name, e);
         let info = endpoint.info().await.map_err(backend_error)?;
-        let state = endpoint.fitted(state);
+        let fitted = endpoint.fitted(&info, state);
+        if fitted != state {
+            self.metrics.record_trimmed_state(name);
+        }
+        let state = fitted;
         let state_hash = verdict::short_hash(&state);
         let mut cached = Vec::new();
         let mut uncached = Vec::new();
@@ -656,10 +663,10 @@ impl Service {
         let mut answers = if uncached.is_empty() {
             Vec::new()
         } else {
-            endpoint
-                .ask(&state, &uncached)
-                .await
-                .map_err(backend_error)?
+            let started = std::time::Instant::now();
+            let answers = endpoint.ask(&state, &uncached).await;
+            self.metrics.record_backend_call(name, started.elapsed());
+            answers.map_err(backend_error)?
         }
         .into_iter();
         let mut judgments = Vec::with_capacity(questions.len());
@@ -737,8 +744,12 @@ impl Service {
                 if !judgment.decision.cached {
                     judgment.decision.id = ids.next().expect("id for each fresh decision");
                 }
-                self.metrics
-                    .record_decision(endpoint, spec, &judgment.decision.verdict);
+                self.metrics.record_decision(
+                    endpoint,
+                    spec,
+                    &judgment.decision.verdict,
+                    judgment.decision.cached,
+                );
                 judgment.decision
             })
             .collect())

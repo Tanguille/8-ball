@@ -148,8 +148,8 @@ async fn live_systemone_long_state_fits() {
     state.push_str(&"log line\n".repeat(2500));
     state.truncate(20_000);
     let endpoint = d3();
-    endpoint.info().await.unwrap();
-    let sent = endpoint.fitted(&state);
+    let info = endpoint.info().await.unwrap();
+    let sent = endpoint.fitted(&info, &state);
     let probabilities = endpoint.ask(&sent, &questions()[..1]).await.unwrap();
     eprintln!(
         "long state: {probabilities:?}; fitted characters {}",
@@ -197,7 +197,12 @@ async fn live_detect_d3() {
     eprintln!("d3 info: {info:?}");
     assert_eq!(info.kind, eightball::config::BackendKind::Systemone);
     assert_eq!(info.concurrency, 2);
-    assert!(info.fingerprint.contains("vllm-d3-nano-Q8_0.gguf@b"));
+    // The model file alone, without the llama.cpp build.
+    assert!(
+        info.fingerprint.ends_with("/vllm-d3-nano-Q8_0.gguf"),
+        "{}",
+        info.fingerprint
+    );
 }
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]

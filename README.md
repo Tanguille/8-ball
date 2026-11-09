@@ -188,7 +188,7 @@ If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authoriz
 | `GET /v1/doctor` | Yes | Return the `doctor` report. |
 | `/mcp` | Yes | Serve HTTP MCP. |
 | `GET /healthz` | No | Return `ok`. |
-| `GET /metrics` | No | Return the OpenMetrics counters `eightball_decisions_total` and `eightball_backend_errors_total`. |
+| `GET /metrics` | No | Return OpenMetrics: `eightball_decisions_total` (with a `cached` label), `eightball_backend_errors_total`, `eightball_trimmed_states_total`, and the histogram `eightball_backend_request_duration_seconds`. |
 | `POST /register`, `GET /.well-known/{*rest}` | No | Return 404, because 8-ball does not use OAuth. |
 
 Service and authentication errors are JSON with an `error` field. Rejected request bodies and rejected `/mcp` hosts return plain text.
@@ -244,7 +244,7 @@ A flag overrides its variable.
 | `EIGHTBALL_DB` | `--db` | SQLite path for `serve` and `mcp` (default `$XDG_STATE_HOME/8ball/8ball.db`, otherwise `$HOME/.local/state/8ball/8ball.db`) |
 | `EIGHTBALL_API_KEY` | `--api-key` | Bearer key for the server and the client |
 | `EIGHTBALL_URL` | `--url` | CLI server root (default `http://127.0.0.1:8080`) |
-| `RUST_LOG` | None | Filter for the logs on stderr (default `info`) |
+| `RUST_LOG` | None | Filter for the logs on stderr (default `info,rmcp=warn`) |
 
 ## Calibration
 
@@ -256,7 +256,7 @@ To calibrate a spec:
 2. Label at least 20 real decisions per side with their numeric row ids.
 3. Run `8ball calibrate <spec>`.
 
-Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model invalidates its calibration identity. Ad-hoc questions always use the default bands.
+Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model file invalidates its calibration identity. A new llama.cpp build of the same file does not. 8-ball checks the model again every minute. Ad-hoc questions always use the default bands.
 
 ## Hermes observation pilot
 
