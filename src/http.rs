@@ -109,20 +109,22 @@ impl IntoResponse for ServiceError {
             Self::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
-        (status, Json(json!({"error":self.to_string()}))).into_response()
+        error(status, &self.to_string())
     }
 }
 
-async fn metrics(State(service): State<Arc<Service>>) -> Result<impl IntoResponse, ServiceError> {
-    service.metrics().map(|body| {
-        (
-            [(
-                header::CONTENT_TYPE,
-                "application/openmetrics-text; version=1.0.0; charset=utf-8",
-            )],
-            body,
-        )
-    })
+fn error(status: StatusCode, message: &str) -> Response {
+    (status, Json(json!({"error": message}))).into_response()
+}
+
+async fn metrics(State(service): State<Arc<Service>>) -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/openmetrics-text; version=1.0.0; charset=utf-8",
+        )],
+        service.metrics(),
+    )
 }
 
 async fn require_bearer(
@@ -148,19 +150,12 @@ async fn require_bearer(
     if authorized {
         next.run(request).await
     } else {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error":"missing or wrong bearer token"})),
-        )
-            .into_response()
+        error(StatusCode::UNAUTHORIZED, "missing or wrong bearer token")
     }
 }
 async fn no_oauth() -> Response {
-    (
+    error(
         StatusCode::NOT_FOUND,
-        Json(json!({
-            "error": "8ball does not use OAuth; send Authorization: Bearer <EIGHTBALL_API_KEY>"
-        })),
+        "8ball does not use OAuth; send Authorization: Bearer <EIGHTBALL_API_KEY>",
     )
-        .into_response()
 }

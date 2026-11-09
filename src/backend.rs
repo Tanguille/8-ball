@@ -64,8 +64,11 @@ impl Endpoint {
     async fn post_json(
         &self,
         path: &str,
-        body: &serde_json::Value,
+        mut body: serde_json::Value,
     ) -> Result<serde_json::Value, BackendError> {
+        if let Some(model) = &self.config.model {
+            body["model"] = model.as_str().into();
+        }
         let permit = self
             .info()
             .await?
@@ -76,7 +79,7 @@ impl Endpoint {
         let request = self
             .client
             .post(format!("{}{path}", self.config.url))
-            .json(body);
+            .json(&body);
         let response = authed(request, self.api_key.as_deref()).send().await?;
         let status = response.status();
         let text = response.text().await?;
@@ -197,7 +200,7 @@ impl Endpoint {
             }
         })
         .await
-        .map_err(|_| BackendError("timed out after 20s".into()))?
+        .map_err(|_| BackendError(format!("timed out after {DECISION_TIMEOUT:?}")))?
     }
 }
 

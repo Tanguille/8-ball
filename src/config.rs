@@ -21,7 +21,7 @@ pub struct EndpointConfig {
     pub model: Option<String>,
     pub api_key_env: Option<String>,
     pub max_state_chars: Option<usize>,
-    pub extra_body: Option<toml::Table>,
+    pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

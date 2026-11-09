@@ -54,12 +54,8 @@ async fn authenticated_http_client_survives_server_restart() {
         assert_eq!(client.list_all_tools().await.unwrap().len(), 2);
         let result = client
             .call_tool(
-                rmcp::model::CallToolRequestParams::new("decision_ask").with_arguments(
-                    json!({"state":"hi","spec":"greeting"})
-                        .as_object()
-                        .unwrap()
-                        .clone(),
-                ),
+                rmcp::model::CallToolRequestParams::new("decision_ask")
+                    .with_arguments(rmcp::object!({"state":"hi","spec":"greeting"})),
             )
             .await
             .unwrap();

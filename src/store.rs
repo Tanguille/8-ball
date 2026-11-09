@@ -69,26 +69,8 @@ impl Store {
             .max_connections(1)
             .connect_with(options)
             .await?;
-        // Lock before inspecting the schema so concurrent legacy opens cannot race the rebuild.
+        // Lock so concurrent first opens cannot both run the migrator.
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
-        let schema: Option<String> = sqlx::query_scalar(
-            "SELECT sql FROM sqlite_schema WHERE type='table' AND name='decisions'",
-        )
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if schema.is_some_and(|sql| !sql.to_uppercase().contains("AUTOINCREMENT")) {
-            sqlx::raw_sql("ALTER TABLE decisions RENAME TO decisions_previous;")
-                .execute(&mut *transaction)
-                .await?;
-            sqlx::raw_sql(SCHEMA).execute(&mut *transaction).await?;
-            sqlx::raw_sql(
-                "INSERT INTO decisions SELECT * FROM decisions_previous; DROP TABLE decisions_previous;",
-            )
-                .execute(&mut *transaction)
-                .await?;
-            // Index names belonged to the renamed table until it was dropped.
-            sqlx::raw_sql(SCHEMA).execute(&mut *transaction).await?;
-        }
         let migrator =
             sqlx::migrate::Migrator::with_migrations(vec![sqlx::migrate::Migration::new(
                 1,

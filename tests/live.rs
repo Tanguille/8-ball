@@ -3,14 +3,14 @@ use std::{
     process::Command,
 };
 
-use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
+use rmcp::{ServiceExt, model::CallToolRequestParams, object, transport::TokioChildProcess};
 use serde_json::json;
 
 use eightball::{
     backend::{Endpoint, embed},
     config::Config,
     question::Question,
-    service::{AskRequest, Service},
+    service::Service,
     verdict,
 };
 
@@ -28,16 +28,17 @@ async fn require(port: u16) {
         "model server on :{port} is not up; run dev/models.sh up"
     );
 }
+fn dev_config_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml")
+}
 fn dev_config() -> Config {
-    Config::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml")).unwrap()
+    Config::load(&dev_config_path()).unwrap()
+}
+fn api_key(variable: Option<&str>) -> Option<String> {
+    variable.and_then(|name| std::env::var(name).ok())
 }
 fn endpoint(name: &str, config: &eightball::config::EndpointConfig) -> Endpoint {
-    let key = config
-        .api_key_env
-        .as_deref()
-        .and_then(|name| std::env::var(name).ok());
-
-    Endpoint::new(name, config, key)
+    Endpoint::new(name, config, api_key(config.api_key_env.as_deref()))
 }
 fn d3() -> Endpoint {
     endpoint("d3", &dev_config().endpoints["d3"])
@@ -164,7 +165,7 @@ async fn live_systemone_long_state_fits() {
 async fn live_cli_ask() {
     require(9931).await;
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml");
+    let config = dev_config_path();
     let server = live_server(&config, &directory.path().join("db.sqlite"), None);
     let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
@@ -310,11 +311,10 @@ async fn live_embed() {
     require(9932).await;
     let config = dev_config();
     let embedder_config = config.embedder.as_ref().unwrap();
-    let key = embedder_config
-        .api_key_env
-        .as_deref()
-        .and_then(|name| std::env::var(name).ok());
-    let embedder = embed::Embedder::new(embedder_config, key);
+    let embedder = embed::Embedder::new(
+        embedder_config,
+        api_key(embedder_config.api_key_env.as_deref()),
+    );
     let vectors = embedder
         .embed(&[
             "disk is full".into(),
@@ -341,8 +341,7 @@ async fn live_embed() {
 async fn live_triage_with_prefilter() {
     require(9931).await;
     require(9932).await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service = calibration_service(dev_config(), &directory.path().join("db.sqlite")).await;
+    let (service, _directory) = calibration_service(dev_config()).await;
     let request: eightball::service::TriageRequest = serde_json::from_value(json!({"items":[
         "The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.",
         "A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."
@@ -366,11 +365,8 @@ async fn live_doctor() {
     for port in [9931, 9932, 9933, 9934] {
         require(port).await;
     }
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let report = calibration_service(dev_config(), &directory.path().join("db.sqlite"))
-        .await
-        .doctor()
-        .await;
+    let (service, _directory) = calibration_service(dev_config()).await;
+    let report = service.doctor().await;
     eprintln!("doctor: {report:?}");
     for endpoint in &report.endpoints {
         assert!(endpoint.error.is_none());
@@ -395,8 +391,7 @@ async fn live_cache_skips_model() {
         "greeting".into(),
         toml::from_str("type='noul'\ninstructions='Is this message a greeting?'").unwrap(),
     );
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service = calibration_service(config, &directory.path().join("db.sqlite")).await;
+    let (service, _directory) = calibration_service(config).await;
     let request = spec_request("hi there, how are you?", "greeting");
     let first = service.ask(request.clone()).await.unwrap();
     let start = std::time::Instant::now();
@@ -408,16 +403,16 @@ async fn live_cache_skips_model() {
     assert!(elapsed < std::time::Duration::from_millis(50));
 }
 
-async fn calibration_service(config: Config, path: &std::path::Path) -> Service {
-    Service::new(config, eightball::store::Store::open(path).await.unwrap())
+async fn calibration_service(config: Config) -> (Service, tempfile::TempDir) {
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
+        .await
+        .unwrap();
+
+    (Service::new(config, store), directory)
 }
-fn spec_request(state: &str, spec: &str) -> AskRequest {
-    AskRequest {
-        state: state.into(),
-        spec: Some(spec.into()),
-        questions: vec![],
-        endpoint: None,
-    }
+fn spec_request(state: &str, spec: &str) -> eightball::service::AskRequest {
+    serde_json::from_value(json!({"state":state,"spec":spec})).unwrap()
 }
 fn fixture_rows(spec: &str) -> Vec<(String, String)> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -484,8 +479,7 @@ async fn fit_fixture(service: &Service, spec: &str) -> eightball::service::Calib
 #[ignore = "needs dev/models.sh up"]
 async fn live_calibrate_holdout() {
     require(9931).await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service = calibration_service(dev_config(), &directory.path().join("db.sqlite")).await;
+    let (service, _directory) = calibration_service(dev_config()).await;
     for spec in ["greeting", "storage-risk"] {
         fit_fixture(&service, spec).await;
         let mut decided = 0_u32;
@@ -523,21 +517,21 @@ async fn live_calibrate_holdout() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_question_edit_invalidates() {
     require(9931).await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let database_path = directory.path().join("db.sqlite");
-    let service = calibration_service(dev_config(), &database_path).await;
+    let (service, directory) = calibration_service(dev_config()).await;
     fit_fixture(&service, "greeting").await;
-    let original = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml"),
-    )
-    .unwrap();
+    let original = std::fs::read_to_string(dev_config_path()).unwrap();
     let edited = original.replace(
         "Is this message a greeting?",
         "Is this message a greeting exactly?",
     );
     let path = directory.path().join("edited.toml");
     std::fs::write(&path, edited).unwrap();
-    let changed = calibration_service(Config::load(&path).unwrap(), &database_path).await;
+    let changed = Service::new(
+        Config::load(&path).unwrap(),
+        eightball::store::Store::open(&directory.path().join("db.sqlite"))
+            .await
+            .unwrap(),
+    );
     let result = changed
         .ask(spec_request("hi there", "greeting"))
         .await
@@ -627,13 +621,10 @@ fn live_server(
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_handler_ask() {
     require(9931).await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let service = std::sync::Arc::new(
-        calibration_service(dev_config(), &directory.path().join("db.sqlite")).await,
-    );
+    let (service, _directory) = calibration_service(dev_config()).await;
     let (server_io, client_io) = tokio::io::duplex(16_384);
     tokio::spawn(async move {
-        eightball::mcp::Mcp::new(service)
+        eightball::mcp::Mcp::new(std::sync::Arc::new(service))
             .serve(server_io)
             .await
             .unwrap()
@@ -644,12 +635,8 @@ async fn live_mcp_handler_ask() {
     let client = ().serve(client_io).await.unwrap();
     let result = client
         .call_tool(
-            CallToolRequestParams::new("decision_ask").with_arguments(
-                json!({"state":"hi there, how are you?","spec":"greeting"})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
+            CallToolRequestParams::new("decision_ask")
+                .with_arguments(object!({"state":"hi there, how are you?","spec":"greeting"})),
         )
         .await
         .unwrap();
@@ -665,7 +652,7 @@ async fn live_mcp_handler_ask() {
 async fn live_mcp_stdio_ask() {
     require(9931).await;
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml");
+    let config = dev_config_path();
     let client = ()
         .serve(
             TokioChildProcess::new(mcp_command(&config, &directory.path().join("db.sqlite")))
@@ -680,12 +667,8 @@ async fn live_mcp_stdio_ask() {
     assert!(instructions.contains("greeting") && instructions.contains("storage-risk"));
     let result = client
         .call_tool(
-            CallToolRequestParams::new("decision_ask").with_arguments(
-                json!({"state":"hi there, how are you?","spec":"greeting"})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
+            CallToolRequestParams::new("decision_ask")
+                .with_arguments(object!({"state":"hi there, how are you?","spec":"greeting"})),
         )
         .await
         .unwrap();
@@ -702,7 +685,7 @@ async fn live_mcp_http_triage() {
     require(9931).await;
     require(9932).await;
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dev/config.toml");
+    let config = dev_config_path();
     let server = live_server(&config, &directory.path().join("db.sqlite"), Some("k"));
     let transport = rmcp::transport::StreamableHttpClientTransport::from_config(
         rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
@@ -711,12 +694,9 @@ async fn live_mcp_http_triage() {
         .auth_header("k"),
     );
     let client = ().serve(transport).await.unwrap();
-    let arguments = json!({"items":["The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.","A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5});
+    let arguments = object!({"items":["The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.","A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5});
     let result = client
-        .call_tool(
-            CallToolRequestParams::new("decision_triage")
-                .with_arguments(arguments.as_object().unwrap().clone()),
-        )
+        .call_tool(CallToolRequestParams::new("decision_triage").with_arguments(arguments))
         .await
         .unwrap();
     eprintln!("MCP HTTP real triage: {result:?}");
@@ -752,10 +732,7 @@ async fn live_mcp_failure_is_fail_open() {
     let result = client
         .call_tool(
             CallToolRequestParams::new("decision_ask").with_arguments(
-                json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]})
-                .as_object()
-                .unwrap()
-                .clone(),
+                object!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}),
             ),
         )
         .await

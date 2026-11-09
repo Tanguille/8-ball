@@ -1,11 +1,10 @@
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 
 use serde_json::{Value, json};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 struct Server {
     child: std::process::Child,
-    _config: tempfile::NamedTempFile,
     _db: tempfile::TempDir,
     url: String,
 }
@@ -16,16 +15,6 @@ impl Drop for Server {
     }
 }
 fn serve(mock: &MockServer) -> Server {
-    let mut config = tempfile::Builder::new()
-        .prefix("8ball-")
-        .tempfile()
-        .unwrap();
-    writeln!(
-        config,
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'",
-        mock.uri()
-    )
-    .unwrap();
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let database_path = directory.path().join("db.sqlite");
     let child = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
@@ -33,17 +22,21 @@ fn serve(mock: &MockServer) -> Server {
             "serve",
             "--db",
             database_path.to_str().unwrap(),
-            "--config",
-            config.path().to_str().unwrap(),
+            "--config-toml",
+            &format!(
+                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'",
+                mock.uri()
+            ),
             "--listen",
             "127.0.0.1:0",
         ])
+        // A config path from the developer's shell would conflict with --config-toml.
+        .env_remove("EIGHTBALL_CONFIG")
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     let mut server = Server {
         child,
-        _config: config,
         _db: directory,
         url: String::new(),
     };
@@ -168,12 +161,11 @@ async fn choice_prints_billing() {
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body["results"][0]["verdict"], "billing");
 }
-#[tokio::test]
-async fn dead_server_exits_four() {
-    let mock = mock(0.97).await;
-    let mut server = serve(&mock);
-    server.child.kill().unwrap();
-    server.child.wait().unwrap();
+#[test]
+fn dead_server_exits_four() {
+    let unused = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let dead = unused.local_addr().unwrap();
+    drop(unused);
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
@@ -182,7 +174,7 @@ async fn dead_server_exits_four() {
             "--state",
             "hi",
             "--url",
-            &server.url,
+            &format!("http://{dead}"),
         ])
         .output()
         .unwrap();

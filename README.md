@@ -260,7 +260,7 @@ Reports are in-sample, so evaluate a separate holdout (labeled cases that calibr
 
 ## Hermes observation pilot
 
-[Contextual triage and evaluation](docs/hermes-triage.md) has a GitOps digest pre-check example and a holdout replay workflow. The example records decisions and passes every candidate to Hermes. It does not modify or deploy Hermes. Deployment, shared MCP registration and Hermes gates are untested and deferred.
+[Contextual triage and evaluation](docs/hermes-triage.md) has a GitOps digest pre-check example and a holdout replay workflow. The example records decisions and passes every candidate to Hermes. It does not modify or deploy Hermes.
 
 ## Thinking chat models
 
@@ -272,7 +272,7 @@ Storage uses SQLx with bundled SQLite, so you need no database server or SQLx CL
 
 The database stores the raw text of every successful decision, with file mode 0600. `retention_days` never deletes labeled rows. The [Helm chart](#helm-chart) is in this repository. Backups are outside it. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
 
-[Privacy Policy](README.md#privacy) describes how this local plugin handles data. Before you send private data to a shared server, read the policy of its operator.
+Before you send private data to a shared server, read the policy of its operator.
 
 ## MCP clients
 
@@ -416,20 +416,16 @@ Follow the [Rust style guide](docs/rust-style.md) for source and tests. Write co
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo nextest run
-dev/models.sh status
-cargo nextest run --test live --run-ignored only
+dev/models.sh up
+cargo nextest run --test live --run-ignored only --no-capture
 docker build -t 8ball:dev .
 bash dev/image-smoke.sh 8ball:dev
 claude plugin validate plugin --strict
 ```
 
-`claude plugin validate plugin --strict` passes. This repository claims no public marketplace submission. A hosted privacy-policy URL for directory publication is deferred.
+This repository claims no public marketplace submission. A hosted privacy-policy URL for directory publication is deferred.
 
 The live tests need `dev/models.sh up`. This script takes `up`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. They use the same pinned llama.cpp image and models as the deployment. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
-
-Renovate updates dependencies with [.renovaterc.json5](.renovaterc.json5), a pinned preset and a dashboard rerun checkbox. Updates require review. The local model image also requires dashboard approval, so that it stays aligned with the deployed image.
-
-Build with current stable Rust. `Cargo.lock` records the tested dependency versions. Latest versions reduce the upgrade backlog, but they do not guarantee that no breaking changes occur.
 
 ## Container image
 
@@ -459,7 +455,7 @@ The chart expects a ConfigMap `<release>-config` with a `config.toml` key, and i
 
 To use no ConfigMap, set `persistence.config.enabled: false`. Then, in `controllers.eightball.containers.app.env`, set `EIGHTBALL_CONFIG` to `null` and put the TOML in `EIGHTBALL_CONFIG_TOML`.
 
-The image contains the `8ball` CLI and server, not models or server configuration. Publishing an image does not enable filtering or deploy the Hermes observation pilot. To run the image:
+The image contains the `8ball` CLI and server, not models or server configuration. To run the image:
 
 - Mount a TOML configuration read-only, or set `EIGHTBALL_CONFIG_TOML`.
 - Provide writable storage for `EIGHTBALL_DB`.

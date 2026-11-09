@@ -11,6 +11,5 @@
     "triage",
     "mcp",
     "claude"
-  ],
-  "skills": "./skills/"
+  ]
 }

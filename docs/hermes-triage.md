@@ -47,7 +47,7 @@ export EIGHTBALL_URL=http://127.0.0.1:8080
   --observations /tmp/8ball-gitops-run.jsonl
 ```
 
-The command uses the authentication and JSON handling of the CLI. `--timeout-ms` defaults to 25,000 and covers the response body. The command refuses redirects. It needs no Python runtime.
+The command uses the authentication and JSON handling of the CLI. It needs no Python runtime.
 
 Choose a new observation path for every run. If the input is valid and the write succeeds, the command creates a new file with mode 0600. It never overwrites an existing file. The file contains one JSONL record: `observed_at_unix_ms` (Unix milliseconds), spec, endpoint override, original snapshot, duration, complete response, and any error.
 
@@ -57,7 +57,7 @@ The final stdout line contains `wakeAgent: true`. If the input is valid, `contex
 
 If `context.input_error` is present, `context.snapshot` is absent. The same holds for JSON that parsed but is not valid. In this case, Hermes must fetch valid evidence and must not conclude that there were no changes. The model verdicts stay in the observation file, outside the evidence that Hermes receives, to reduce evaluation bias.
 
-Hermes supports pre-check scripts through its [native cron `script` interface](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron/#skipping-the-agent-entirely-wakeagent). A future approved installation can use a wrapper that collects a fresh snapshot, chooses a unique output path, and then invokes `8ball observe`. The two-line `examples/hermes/gitops-observe.sh` launcher executes the CLI. It contains no HTTP or decision logic. Hermes accepts a script file as the `script` value, not a shell command. Nothing here modifies a running Hermes instance.
+Hermes supports pre-check scripts through its [native cron `script` interface](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron/#skipping-the-agent-entirely-wakeagent). A future approved installation can use a wrapper that collects a fresh snapshot, chooses a unique output path, and then invokes `8ball observe`. The two-line `examples/hermes/gitops-observe.sh` launcher executes the CLI. It contains no HTTP or decision logic. Hermes accepts a script file as the `script` value, not a shell command.
 
 ## Replay a separate labeled holdout
 
@@ -82,11 +82,7 @@ umask 077
 
 Save the configuration and the `doctor` output with the experiment to identify model, spec, and calibration changes. The report does not repeat raw fixture text. Keep the original dataset beside the report.
 
-`evaluate` has these flags:
-
-- `--keep`: Has the same meaning as in triage (default `yes`, choice label, or minimum score index).
-- `--endpoint`: Overrides the spec endpoint.
-- `--timeout-ms`: Limits each HTTP request, including its response body. The default is 25,000.
+[Commands](../README.md#commands) lists the `evaluate` flags.
 
 Exit 0 means that all cases produced valid responses. It does not mean that the model is accurate. Exit 4 with a JSON report means that one or more cases failed. An invalid dataset exits 4 before inference, with a stderr diagnostic.
 

@@ -31,40 +31,40 @@ pub struct Decision {
 pub struct AskResponse {
     pub results: Vec<Decision>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct AskRequest {
     /// The text to judge. Treated as data, never as instructions.
     pub state: String,
     /// A named spec from the server config. Use this OR `questions`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub spec: Option<String>,
     /// Ad-hoc questions. Use this OR `spec`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub questions: Vec<Question>,
     /// Endpoint name; default = the spec's endpoint or the config default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub endpoint: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct TriageRequest {
     /// Items to judge (strings or JSON objects), at most 64.
     pub items: Vec<serde_json::Value>,
     /// Shared evidence for every item, treated as data. Contextual inputs must fit the endpoint limit.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub context: Option<String>,
     /// A named spec, OR `question` for an ad-hoc question.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub spec: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub question: Option<Question>,
     /// Verdict to keep: default "yes" (noul); an option name (choice); a minimum level index like "2" (score).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub keep: Option<String>,
     /// With an [embedder] configured: judge only the `top_k` items most similar to the question.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub top_k: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub endpoint: Option<String>,
 }
 
@@ -92,7 +92,7 @@ pub enum ServiceError {
     #[error("backend {endpoint}: {message}")]
     Backend { endpoint: String, message: String },
     #[error("store: {0}")]
-    Store(String),
+    Store(#[from] StoreError),
 }
 
 #[derive(Debug, Serialize)]
@@ -129,15 +129,7 @@ pub struct DoctorEndpoint {
     pub error: Option<String>,
 }
 
-impl From<StoreError> for ServiceError {
-    fn from(e: StoreError) -> Self {
-        Self::Store(e.to_string())
-    }
-}
-
 struct Judgment {
-    endpoint: String,
-    spec: Option<String>,
     decision: Decision,
     fresh: Option<NewDecision>,
 }
@@ -182,10 +174,9 @@ impl Service {
         &self.config.specs
     }
 
-    pub fn metrics(&self) -> Result<String, ServiceError> {
-        self.metrics
-            .render()
-            .map_err(|e| ServiceError::Store(format!("metrics encoding: {e}")))
+    #[must_use]
+    pub fn metrics(&self) -> String {
+        self.metrics.render()
     }
 
     fn backend_error(&self, name: &str, error: crate::backend::BackendError) -> ServiceError {
@@ -448,24 +439,12 @@ impl Service {
         } else {
             (Vec::new(), None)
         };
-        let question = &question;
-        let endpoint = &endpoint;
-        let spec = &request.spec;
+        let questions = std::slice::from_ref(&question);
+        let (endpoint, spec) = (&endpoint, request.spec.as_deref());
         let mut decisions =
             futures::future::try_join_all(items.into_iter().map(|(index, state)| async move {
-                let mut response = self
-                    .judge(AskRequest {
-                        state,
-                        spec: spec.clone(),
-                        questions: if spec.is_none() {
-                            vec![question.clone()]
-                        } else {
-                            Vec::new()
-                        },
-                        endpoint: Some(endpoint.clone()),
-                    })
-                    .await?;
-                Ok::<_, ServiceError>((index, response.remove(0)))
+                let mut judgments = self.judge(&state, spec, questions, endpoint).await?;
+                Ok::<_, ServiceError>((index, judgments.remove(0)))
             }))
             .await?;
         decisions.sort_by_key(|(index, _)| *index);
@@ -473,7 +452,7 @@ impl Service {
         let mut unsure = Vec::new();
         let mut rejected = Vec::new();
         let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
-        let decisions = self.persist(judgments).await?;
+        let decisions = self.persist(judgments, endpoint, spec).await?;
         for (index, decision) in indices.into_iter().zip(decisions) {
             let matches = if matches!(question.kind, Kind::Score { .. }) {
                 decision
@@ -580,12 +559,11 @@ impl Service {
                 .then_with(|| left.0.cmp(&right.0))
         });
         let mut prefiltered: Vec<_> = ranked
-            .iter()
-            .skip(top_k)
-            .map(|(index, _, _)| *index)
+            .split_off(top_k)
+            .into_iter()
+            .map(|(index, _, _)| index)
             .collect();
         prefiltered.sort_unstable();
-        ranked.truncate(top_k);
         *items = ranked
             .into_iter()
             .map(|(index, text, _)| (index, text))
@@ -595,10 +573,15 @@ impl Service {
     }
 
     pub async fn ask(&self, request: AskRequest) -> Result<AskResponse, ServiceError> {
-        let judgments = self.judge(request).await?;
+        let spec = request.spec.as_deref();
+        let (questions, endpoint) =
+            self.resolve_questions(spec, &request.questions, request.endpoint.as_deref())?;
+        let judgments = self
+            .judge(&request.state, spec, &questions, &endpoint)
+            .await?;
 
         Ok(AskResponse {
-            results: self.persist(judgments).await?,
+            results: self.persist(judgments, &endpoint, spec).await?,
         })
     }
 
@@ -640,27 +623,29 @@ impl Service {
         Ok((questions, name.into()))
     }
 
-    async fn judge(&self, request: AskRequest) -> Result<Vec<Judgment>, ServiceError> {
-        let (questions, name) = self.resolve_questions(
-            request.spec.as_deref(),
-            &request.questions,
-            request.endpoint.as_deref(),
-        )?;
-        let endpoint = &self.endpoints[&name];
-        let backend_error = |e| self.backend_error(&name, e);
+    /// Judges resolved questions; `resolve_questions` must have validated them and `name`.
+    async fn judge(
+        &self,
+        state: &str,
+        spec: Option<&str>,
+        questions: &[Question],
+        name: &str,
+    ) -> Result<Vec<Judgment>, ServiceError> {
+        let endpoint = &self.endpoints[name];
+        let backend_error = |e| self.backend_error(name, e);
         let info = endpoint.info().await.map_err(backend_error)?;
-        let state = endpoint.fitted(&request.state);
+        let state = endpoint.fitted(state);
         let state_hash = verdict::short_hash(&state);
         let mut cached = Vec::new();
         let mut uncached = Vec::new();
         let mut identities = Vec::new();
-        for question in &questions {
+        for question in questions {
             let question_hash = verdict::question_hash(question);
             let calibration_id =
                 verdict::calibration_id(&question_hash, info.kind, &info.fingerprint);
             let answer = self
                 .store
-                .cached(&calibration_id, &state_hash, request.spec.as_deref())
+                .cached(&calibration_id, &state_hash, spec)
                 .await?;
             if answer.is_none() {
                 uncached.push(question.clone());
@@ -679,7 +664,7 @@ impl Service {
         .into_iter();
         let mut judgments = Vec::with_capacity(questions.len());
         for ((question, cached_answer), (question_hash, calibration_id)) in
-            questions.into_iter().zip(cached).zip(identities)
+            questions.iter().zip(cached).zip(identities)
         {
             let (id, probabilities, cached) = cached_answer.map_or_else(
                 || {
@@ -691,7 +676,7 @@ impl Service {
                 },
                 |(id, probabilities)| (id, probabilities, true),
             );
-            let calibration = if request.spec.is_some() {
+            let calibration = if spec.is_some() {
                 self.store.calibration(&calibration_id).await?
             } else {
                 None
@@ -702,18 +687,18 @@ impl Service {
             let labels = question.kind.labels();
             let outcome = verdict::verdict(&question.kind, &probabilities, bands);
             let fresh = (!cached).then(|| NewDecision {
-                spec: request.spec.clone(),
+                spec: spec.map(Into::into),
                 question_hash,
                 calibration_id,
                 state_hash: state_hash.clone(),
                 state: state.clone(),
                 answer: probabilities.clone(),
                 verdict: outcome.clone(),
-                endpoint: name.clone(),
+                endpoint: name.into(),
             });
             let decision = Decision {
                 id,
-                question: question.id,
+                question: question.id.clone(),
                 question_type: question.kind.type_name().into(),
                 verdict: outcome,
                 confidence: verdict::confidence(&question.kind, &probabilities),
@@ -723,18 +708,18 @@ impl Service {
                 calibrated,
                 cached,
             };
-            judgments.push(Judgment {
-                endpoint: name.clone(),
-                spec: request.spec.clone(),
-                decision,
-                fresh,
-            });
+            judgments.push(Judgment { decision, fresh });
         }
 
         Ok(judgments)
     }
 
-    async fn persist(&self, mut judgments: Vec<Judgment>) -> Result<Vec<Decision>, ServiceError> {
+    async fn persist(
+        &self,
+        mut judgments: Vec<Judgment>,
+        endpoint: &str,
+        spec: Option<&str>,
+    ) -> Result<Vec<Decision>, ServiceError> {
         let fresh = judgments
             .iter_mut()
             .filter_map(|judgment| judgment.fresh.take())
@@ -752,11 +737,8 @@ impl Service {
                 if !judgment.decision.cached {
                     judgment.decision.id = ids.next().expect("id for each fresh decision");
                 }
-                self.metrics.record_decision(
-                    judgment.endpoint,
-                    judgment.spec,
-                    &judgment.decision.verdict,
-                );
+                self.metrics
+                    .record_decision(endpoint, spec, &judgment.decision.verdict);
                 judgment.decision
             })
             .collect())

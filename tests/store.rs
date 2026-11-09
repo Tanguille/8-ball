@@ -215,53 +215,9 @@ async fn pruned_ids_never_label_replacement_rows() {
     );
 }
 
-#[tokio::test]
-async fn existing_database_migrates_without_losing_labels_or_ids() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let id = 42;
-    let mut connection = fixture(&path).await;
-    sqlx::raw_sql(LEGACY_SCHEMA)
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    sqlx::raw_sql("INSERT INTO decisions VALUES (42,CURRENT_TIMESTAMP,'greeting','question','model-question','saved','hello','[0.9,0.1]','yes','d3','yes')")
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO calibrations VALUES ('cid','greeting',?1,?2)")
-        .bind(
-            serde_json::to_string(&Bands::Noul {
-                yes_at: 0.8,
-                no_at: 0.2,
-            })
-            .unwrap(),
-        )
-        .bind(serde_json::to_string(&report()).unwrap())
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    drop(connection);
-    let store = Store::open(&path).await.unwrap();
-    let (_, saved_report) = store.calibration("cid").await.unwrap().unwrap();
-    assert_eq!(saved_report.examples, 40);
-    let rows = store.labelled("greeting", "question").await.unwrap();
-    assert_eq!(rows[0].id, id);
-    assert_eq!(rows[0].label, "yes");
-    let old = insert(&store, decision("old")).await;
-    sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
-        .execute(&mut fixture(&path).await)
-        .await
-        .unwrap();
-    store.prune(0).await.unwrap();
-    let new = insert(&store, decision("new")).await;
-    assert!(new > old);
-    assert!(!store.set_label(old, "no").await.unwrap());
-}
-
 const LEGACY_SCHEMA: &str  =  "
 CREATE TABLE decisions (
- id INTEGER PRIMARY KEY, ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  spec TEXT, question_hash TEXT NOT NULL, calibration_id TEXT NOT NULL,
  state_hash TEXT NOT NULL, state TEXT NOT NULL, answer TEXT NOT NULL,
  verdict TEXT NOT NULL, endpoint TEXT NOT NULL, label TEXT);
@@ -275,13 +231,10 @@ async fn existing_autoincrement_preserves_deleted_highwater_and_calibration() {
     let directory = temp();
     let path = directory.path().join("db.sqlite");
     let mut connection = fixture(&path).await;
-    sqlx::raw_sql(sqlx::AssertSqlSafe(LEGACY_SCHEMA.replace(
-        "id INTEGER PRIMARY KEY,",
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,",
-    )))
-    .execute(&mut connection)
-    .await
-    .unwrap();
+    sqlx::raw_sql(LEGACY_SCHEMA)
+        .execute(&mut connection)
+        .await
+        .unwrap();
     sqlx::raw_sql("INSERT INTO decisions VALUES (100,CURRENT_TIMESTAMP,NULL,'question','model-question','old','hello','[0.9,0.1]','yes','d3',NULL); DELETE FROM decisions;")
         .execute(&mut connection)
         .await
@@ -365,100 +318,5 @@ async fn cache_preserves_null_scope_and_latest_row_and_rejects_bad_json() {
             .cached("model-question", "same", Some("greeting"))
             .await
             .is_err()
-    );
-}
-
-#[tokio::test]
-async fn concurrent_legacy_opens_preserve_rows_and_indexes() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let mut connection = fixture(&path).await;
-    sqlx::raw_sql(LEGACY_SCHEMA)
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    sqlx::raw_sql("INSERT INTO decisions VALUES (42,CURRENT_TIMESTAMP,'greeting','question','model-question','saved','hello','[0.9,0.1]','yes','d3','yes')")
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    drop(connection);
-    let (first_store, second_store) = tokio::join!(Store::open(&path), Store::open(&path));
-    let first_store = first_store.unwrap();
-    let second_store = second_store.unwrap();
-    assert_ne!(
-        insert(&first_store, decision("a")).await,
-        insert(&second_store, decision("b")).await
-    );
-    assert_eq!(
-        first_store.labelled("greeting", "question").await.unwrap()[0].id,
-        42
-    );
-    assert_eq!(
-        second_store.labelled("greeting", "question").await.unwrap()[0].label,
-        "yes"
-    );
-    let mut connection = fixture(&path).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND name IN ('decisions_cache','decisions_labelled')")
-            .fetch_one(&mut connection)
-            .await
-            .unwrap(),
-        2
-    );
-}
-
-#[tokio::test]
-async fn failed_legacy_upgrade_rolls_back_schema_and_data() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let mut connection = fixture(&path).await;
-    sqlx::raw_sql(sqlx::AssertSqlSafe(
-        LEGACY_SCHEMA.replace("state TEXT NOT NULL", "state TEXT"),
-    ))
-    .execute(&mut connection)
-    .await
-    .unwrap();
-    sqlx::raw_sql("INSERT INTO decisions VALUES (42,CURRENT_TIMESTAMP,'greeting','question','model-question','saved',NULL,'[0.9,0.1]','yes','d3','yes'); INSERT INTO calibrations VALUES ('cid','greeting','{}','{}');")
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    assert!(Store::open(&path).await.is_err());
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM decisions WHERE id=42 AND state IS NULL"
-        )
-        .fetch_one(&mut connection)
-        .await
-        .unwrap(),
-        1
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM calibrations")
-            .fetch_one(&mut connection)
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND name IN ('decisions_cache','decisions_labelled')")
-            .fetch_one(&mut connection)
-            .await
-            .unwrap(),
-        2
-    );
-    let schema: String = sqlx::query_scalar("SELECT sql FROM sqlite_schema WHERE name='decisions'")
-        .fetch_one(&mut connection)
-        .await
-        .unwrap();
-    assert!(!schema.contains("AUTOINCREMENT"));
-    sqlx::query("UPDATE decisions SET state='hello'")
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    drop(connection);
-    let store = Store::open(&path).await.unwrap();
-    assert_eq!(
-        store.labelled("greeting", "question").await.unwrap()[0].id,
-        42
     );
 }

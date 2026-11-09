@@ -11,7 +11,6 @@ pub async fn ask(
     futures::future::try_join_all(questions.iter().map(|question| async move {
         let (prompt, labels) = prompt(question, state)?;
         let mut body = serde_json::json!({
-            "model": endpoint.config.model,
             "max_tokens": 1,
             "temperature": 0,
             "logprobs": true,
@@ -21,13 +20,10 @@ pub async fn ask(
                 {"role": "user", "content": prompt}
             ]
         });
-        if let Some(extra) = &endpoint.config.extra_body {
-            let extra = serde_json::to_value(extra).map_err(|e| BackendError(e.to_string()))?;
-            body.as_object_mut()
-                .expect("request is object")
-                .extend(extra.as_object().expect("extra_body is table").clone());
+        for (key, value) in endpoint.config.extra_body.iter().flatten() {
+            body[key] = value.clone();
         }
-        let response = endpoint.post_json("/v1/chat/completions", &body).await?;
+        let response = endpoint.post_json("/v1/chat/completions", body).await?;
         let entries = response["choices"][0]["logprobs"]["content"][0]["top_logprobs"]
             .as_array()
             .ok_or_else(|| BackendError("missing top_logprobs".into()))?;

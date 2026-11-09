@@ -1,11 +1,16 @@
-use std::sync::Arc;
-
 use serde_json::{Value, json};
 use wiremock::{MockServer, ResponseTemplate, matchers};
 
-use eightball::service::{AskRequest, Service};
+use eightball::service::AskRequest;
 
-async fn app() -> (String, Arc<Service>, MockServer, tempfile::TempDir) {
+mod common;
+
+async fn app() -> (
+    String,
+    std::sync::Arc<eightball::service::Service>,
+    MockServer,
+    tempfile::TempDir,
+) {
     let mock = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/systemone"))
@@ -47,22 +52,8 @@ async fn app() -> (String, Arc<Service>, MockServer, tempfile::TempDir) {
             ),
         )
         .unwrap();
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    let service = Arc::new(Service::new(config, store));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    let served = service.clone();
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            eightball::http::router(served, None, &tokio_util::sync::CancellationToken::new()),
-        )
-        .await
-        .unwrap();
-    });
+    let (service, _, directory) = common::service(config).await;
+    let url = common::serve(service.clone(), None).await;
 
     (url, service, mock, directory)
 }
@@ -94,7 +85,7 @@ async fn backend_errors_are_counted() {
     )
     .unwrap();
     assert!(service.ask(request).await.is_err());
-    let text = service.metrics().unwrap();
+    let text = service.metrics();
     assert!(
         text.contains("eightball_backend_errors_total{endpoint=\"d3\"} 1"),
         "{text}"
@@ -107,7 +98,7 @@ async fn spec_verdict_and_cache_hits_are_counted() {
         serde_json::from_value(json!({"state":"hi","spec":"greeting"})).unwrap();
     service.ask(request.clone()).await.unwrap();
     assert!(service.ask(request).await.unwrap().results[0].cached);
-    let text = service.metrics().unwrap();
+    let text = service.metrics();
     assert!(
         text.contains(
             "eightball_decisions_total{endpoint=\"d3\",spec=\"greeting\",verdict=\"yes\"} 2"
