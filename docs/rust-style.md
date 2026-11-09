@@ -49,26 +49,6 @@ For critical ranges (for example, "must be 1..=100"), consider a small type with
 
 In existing code, tighten types in new code and at clear boundaries (new endpoints, database mappers). Avoid unrelated mass migrations of `i64` or `i32` across the codebase in one change set.
 
-## Strings
-
-The main UTF-8 text types in Rust are `String` (owned), `&str` (borrowed), and `Cow<'_, str>` (borrowed or allocated). See the [Rust book on strings](https://doc.rust-lang.org/book/ch08-02-strings.html) for indexing and UTF-8 pitfalls.
-
-### Choosing parameter types
-
-| Situation | Prefer |
-| --- | --- |
-| Read-only, borrowed text in most internal helpers | `&str`. It is the simplest type. `&String` and `&str` both coerce for callers ([`Deref`](https://doc.rust-lang.org/std/ops/trait.Deref.html) to `str`). |
-| Public or shared API that accepts `String`, `&str`, `Cow<str>`, and similar types without `&` at every call site | `impl AsRef<str>`. Call `s.as_ref()` once in the body. See [`AsRef`](https://doc.rust-lang.org/std/convert/trait.AsRef.html). |
-| Multiple string parameters that each need `AsRef<str>` | Separate type parameters, for example `S1: AsRef<str>, S2: AsRef<str>`. If callers can pass `&`, use `&str`. With one shared type parameter, the compiler can unify one type for both. |
-| Own or consume the text (store, mutate, move on) | `String` or `impl Into<String>`. `impl Into<String>` accepts `String` and `&str`, with an allocation cost for `&str`. |
-| Sometimes borrow, sometimes allocate (for example, an optional default) | `Cow<'_, str>`. |
-
-`impl AsRef<str>` is not the default everywhere, because it adds generic noise and monomorphization. Many codebases use `&str` for most functions. They reserve `AsRef<str>` for crate boundaries and for helpers called with mixed owned and borrowed strings. Use the type that matches the call sites without extra ceremony.
-
-### Paths
-
-Use `&Path`, `PathBuf`, or `impl AsRef<Path>` for filesystem paths. Do not use `AsRef<str>`, because paths are not always valid UTF-8 on all platforms. See [`std::path::Path`](https://doc.rust-lang.org/std/path/struct.Path.html).
-
 ## Imports
 
 If you import multiple items from the same path, use one `use` statement with a braced list. Use one `use` per path prefix.
@@ -182,8 +162,6 @@ Follow the [Rust style guide](https://doc.rust-lang.org/beta/style-guide/items.h
 
 - In each file, put all `use` statements first, in the [import order](#order) above. Then put all `mod` declarations. Then put the rest of the file (types, functions, re-exports, and other items).
 - Sort module declarations alphabetically (version-sort). Keep `#[cfg(...)]` attached to the `mod` that it applies to. rustfmt determines the layout. Sort only by the module name.
-- Feature-gated items follow the same order. Put a cfg-gated `use` in the `use` section. Put a cfg-gated `mod` in the `mod` section. Put a cfg-gated `pub use` or code in the rest. Do not group by feature at the expense of use-before-mod.
-- If a move can change semantics, do not move or reorder `#[macro_use]` or other attribute-annotated mods.
 
 ### Module file layout
 
