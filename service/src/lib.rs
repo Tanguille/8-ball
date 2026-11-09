@@ -275,7 +275,7 @@ impl Service {
     }
 
     pub async fn label(&self, id: i64, value: String) -> Result<LabelResponse, ServiceError> {
-        let (spec, question_hash) = self
+        let (spec, question_hash, _endpoint) = self
             .store
             .metadata(id)
             .await?
@@ -448,7 +448,7 @@ impl Service {
         let question_hash = verdict::question_hash(question);
         let calibration_id = verdict::calibration_id(&question_hash, info.kind, &info.fingerprint);
         let mut groups: IndexMap<String, Vec<store::Labelled>> = IndexMap::new();
-        for row in self.store.labelled(spec, &question_hash).await? {
+        for row in self.store.labelled(Some(spec), &question_hash).await? {
             groups.entry(row.state_hash.clone()).or_default().push(row);
         }
         let mut warnings = Vec::new();

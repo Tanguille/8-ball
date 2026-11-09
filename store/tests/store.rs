@@ -102,18 +102,18 @@ async fn labels_can_be_replaced_and_are_scoped() {
     let (_directory, _, store) = opened().await;
     let id = insert(&store, decision("first")).await;
     assert!(store.set_label(id, "yes").await.unwrap());
-    let rows = store.labelled("greeting", "question").await.unwrap();
+    let rows = store.labelled(Some("greeting"), "question").await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].label, "yes");
     assert_eq!(rows[0].id, id);
     store.set_label(id, "no").await.unwrap();
     assert_eq!(
-        store.labelled("greeting", "question").await.unwrap()[0].label,
+        store.labelled(Some("greeting"), "question").await.unwrap()[0].label,
         "no"
     );
     assert!(
         store
-            .labelled("greeting", "edited-question")
+            .labelled(Some("greeting"), "edited-question")
             .await
             .unwrap()
             .is_empty()
@@ -218,7 +218,7 @@ async fn pruned_ids_never_label_replacement_rows() {
     assert!(!reopened.set_label(old, "yes").await.unwrap());
     assert!(
         reopened
-            .labelled("greeting", "question")
+            .labelled(Some("greeting"), "question")
             .await
             .unwrap()
             .is_empty()
@@ -328,5 +328,86 @@ async fn cache_preserves_null_scope_and_latest_row_and_rejects_bad_json() {
             .cached("model-question", "same", Some("greeting"))
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn remembered_finds_the_newest_label_under_any_model() {
+    let (_directory, _, store) = opened().await;
+    let older = insert(&store, decision("same")).await;
+    let mut newer = decision("same");
+    newer.calibration_id = "other-model".into();
+    insert(&store, newer).await;
+    store.set_label(older, "no").await.unwrap();
+    let (id, answer, label) = store
+        .remembered(Some("greeting"), "question", "same")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((id, label.as_str()), (older, "no"));
+    assert!((answer[0] - 0.9).abs() < 1e-9);
+    assert!(
+        store
+            .remembered(None, "question", "same")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let mut anonymous = decision("same");
+    anonymous.spec = None;
+    let ad_hoc = insert(&store, anonymous).await;
+    store.set_label(ad_hoc, "yes").await.unwrap();
+    assert_eq!(
+        store
+            .remembered(None, "question", "same")
+            .await
+            .unwrap()
+            .unwrap()
+            .0,
+        ad_hoc
+    );
+    assert_eq!(
+        store
+            .remembered(Some("greeting"), "question", "same")
+            .await
+            .unwrap()
+            .unwrap()
+            .0,
+        older
+    );
+}
+
+#[tokio::test]
+async fn labelled_count_and_rows_are_scoped_by_spec() {
+    let (_directory, _, store) = opened().await;
+    let first = insert(&store, decision("one")).await;
+    let second = insert(&store, decision("two")).await;
+    insert(&store, decision("three")).await;
+    let mut anonymous = decision("one");
+    anonymous.spec = None;
+    let ad_hoc = insert(&store, anonymous).await;
+    for id in [first, second, ad_hoc] {
+        store.set_label(id, "yes").await.unwrap();
+    }
+    assert_eq!(
+        store
+            .labelled_count(Some("greeting"), "question")
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(store.labelled_count(None, "question").await.unwrap(), 1);
+    let rows = store.labelled(None, "question").await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, ad_hoc);
+}
+
+#[tokio::test]
+async fn metadata_returns_spec_question_and_endpoint() {
+    let (_directory, _, store) = opened().await;
+    let id = insert(&store, decision("one")).await;
+    assert_eq!(
+        store.metadata(id).await.unwrap(),
+        Some((Some("greeting".into()), "question".into(), "d3".into()))
     );
 }

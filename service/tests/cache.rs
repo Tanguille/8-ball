@@ -158,11 +158,11 @@ async fn cache_ids_and_labels_stay_in_the_requested_scope() {
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
     let qh = verdict::question_hash(&question);
     assert_eq!(
-        store.labelled("greeting", &qh).await.unwrap()[0].label,
+        store.labelled(Some("greeting"), &qh).await.unwrap()[0].label,
         "yes"
     );
     assert_eq!(
-        store.labelled("greeting-copy", &qh).await.unwrap()[0].label,
+        store.labelled(Some("greeting-copy"), &qh).await.unwrap()[0].label,
         "no"
     );
     assert!(service.label(ad.id, "yes".into()).await.is_err());

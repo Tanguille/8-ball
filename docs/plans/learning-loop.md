@@ -199,7 +199,7 @@ All chunks run one after another in the same worktree. Two chunks in one tree wo
 - [x] Chunk 1: `domain`: `Learning`, `explore_draw`, `calibration_key`, merging `calibrate`
 
 #### Wave 2 (sequential) — Store
-- [ ] Chunk 2: `store`: `remembered`, `labelled_count`, `labelled(Option)`, `metadata` with endpoint (depends on Chunk 1)
+- [x] Chunk 2: `store`: `remembered`, `labelled_count`, `labelled(Option)`, `metadata` with endpoint (depends on Chunk 1)
 
 #### Wave 3 (sequential) — Service
 - [ ] Chunk 3: `service` and `cli`: the learning loop (depends on Chunks 1 and 2)
@@ -299,7 +299,7 @@ feat(domain): add the [learning] config, exploration draws and band merging
 ---
 
 ### Chunk 2: `store`: remembered labels, label counts, decision endpoint
-**Status:** Not Started
+**Status:** Complete
 **Wave:** 2
 **Estimated Context:** ~30k tokens
 **Complexity:** Low
