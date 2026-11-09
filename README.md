@@ -187,7 +187,7 @@ If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authoriz
 | --- | --- | --- |
 | `POST /v1/ask`, `POST /v1/triage` | Yes | Take the input of `decision_ask` and `decision_triage`. |
 | `POST /v1/label`, `POST /v1/calibrate` | Yes | Take the CLI arguments as JSON: `id`, `value`, `spec`, `precision`, `dry_run`. |
-| `POST /v1/questions`, `POST /v1/decisions` | Yes | Take the CLI arguments as JSON: `limit`, `spec`, `question`, `unlabelled`. Lists hold at most 500 rows, and 50 by default. |
+| `POST /v1/questions`, `POST /v1/decisions` | Yes | Take the CLI arguments as JSON: `limit`, `spec`, `question`, `unlabelled`. `limit` is 1 to 500, and 50 by default. |
 | `GET /v1/doctor` | Yes | Return the `doctor` report. |
 | `/mcp` | Yes | Serve HTTP MCP. |
 | `GET /healthz` | No | Return `ok`. |
