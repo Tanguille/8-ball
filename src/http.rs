@@ -144,7 +144,16 @@ async fn require_bearer(
     next: middleware::Next,
 ) -> Response {
     let Some(key) = key else {
-        return next.run(request).await;
+        // Without a key only local clients may call, as for MCP. Checking Host stops a web page from reaching this
+        // server through DNS rebinding and reading stored decisions.
+        return if local_host(&request) {
+            next.run(request).await
+        } else {
+            error(
+                StatusCode::FORBIDDEN,
+                "without EIGHTBALL_API_KEY only localhost may call this; set a key to serve other hosts",
+            )
+        };
     };
     let given = request
         .headers()
@@ -163,6 +172,25 @@ async fn require_bearer(
     } else {
         error(StatusCode::UNAUTHORIZED, "missing or wrong bearer token")
     }
+}
+/// The Host header (or the HTTP/2 authority) names `localhost`, `127.0.0.1` or `::1`, the hosts rmcp allows by default.
+fn local_host(request: &axum::extract::Request) -> bool {
+    request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|host| axum::http::uri::Authority::try_from(host).ok())
+        .or_else(|| request.uri().authority().cloned())
+        .is_some_and(|authority| {
+            matches!(
+                authority
+                    .host()
+                    .trim_matches(['[', ']'])
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "localhost" | "127.0.0.1" | "::1"
+            )
+        })
 }
 async fn no_oauth() -> Response {
     error(

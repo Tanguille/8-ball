@@ -121,3 +121,32 @@ async fn keyless_server_accepts_empty_bearer_header() {
         .unwrap();
     assert_eq!(response.status(), 200);
 }
+#[tokio::test]
+async fn keyless_server_rejects_other_hosts() {
+    let (url, _mock, _dir) = app(None).await;
+    let port = url.rsplit_once(':').unwrap().1;
+    // A DNS-rebinding page reaches 127.0.0.1 but sends its own host name.
+    for (host, status) in [
+        ("rebind.example".to_owned(), 403),
+        (format!("rebind.example:{port}"), 403),
+        (format!("localhost:{port}"), 200),
+        (format!("[::1]:{port}"), 200),
+    ] {
+        let response = reqwest::Client::new()
+            .post(format!("{url}/v1/questions"))
+            .header("host", &host)
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "{host}");
+    }
+    // Public routes stay reachable.
+    let health = reqwest::Client::new()
+        .get(format!("{url}/healthz"))
+        .header("host", "rebind.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(health.status(), 200);
+}
