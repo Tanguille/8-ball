@@ -137,7 +137,7 @@ List `use` statements in this order, from top to bottom. Put one blank line betw
 
 1. std: The standard library (`use std::...`)
 2. External: Third-party crates.io crates (for example, `serde`, `tokio`, `axum`)
-3. Crates: The `eightball` library in the binary and integration tests, or any added workspace member crates
+3. Crates: The workspace members `domain`, `store`, `backend`, and `service`
 4. crate: The current crate (`use crate::...`)
 5. super: The parent module (`use super::...`)
 
@@ -149,9 +149,9 @@ use std::path::PathBuf;
 use serde::Serialize;
 use sqlx::SqlitePool;
 
-use eightball::config::Config;
+use domain::config::Config;
 
-use crate::{backend::Endpoint, service::Service};
+use crate::{evaluate::Report, metrics::Metrics};
 
 use super::BackendError;
 ```
@@ -169,7 +169,7 @@ Prefer the module-name-as-filename layout over top-level `mod.rs` files ([Rust b
 
 This layout prevents many files named `mod.rs` and keeps the module tree easy to follow. 8-ball always uses this layout. Do not add `mod.rs`.
 
-For example, prefer `src/backend.rs` with `src/backend/embed.rs` and `src/backend/rerank.rs`. Avoid `src/backend/mod.rs` with the same children, because the parent is then the redundant `mod.rs`.
+For example, prefer `src/parser.rs` with `src/parser/lexer.rs` and `src/parser/tokens.rs`. Avoid `src/parser/mod.rs` with the same children, because the parent is then the redundant `mod.rs`. A crate root is `src/lib.rs` or `src/main.rs`, so `backend/src/lib.rs` has `backend/src/embed.rs` beside it.
 
 ## Error Handling
 

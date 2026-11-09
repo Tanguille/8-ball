@@ -1,0 +1,25 @@
+[package]
+name = "backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+domain = { workspace = true }
+
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+axum = { workspace = true, features = ["http1", "json", "tokio"] }
+# test-util steps the clock in the info refresh test.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "test-util"] }
+toml = { workspace = true }
+wiremock = { workspace = true }

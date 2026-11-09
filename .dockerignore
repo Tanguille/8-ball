@@ -1,7 +1,13 @@
 **
 !Cargo.toml
 !Cargo.lock
-!src/
-!src/**
-!migrations/
-!migrations/**
+!domain/
+!domain/**
+!store/
+!store/**
+!backend/
+!backend/**
+!service/
+!service/**
+!cli/
+!cli/**

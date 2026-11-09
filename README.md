@@ -416,6 +416,8 @@ To uninstall, remove only `mcp.servers.8ball` from the configuration and the ski
 
 ## Development checks
 
+The code is a Cargo workspace. `domain` holds questions, configuration, and verdict math. `store` is the SQLite storage, `backend` calls the model servers, `service` is the logic with its REST and MCP routes, and `cli` is the `8ball` binary.
+
 Follow [AGENTS.md](AGENTS.md). Also check the image and the plugin:
 
 ```sh
