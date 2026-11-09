@@ -71,12 +71,18 @@ impl Config {
             path: path_string.clone(),
             source,
         })?;
+
+        Self::parse(&text, &path_string)
+    }
+
+    /// Parses TOML text. `source` names the text in errors, such as a path or an env var.
+    pub fn parse(text: &str, source: &str) -> Result<Self, ConfigError> {
         let invalid = |message| ConfigError::Invalid {
-            path: path_string.clone(),
+            path: source.into(),
             message,
         };
         let mut config: Self =
-            toml::from_str(&text).map_err(|e: toml::de::Error| invalid(e.to_string()))?;
+            toml::from_str(text).map_err(|e: toml::de::Error| invalid(e.to_string()))?;
         for endpoint in config.endpoints.values_mut() {
             endpoint.url = normalize_url(&endpoint.url);
         }

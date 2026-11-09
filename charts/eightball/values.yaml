@@ -77,6 +77,7 @@ serviceMonitor:
 
 persistence:
   # -- The 8-ball config.toml. Create a ConfigMap with a config.toml key, or change the name.
+  # To use no ConfigMap, set enabled: false here, and in the app env set EIGHTBALL_CONFIG: null and EIGHTBALL_CONFIG_TOML.
   config:
     type: configMap
     name: "{{ .Release.Name }}-config"

@@ -149,12 +149,36 @@ impl Remote {
     }
 }
 
+/// Where `serve` and `mcp` read their configuration.
+#[derive(clap::Args)]
+struct ConfigArgs {
+    #[arg(long, env = "EIGHTBALL_CONFIG")]
+    config: Option<PathBuf>,
+    /// Configuration TOML text, instead of a file.
+    #[arg(
+        long,
+        env = "EIGHTBALL_CONFIG_TOML",
+        conflicts_with = "config",
+        hide_env_values = true
+    )]
+    config_toml: Option<String>,
+}
+
+impl ConfigArgs {
+    fn load(self) -> anyhow::Result<Config> {
+        Ok(match self.config_toml {
+            Some(text) => Config::parse(&text, "EIGHTBALL_CONFIG_TOML")?,
+            None => Config::load(&self.config.unwrap_or_else(config::default_config_path))?,
+        })
+    }
+}
+
 #[derive(clap::Subcommand)]
 enum Command {
     /// Run the HTTP server (REST + MCP).
     Serve {
-        #[arg(long, env = "EIGHTBALL_CONFIG")]
-        config: Option<PathBuf>,
+        #[command(flatten)]
+        config: ConfigArgs,
         #[arg(long, env = "EIGHTBALL_LISTEN", default_value = "127.0.0.1:8080")]
         listen: String,
         #[arg(long, env = "EIGHTBALL_DB")]
@@ -164,8 +188,8 @@ enum Command {
     },
     /// Run MCP over stdin and stdout.
     Mcp {
-        #[arg(long, env = "EIGHTBALL_CONFIG")]
-        config: Option<PathBuf>,
+        #[command(flatten)]
+        config: ConfigArgs,
         #[arg(long, env = "EIGHTBALL_DB")]
         db: Option<PathBuf>,
     },
@@ -302,7 +326,7 @@ async fn shutdown() {
 }
 
 async fn serve(
-    config: Option<PathBuf>,
+    config: ConfigArgs,
     listen: String,
     db: Option<PathBuf>,
     api_key: Option<String>,
@@ -404,11 +428,8 @@ async fn ask(
     })
 }
 
-async fn build_service(
-    config: Option<PathBuf>,
-    db: Option<PathBuf>,
-) -> anyhow::Result<Arc<Service>> {
-    let config = Config::load(&config.unwrap_or_else(config::default_config_path))?;
+async fn build_service(config: ConfigArgs, db: Option<PathBuf>) -> anyhow::Result<Arc<Service>> {
+    let config = config.load()?;
     let store =
         eightball::store::Store::open(&db.unwrap_or_else(|| {
             config::xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
