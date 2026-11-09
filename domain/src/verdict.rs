@@ -257,25 +257,27 @@ fn decides(threshold: f64) -> bool {
 /// Thin evidence never makes a question less certain: a side without a deciding threshold
 /// keeps the previous one, else the default.
 fn merge(kind: &Kind, fitted: Bands, previous: Bands) -> Bands {
-    let pick = |fitted: f64, previous: Option<f64>, default: f64| {
+    let pick = |fitted: f64, previous: f64, default: f64| {
         if decides(fitted) {
             fitted
+        } else if decides(previous) {
+            previous
         } else {
-            previous.filter(|value| decides(*value)).unwrap_or(default)
+            default
         }
     };
-    match (fitted, Bands::default_for(kind)) {
+    match (fitted, previous, Bands::default_for(kind)) {
         (
             Bands::Noul { yes_at, no_at },
+            Bands::Noul {
+                yes_at: previous_yes,
+                no_at: previous_no,
+            },
             Bands::Noul {
                 yes_at: default_yes,
                 no_at: default_no,
             },
         ) => {
-            let (previous_yes, previous_no) = match previous {
-                Bands::Noul { yes_at, no_at } => (Some(yes_at), Some(no_at)),
-                Bands::Level { .. } => (None, None),
-            };
             let yes_at = pick(yes_at, previous_yes, default_yes);
             let no_at = pick(no_at, previous_no, default_no);
             if yes_at <= no_at {
@@ -287,19 +289,15 @@ fn merge(kind: &Kind, fitted: Bands, previous: Bands) -> Bands {
         (
             Bands::Level { min_confidence },
             Bands::Level {
+                min_confidence: previous,
+            },
+            Bands::Level {
                 min_confidence: default,
             },
-        ) => {
-            let previous = match previous {
-                Bands::Level { min_confidence } => Some(min_confidence),
-                Bands::Noul { .. } => None,
-            };
-
-            Bands::Level {
-                min_confidence: pick(min_confidence, previous, default),
-            }
-        }
-        // calibrate fits bands of the kind's own shape, so this never happens.
+        ) => Bands::Level {
+            min_confidence: pick(min_confidence, previous, default),
+        },
+        // Fitted and previous bands share the kind's shape: the calibration id includes the kind.
         _ => fitted,
     }
 }

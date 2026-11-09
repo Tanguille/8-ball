@@ -4,7 +4,7 @@ use sqlx::SqlSafeStr;
 
 use domain::{
     Probs,
-    verdict::{Bands, Report},
+    verdict::{self, Bands, Report},
 };
 
 #[derive(Clone)]
@@ -246,18 +246,20 @@ impl Store {
         usize::try_from(count).map_err(|e| StoreError(e.to_string()))
     }
 
+    /// Stores bands under `calibration_key`, so an ad-hoc question never shares a spec's calibration.
     pub async fn put_calibration(
         &self,
         calibration_id: &str,
-        spec: &str,
+        spec: Option<&str>,
         bands: &Bands,
         report: &Report,
     ) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO calibrations (calibration_id,spec,bands,report) VALUES (?1,?2,?3,?4) ON CONFLICT(calibration_id) DO UPDATE SET bands=excluded.bands,report=excluded.report",
         )
-            .bind(calibration_id)
-            .bind(spec)
+            .bind(verdict::calibration_key(calibration_id, spec))
+            // The column is NOT NULL: an ad-hoc calibration stores an empty spec.
+            .bind(spec.unwrap_or(""))
             .bind(serde_json::to_string(bands)?)
             .bind(serde_json::to_string(report)?)
             .execute(&self.pool)
@@ -269,10 +271,11 @@ impl Store {
     pub async fn calibration(
         &self,
         calibration_id: &str,
+        spec: Option<&str>,
     ) -> Result<Option<(Bands, Report)>, StoreError> {
         let row: Option<(String, String)> =
             sqlx::query_as("SELECT bands,report FROM calibrations WHERE calibration_id=?1")
-                .bind(calibration_id)
+                .bind(verdict::calibration_key(calibration_id, spec))
                 .fetch_optional(&self.pool)
                 .await?;
 

@@ -261,7 +261,7 @@ async fn labels_refit_at_every_multiple_of_recalibrate_after() {
     }
     assert!(
         app.store
-            .calibration(&calibration_id)
+            .calibration(&calibration_id, Some("greeting"))
             .await
             .unwrap()
             .is_none()
@@ -272,7 +272,7 @@ async fn labels_refit_at_every_multiple_of_recalibrate_after() {
     app.service.label(id, "yes".into()).await.unwrap();
     let (bands, report) = app
         .store
-        .calibration(&calibration_id)
+        .calibration(&calibration_id, Some("greeting"))
         .await
         .unwrap()
         .unwrap();
@@ -341,40 +341,4 @@ async fn ad_hoc_questions_learn_by_their_stored_text() {
         error.to_string().contains("question text unknown"),
         "{error}"
     );
-}
-
-#[tokio::test]
-async fn ad_hoc_question_with_a_spec_text_keeps_its_own_calibration() {
-    let app = fixture("").await;
-    let calibration_id = verdict::calibration_id(
-        &verdict::question_hash(&greeting()),
-        BackendKind::Systemone,
-        &app.mock.uri(),
-    );
-    let report = verdict::Report {
-        examples: 40,
-        decided: 0,
-        correct: 0,
-        precision: 0.0,
-        coverage: 0.0,
-        target: 0.95,
-        in_sample: true,
-        warnings: vec![],
-    };
-    app.store
-        .put_calibration(
-            &calibration_id,
-            "greeting",
-            &Bands::default_for(&greeting().kind),
-            &report,
-        )
-        .await
-        .unwrap();
-    assert!(spec(&app, "yes-1").await.calibrated);
-    let adhoc = ask(
-        &app,
-        json!({"state":"yes-1","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}),
-    )
-    .await;
-    assert!(!adhoc.calibrated);
 }

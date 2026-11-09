@@ -151,7 +151,7 @@ async fn calibration_upsert_keeps_latest_bands() {
     store
         .put_calibration(
             "cid",
-            "greeting",
+            Some("greeting"),
             &Bands::Noul {
                 yes_at: 0.9,
                 no_at: 0.1,
@@ -163,7 +163,7 @@ async fn calibration_upsert_keeps_latest_bands() {
     store
         .put_calibration(
             "cid",
-            "greeting",
+            Some("greeting"),
             &Bands::Noul {
                 yes_at: 0.8,
                 no_at: 0.2,
@@ -172,7 +172,11 @@ async fn calibration_upsert_keeps_latest_bands() {
         )
         .await
         .unwrap();
-    let (bands, report) = store.calibration("cid").await.unwrap().unwrap();
+    let (bands, report) = store
+        .calibration("cid", Some("greeting"))
+        .await
+        .unwrap()
+        .unwrap();
     let Bands::Noul { yes_at, no_at } = bands else {
         panic!("noul bands")
     };
@@ -263,7 +267,11 @@ async fn existing_autoincrement_preserves_deleted_highwater_and_calibration() {
     for _ in 0..2 {
         let store = Store::open(&path).await.unwrap();
         assert!(insert(&store, decision("new")).await > 100);
-        let (saved, report) = store.calibration("cid").await.unwrap().unwrap();
+        let (saved, report) = store
+            .calibration("cid", Some("greeting"))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             serde_json::to_value(saved).unwrap(),
             serde_json::to_value(bands).unwrap()

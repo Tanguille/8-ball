@@ -240,28 +240,23 @@ pub struct DoctorEndpoint {
 struct Judgment {
     decision: Decision,
     fresh: Option<NewDecision>,
-    question_hash: String,
-    state_hash: String,
+    /// `verdict::explore_draw` for this question and state.
+    explore_draw: f64,
     /// A spec, or an ad-hoc question whose text `label` can read.
     learnable: bool,
 }
 
-/// One question's stored inputs, read before the model call.
-struct Lookup {
-    source: Source,
-    question_hash: String,
-    calibration_id: String,
-    /// Calibrated bands, if any.
-    bands: Option<Bands>,
-    learnable: bool,
+/// What the caller does with a verdict, which decides whether `learn` reports or explores it.
+enum Action {
+    /// The caller would not work on it.
+    Skip,
+    /// The caller works on it.
+    Work,
+    Other,
 }
 
-/// Where a judgment's probabilities come from. Only `Fresh` questions go to the model.
-enum Source {
-    Remembered(i64, Probs, String),
-    Cached(i64, Probs),
-    Fresh,
-}
+/// A stored answer that saves a model call: `(id, probabilities, remembered label)`.
+type Stored = Option<(i64, Probs, Option<String>)>;
 
 pub struct Service {
     config: Config,
@@ -304,6 +299,11 @@ impl Service {
 
     pub(crate) const fn learning(&self) -> &Learning {
         &self.config.learning
+    }
+
+    /// `label` accepts decisions of a spec, or of an ad-hoc question with stored text while `learning.ad_hoc` is on.
+    const fn learnable(&self, spec: Option<&str>, has_text: bool) -> bool {
+        spec.is_some() || (self.config.learning.ad_hoc && has_text)
     }
 
     pub(crate) const fn specs(&self) -> &IndexMap<String, domain::config::SpecConfig> {
@@ -368,7 +368,7 @@ impl Service {
 
     /// The stored text of an ad-hoc question, which `label` checks values against.
     async fn ad_hoc_question(&self, question_hash: &str) -> Result<Question, ServiceError> {
-        if !self.config.learning.ad_hoc {
+        if !self.learnable(None, true) {
             return Err(ServiceError::BadRequest(
                 "ad-hoc question: save it as a spec in the config first".into(),
             ));
@@ -406,7 +406,15 @@ impl Service {
         let Ok(_refit) = self.refit.try_lock() else {
             return Ok(());
         };
-        self.calibrate_question(spec, question, endpoint, None, false, true)
+        let calibration_id = self
+            .calibration_id(endpoint, &verdict::question_hash(question))
+            .await?;
+        let previous = self
+            .store
+            .calibration(&calibration_id, spec)
+            .await?
+            .map_or_else(|| Bands::default_for(&question.kind), |(bands, _)| bands);
+        self.calibrate_question(spec, question, endpoint, None, false, Some(previous))
             .await?;
 
         Ok(())
@@ -424,9 +432,12 @@ impl Service {
                     .spec
                     .as_deref()
                     .and_then(|spec| self.spec_question(spec).ok());
-                let ad_hoc = row.spec.is_none() && self.config.learning.ad_hoc;
-                let (labelable, question) =
-                    shown_question(current, &row.question_hash, row.question, ad_hoc);
+                let (labelable, question) = self.shown_question(
+                    row.spec.as_deref(),
+                    current,
+                    &row.question_hash,
+                    row.question,
+                );
                 QuestionSummary {
                     spec: row.spec,
                     question_hash: row.question_hash,
@@ -459,11 +470,11 @@ impl Service {
                 return Err(ServiceError::BadRequest("give spec or question".into()));
             }
         };
-        let (labelable, question) = shown_question(
+        let (labelable, question) = self.shown_question(
+            request.spec.as_deref(),
             current,
             &question_hash,
             self.store.question(&question_hash).await?,
-            request.spec.is_none() && self.config.learning.ad_hoc,
         );
         let labels = question
             .clone()
@@ -506,6 +517,34 @@ impl Service {
         })
     }
 
+    /// Whether `label` accepts decisions of `question_hash`, and the question to show.
+    /// `label` accepts the current version of a spec, and an ad-hoc question by `learnable`.
+    fn shown_question(
+        &self,
+        spec: Option<&str>,
+        current: Option<Question>,
+        question_hash: &str,
+        stored: Option<String>,
+    ) -> (bool, Option<serde_json::Value>) {
+        let labelable = if spec.is_some() {
+            current
+                .as_ref()
+                .is_some_and(|question| verdict::question_hash(question) == question_hash)
+        } else {
+            self.learnable(spec, stored.is_some())
+        };
+        // Decisions from before the questions table still show the current spec text.
+        let question = stored
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .or_else(|| {
+                current
+                    .filter(|_| labelable)
+                    .map(|question| stored_question(&question))
+            });
+
+        (labelable, question)
+    }
+
     pub async fn review(&self, request: ReviewRequest) -> Result<ReviewResponse, ServiceError> {
         let question = self.spec_question(&request.spec)?;
         let decisions = self
@@ -544,21 +583,16 @@ impl Service {
     ) -> Result<CalibrateResponse, ServiceError> {
         let (questions, name) = self.resolve_questions(Some(spec), &[], None)?;
 
-        self.calibrate_question(Some(spec), &questions[0], &name, precision, dry_run, false)
+        self.calibrate_question(Some(spec), &questions[0], &name, precision, dry_run, None)
             .await
     }
 
-    /// Fits a question's bands to its labels. `auto` uses only answers cached under the current model,
-    /// and keeps a side's previous threshold when the labels cannot set it.
-    async fn calibrate_question(
+    /// A question's calibration id under endpoint `name`.
+    async fn calibration_id(
         &self,
-        spec: Option<&str>,
-        question: &Question,
         name: &str,
-        precision: Option<f64>,
-        dry_run: bool,
-        auto: bool,
-    ) -> Result<CalibrateResponse, ServiceError> {
+        question_hash: &str,
+    ) -> Result<String, ServiceError> {
         let endpoint = self
             .endpoints
             .get(name)
@@ -567,9 +601,28 @@ impl Service {
             .info()
             .await
             .map_err(|e| self.backend_error(name, e))?;
+
+        Ok(verdict::calibration_id(
+            question_hash,
+            info.kind,
+            &info.fingerprint,
+        ))
+    }
+
+    /// Fits a question's bands to its labels. With `previous` bands (an automatic refit), it uses only
+    /// answers cached under the current model, keeps a side's previous threshold when the labels cannot
+    /// set it, and stores nothing when the bands do not change.
+    async fn calibrate_question(
+        &self,
+        spec: Option<&str>,
+        question: &Question,
+        name: &str,
+        precision: Option<f64>,
+        dry_run: bool,
+        previous: Option<Bands>,
+    ) -> Result<CalibrateResponse, ServiceError> {
         let question_hash = verdict::question_hash(question);
-        let calibration_id = verdict::calibration_id(&question_hash, info.kind, &info.fingerprint);
-        let key = verdict::calibration_key(&calibration_id, spec);
+        let calibration_id = self.calibration_id(name, &question_hash).await?;
         let mut groups: IndexMap<String, Vec<store::Labelled>> = IndexMap::new();
         for row in self.store.labelled(spec, &question_hash).await? {
             groups.entry(row.state_hash.clone()).or_default().push(row);
@@ -593,7 +646,7 @@ impl Service {
                 .await?
             {
                 probabilities
-            } else if auto {
+            } else if previous.is_some() {
                 continue;
             } else {
                 // Never remember here: a fit must use the model's answers, not the labels themselves.
@@ -618,16 +671,6 @@ impl Service {
                 label: first.label.clone(),
             });
         }
-        let previous = if auto {
-            Some(
-                self.store
-                    .calibration(&key)
-                    .await?
-                    .map_or_else(|| Bands::default_for(&question.kind), |(bands, _)| bands),
-            )
-        } else {
-            None
-        };
         let (bands, mut report) = verdict::calibrate(
             &question.kind,
             &examples,
@@ -640,13 +683,13 @@ impl Service {
         let stored = !dry_run && previous != Some(bands);
         if stored {
             self.store
-                .put_calibration(&key, spec.unwrap_or(""), &bands, &report)
+                .put_calibration(&calibration_id, spec, &bands, &report)
                 .await?;
         }
 
         Ok(CalibrateResponse {
             spec: spec.unwrap_or("").into(),
-            calibration_id: key,
+            calibration_id,
             bands,
             report,
             stored,
@@ -723,7 +766,7 @@ impl Service {
                         &info.fingerprint,
                     );
                     status["calibration_id"] = serde_json::json!(calibration_id);
-                    match self.store.calibration(&calibration_id).await {
+                    match self.store.calibration(&calibration_id, Some(name)).await {
                         Ok(Some((_, report))) => {
                             status["calibrated"] = serde_json::json!(true);
                             status["report"] = serde_json::json!(report);
@@ -815,10 +858,18 @@ impl Service {
             }
         };
         // Before the split, so an explored item lands in `unsure`.
-        for (_, judgment) in &mut decisions {
-            let worked = matches(&judgment.decision.verdict);
-            let skipped = !worked && judgment.decision.verdict != "unsure";
-            self.learn(judgment, request.learn, skipped, worked);
+        if request.learn {
+            for (_, judgment) in &mut decisions {
+                let verdict = &judgment.decision.verdict;
+                let action = if matches(verdict) {
+                    Action::Work
+                } else if verdict == "unsure" {
+                    Action::Other
+                } else {
+                    Action::Skip
+                };
+                self.learn(judgment, &action);
+            }
         }
         let mut kept = Vec::new();
         let mut unsure = Vec::new();
@@ -945,12 +996,17 @@ impl Service {
         let mut judgments = self
             .judge(&request.state, spec, &questions, &endpoint, remember)
             .await?;
-        for (judgment, question) in judgments.iter_mut().zip(&questions) {
-            // A caller works on a noul `yes` and skips a `no`; choices and scores are worked only when unsure.
-            let noul = matches!(question.kind, Kind::Noul { .. });
-            let skipped = noul && judgment.decision.verdict == "no";
-            let worked = noul && judgment.decision.verdict == "yes";
-            self.learn(judgment, request.learn, skipped, worked);
+        if request.learn {
+            for (judgment, question) in judgments.iter_mut().zip(&questions) {
+                // A caller works on a noul `yes` and skips a `no`; choices and scores are worked only when unsure.
+                let noul = matches!(question.kind, Kind::Noul { .. });
+                let action = match judgment.decision.verdict.as_str() {
+                    "no" if noul => Action::Skip,
+                    "yes" if noul => Action::Work,
+                    _ => Action::Other,
+                };
+                self.learn(judgment, &action);
+            }
         }
 
         Ok(AskResponse {
@@ -1021,13 +1077,13 @@ impl Service {
             let question_hash = verdict::question_hash(question);
             let calibration_id =
                 verdict::calibration_id(&question_hash, info.kind, &info.fingerprint);
-            let lookup = self
-                .lookup(spec, question_hash, calibration_id, &state_hash, remember)
+            let (stored, bands, learnable) = self
+                .lookup(spec, &question_hash, &calibration_id, &state_hash, remember)
                 .await?;
-            if matches!(lookup.source, Source::Fresh) {
+            if stored.is_none() {
                 uncached.push(question.clone());
             }
-            lookups.push(lookup);
+            lookups.push((question_hash, calibration_id, stored, bands, learnable));
         }
         let mut answers = if uncached.is_empty() {
             Vec::new()
@@ -1039,17 +1095,15 @@ impl Service {
         }
         .into_iter();
         let mut judgments = Vec::with_capacity(questions.len());
-        for (question, lookup) in questions.iter().zip(lookups) {
-            let calibrated = lookup.bands.is_some();
-            let bands = lookup
-                .bands
-                .unwrap_or_else(|| Bands::default_for(&question.kind));
-            let (id, probabilities, cached, label) = match lookup.source {
-                Source::Remembered(id, probabilities, label) => {
-                    (id, probabilities, true, Some(label))
-                }
-                Source::Cached(id, probabilities) => (id, probabilities, true, None),
-                Source::Fresh => (
+        for (question, (question_hash, calibration_id, stored, bands, learnable)) in
+            questions.iter().zip(lookups)
+        {
+            let calibrated = bands.is_some();
+            let bands = bands.unwrap_or_else(|| Bands::default_for(&question.kind));
+            let explore_draw = verdict::explore_draw(&question_hash, &state_hash);
+            let (id, probabilities, cached, label) = match stored {
+                Some((id, probabilities, label)) => (id, probabilities, true, label),
+                None => (
                     0,
                     answers.next().expect("one probability vector per question"),
                     false,
@@ -1062,8 +1116,8 @@ impl Service {
             let fresh = (!cached).then(|| NewDecision {
                 spec: spec.map(Into::into),
                 question: stored_question(question).to_string(),
-                question_hash: lookup.question_hash.clone(),
-                calibration_id: lookup.calibration_id,
+                question_hash,
+                calibration_id,
                 state_hash: state_hash.clone(),
                 state: state.clone(),
                 answer: probabilities.clone(),
@@ -1093,81 +1147,75 @@ impl Service {
             judgments.push(Judgment {
                 decision,
                 fresh,
-                question_hash: lookup.question_hash,
-                state_hash: state_hash.clone(),
-                learnable: lookup.learnable,
+                explore_draw,
+                learnable,
             });
         }
 
         Ok(judgments)
     }
 
-    /// Reads what the store knows about one question and state, before the model call.
+    /// Reads what the store knows about one question and state, before the model call:
+    /// a stored answer, calibrated bands if any, and whether the question is learnable.
     async fn lookup(
         &self,
         spec: Option<&str>,
-        question_hash: String,
-        calibration_id: String,
+        question_hash: &str,
+        calibration_id: &str,
         state_hash: &str,
         remember: bool,
-    ) -> Result<Lookup, ServiceError> {
-        let ad_hoc = self.config.learning.ad_hoc;
-        let mut learnable =
-            spec.is_some() || (ad_hoc && self.store.question(&question_hash).await?.is_some());
+    ) -> Result<(Stored, Option<Bands>, bool), ServiceError> {
+        // Only an ad-hoc question needs its stored text to be learnable; a spec always is.
+        let has_text = spec.is_none()
+            && self.config.learning.ad_hoc
+            && self.store.question(question_hash).await?.is_some();
+        let learnable = self.learnable(spec, has_text);
         let bands = if learnable {
-            let key = verdict::calibration_key(&calibration_id, spec);
-            self.store.calibration(&key).await?.map(|(bands, _)| bands)
+            self.store
+                .calibration(calibration_id, spec)
+                .await?
+                .map(|(bands, _)| bands)
         } else {
             None
         };
         let remembered = if remember && learnable {
             self.store
-                .remembered(spec, &question_hash, state_hash)
+                .remembered(spec, question_hash, state_hash)
                 .await?
         } else {
             None
         };
-        let source = if let Some((id, probabilities, label)) = remembered {
-            Source::Remembered(id, probabilities, label)
-        } else if let Some((id, probabilities)) =
-            self.store.cached(&calibration_id, state_hash, spec).await?
-        {
-            Source::Cached(id, probabilities)
+        let stored = if let Some((id, probabilities, label)) = remembered {
+            Some((id, probabilities, Some(label)))
         } else {
-            // `persist` stores the text of a fresh ad-hoc question, so `label` can read it.
-            learnable |= ad_hoc;
-            Source::Fresh
+            self.store
+                .cached(calibration_id, state_hash, spec)
+                .await?
+                .map(|(id, probabilities)| (id, probabilities, None))
         };
+        // `persist` stores the text of a fresh ad-hoc question, so `label` can read it.
+        let learnable = self.learnable(spec, has_text || stored.is_none());
 
-        Ok(Lookup {
-            source,
-            question_hash,
-            calibration_id,
-            bands,
-            learnable,
-        })
+        Ok((stored, bands, learnable))
     }
 
     /// Marks a decision to report, or explores a skipped one, after `judge` and before `persist`.
-    /// `skipped`: the caller would not work on this verdict. `worked`: the caller works on it.
     /// The stored row keeps the model's verdict; only the returned decision changes.
-    fn learn(&self, judgment: &mut Judgment, learn: bool, skipped: bool, worked: bool) {
+    fn learn(&self, judgment: &mut Judgment, action: &Action) {
         let learning = &self.config.learning;
         let decision = &mut judgment.decision;
-        if !learn || !learning.report || !judgment.learnable || decision.remembered {
+        if !learning.report || !judgment.learnable || decision.remembered {
             return;
         }
-        if skipped
-            && verdict::explore_draw(&judgment.question_hash, &judgment.state_hash)
-                < learning.explore
-        {
-            decision.verdict = "unsure".into();
-            decision.explored = true;
-            decision.report = true;
-
-            return;
+        match action {
+            Action::Skip if judgment.explore_draw < learning.explore => {
+                decision.verdict = "unsure".into();
+                decision.explored = true;
+                decision.report = true;
+            }
+            Action::Work => decision.report = true,
+            Action::Skip | Action::Other => decision.report = decision.verdict == "unsure",
         }
-        decision.report = worked || decision.verdict == "unsure";
     }
 
     async fn persist(
@@ -1218,29 +1266,4 @@ fn stored_question(question: &Question) -> serde_json::Value {
         .remove("id");
 
     value
-}
-
-/// Whether `label` accepts decisions of `question_hash`, and the question to show.
-/// `label` accepts the current spec version, and with `ad_hoc` (an ad-hoc question while `learning.ad_hoc` is on) any stored text.
-fn shown_question(
-    current: Option<Question>,
-    question_hash: &str,
-    stored: Option<String>,
-    ad_hoc: bool,
-) -> (bool, Option<serde_json::Value>) {
-    let ad_hoc = ad_hoc && stored.is_some();
-    let labelable = ad_hoc
-        || current
-            .as_ref()
-            .is_some_and(|question| verdict::question_hash(question) == question_hash);
-    // Decisions from before the questions table still show the current spec text.
-    let question = stored
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .or_else(|| {
-            current
-                .filter(|_| labelable)
-                .map(|question| stored_question(&question))
-        });
-
-    (labelable, question)
 }
