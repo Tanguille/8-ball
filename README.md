@@ -151,6 +151,8 @@ A spec is a named question in the configuration. The state is the text to judge.
 | `triage [<instructions>]` | Judge a JSON array from stdin with one question or a `--spec`, not both. `--type` sets the question type (default `noul`). `--context-file` names a UTF-8 file with shared evidence for every item. `--top-k` judges only the items most similar to the question and needs `[embedder]`. |
 | `observe` | Record the triage decisions of a snapshot in a private file. Print JSON with `wakeAgent: true` and every candidate. It requires `--spec`, `--input` (JSON with `context` text and at most 64 `items`), and `--observations` (a new JSONL file, never overwritten). |
 | `evaluate` | Replay labeled JSONL cases from stdin against a required `--spec`. Report misses, `unsure` verdicts, errors, and latency. Calibration does not change. |
+| `questions` | List the stored questions with their decision, `unsure`, and label counts. Find ad-hoc questions that come back often, and save them as specs. |
+| `decisions --spec <spec>` | List the stored decisions of the current spec version, newest first, with verdicts and states. `--unlabelled` hides labeled ones. `--question <hash>` lists an ad-hoc question, or an older spec version together with `--spec`. |
 | `label <id> <value>` | Label a saved decision of a current spec. The value is `yes`, `no`, an option name, or a level index. |
 | `calibrate <spec>` | Fit bands (decision thresholds) from labeled states. `--precision` takes 0.5 to 0.99 and defaults to 0.95. `--dry-run` reports without a save. |
 | `doctor` | Report endpoint detection, health, model fingerprints, and spec calibration. |
@@ -179,12 +181,13 @@ A spec is a named question in the configuration. The state is the text to judge.
 
 ## HTTP routes
 
-If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authorization: Bearer <key>`. A missing or wrong key returns 401. Without a key, `/mcp` accepts only the hosts `localhost`, `127.0.0.1`, and `::1`.
+If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authorization: Bearer <key>`. A missing or wrong key returns 401. Without a key, `/mcp` and `/v1` accept only the hosts `localhost`, `127.0.0.1`, and `::1`, and other hosts get 403. This check stops a web page from reaching a local server through DNS rebinding. To serve other hosts, set a key.
 
 | Route | Protected | Purpose |
 | --- | --- | --- |
 | `POST /v1/ask`, `POST /v1/triage` | Yes | Take the input of `decision_ask` and `decision_triage`. |
 | `POST /v1/label`, `POST /v1/calibrate` | Yes | Take the CLI arguments as JSON: `id`, `value`, `spec`, `precision`, `dry_run`. |
+| `POST /v1/questions`, `POST /v1/decisions` | Yes | Take the CLI arguments as JSON: `limit`, `spec`, `question`, `unlabelled`. `limit` is 1 to 500, and 50 by default. |
 | `GET /v1/doctor` | Yes | Return the `doctor` report. |
 | `/mcp` | Yes | Serve HTTP MCP. |
 | `GET /healthz` | No | Return `ok`. |
@@ -199,6 +202,9 @@ Service and authentication errors are JSON with an `error` field. Rejected reque
 | --- | --- |
 | `decision_ask` | Ask typed questions about `state`. It takes `spec` or `questions`, and an optional `endpoint`. |
 | `decision_triage` | Judge at most 64 `items` with one `spec` or `question`. It also takes optional `context`, `keep`, `top_k`, and `endpoint`. |
+| `decision_questions` | List the stored questions with their decision, `unsure`, and label counts. |
+| `decision_review` | List the unlabeled decisions of a `spec` with their ids and states. It leaves out the model's answer, so a label stays independent. |
+| `decision_label` | Label a decision `id` with a `value`, as `label` does. |
 
 ## Configuration reference
 
@@ -253,7 +259,7 @@ Bands select the decisive verdicts at the requested precision. The other verdict
 To calibrate a spec:
 
 1. Save the question as a reviewed spec in the configuration.
-2. Label at least 20 real decisions per side with their numeric row ids.
+2. Label at least 20 real decisions per side. `8ball decisions --spec <spec> --unlabelled` lists them, and `8ball label <id> <value>` saves a label. An agent can do the same with `decision_review` and `decision_label`. Label only from evidence, such as the outcome of the work.
 3. Run `8ball calibrate <spec>`.
 
 Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model file invalidates its calibration identity. A new llama.cpp build of the same file does not. 8-ball checks the model again every minute. Ad-hoc questions always use the default bands.
@@ -270,7 +276,7 @@ The logprob backend needs a one-token answer, so you must disable reasoning. Set
 
 Storage uses SQLx with bundled SQLite, so you need no database server or SQLx CLI. Startup applies embedded migrations and keeps decisions, labels, calibrations, and id counters, including from the original v1 database. Before an upgrade, back up an existing database with a SQLite-aware tool. This backup includes committed data in the WAL (the SQLite write-ahead log). SQLite is the only supported database. PostgreSQL and persistent vector search are future work.
 
-The database stores the raw text of every successful decision, with file mode 0600. `retention_days` never deletes labeled rows. The [Helm chart](#helm-chart) is in this repository. Backups are outside it. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
+The database stores the raw text of every successful decision and of its question, with file mode 0600. `retention_days` never deletes labeled rows. It deletes a question's text when no decision uses that question any more. The [Helm chart](#helm-chart) is in this repository. Backups are outside it. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
 
 Before you send private data to a shared server, read the policy of its operator.
 

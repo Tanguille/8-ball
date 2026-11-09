@@ -231,6 +231,7 @@ async fn conflicting_labels_are_excluded() {
         .insert_many(vec![eightball::store::NewDecision {
             spec: Some("greeting".into()),
             question_hash: verdict::question_hash(&question),
+            question: "{}".into(),
             calibration_id: "previous-model".into(),
             state_hash: verdict::short_hash(state),
             state: state.into(),
