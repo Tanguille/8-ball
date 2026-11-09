@@ -418,9 +418,14 @@ To uninstall, remove only `mcp.servers.8ball` from the configuration and the ski
 
 The code is a Cargo workspace. `domain` holds questions, configuration, and verdict math. `store` is the SQLite storage, `backend` calls the model servers, `service` is the logic with its REST and MCP routes, and `cli` is the `8ball` binary.
 
-Follow [AGENTS.md](AGENTS.md). Also check the image and the plugin:
+Follow the [Rust style guide](docs/rust-style.md) for source and tests. Write commits in Commitizen style, and write docs in the Plain mode of [SimpleEnglish](https://github.com/AminBlg/SimpleEnglish). Do not loosen a live test assertion to make it pass.
 
 ```sh
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo nextest run
+dev/models.sh up
+cargo nextest run --test live --run-ignored only --no-capture
 docker build -t 8ball:dev .
 bash dev/image-smoke.sh 8ball:dev
 claude plugin validate plugin --strict
