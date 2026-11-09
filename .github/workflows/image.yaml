@@ -66,6 +66,8 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # A fresh runner has no Helm repos, and dependency build only downloads from added ones.
+          helm repo add bjw-s https://bjw-s-labs.github.io/helm-charts
           helm dependency build charts/eightball
           helm lint charts/eightball
           helm package charts/eightball --version "${VERSION#v}" --app-version "$VERSION" --destination "$RUNNER_TEMP/chart"
