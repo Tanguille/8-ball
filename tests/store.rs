@@ -125,6 +125,14 @@ async fn labels_can_be_replaced_and_are_scoped() {
 #[tokio::test]
 async fn pruning_preserves_labelled_rows() {
     let (_directory, path, store) = opened().await;
+    insert(
+        &store,
+        NewDecision {
+            question_hash: "old-question".into(),
+            ..decision("old")
+        },
+    )
+    .await;
     insert(&store, decision("first")).await;
     let labelled = insert(&store, decision("second")).await;
     store.set_label(labelled, "yes").await.unwrap();
@@ -132,9 +140,12 @@ async fn pruning_preserves_labelled_rows() {
         .execute(&mut fixture(&path).await)
         .await
         .unwrap();
-    assert_eq!(store.prune(0).await.unwrap(), 1);
+    assert_eq!(store.prune(0).await.unwrap(), 2);
     assert!(cached(&store, "first", Some("greeting")).await.is_none());
     assert!(cached(&store, "second", Some("greeting")).await.is_some());
+    // The labelled decision keeps its question text; the pruned old version loses its own.
+    assert!(store.question("question").await.unwrap().is_some());
+    assert!(store.question("old-question").await.unwrap().is_none());
 }
 #[tokio::test]
 async fn calibration_upsert_keeps_latest_bands() {
