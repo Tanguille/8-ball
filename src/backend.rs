@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crate::config::{BackendKind, EndpointConfig};
 
@@ -15,11 +15,14 @@ pub struct Endpoint {
     config: EndpointConfig,
     api_key: Option<String>,
     client: reqwest::Client,
-    info: tokio::sync::OnceCell<Info>,
+    /// The last detected info and when it was detected.
+    info: tokio::sync::Mutex<Option<(tokio::time::Instant, Arc<Info>)>>,
 }
 
 // Decision models answer in under 1 s; 20 s only absorbs a cold model load.
 const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
+// A new model behind the same URL gets its own fingerprint, and so its own cache and calibration, within this time.
+const INFO_TTL: Duration = Duration::from_secs(60);
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -39,12 +42,32 @@ impl Endpoint {
             config: config.clone(),
             api_key,
             client: reqwest::Client::new(),
-            info: tokio::sync::OnceCell::new(),
+            info: tokio::sync::Mutex::new(None),
         }
     }
 
-    pub async fn info(&self) -> Result<&Info, BackendError> {
-        self.info.get_or_try_init(|| self.detect()).await
+    /// Detects the endpoint, again once `INFO_TTL` has passed.
+    // ponytail: callers wait on one lock while a refresh runs (at most 5 s per GET); fine at one refresh a minute.
+    pub async fn info(&self) -> Result<Arc<Info>, BackendError> {
+        let mut slot = self.info.lock().await;
+        let previous = match slot.as_ref() {
+            Some((detected_at, info)) if detected_at.elapsed() < INFO_TTL => {
+                return Ok(info.clone());
+            }
+            other => other.map(|(_, info)| info.clone()),
+        };
+        let info = match (self.detect(previous.is_some()).await, previous) {
+            // Reuse the old value while nothing changed, so requests in flight and new ones share one semaphore.
+            (Ok(detected), Some(previous)) if previous.same_identity(&detected) => previous,
+            (Ok(detected), _) => Arc::new(detected),
+            // A failed refresh keeps the last identity. A dead backend still fails the request that follows.
+            (Err(_), Some(previous)) => previous,
+            (Err(e), None) => return Err(e),
+        };
+        *slot = Some((tokio::time::Instant::now(), info.clone()));
+        drop(slot);
+
+        Ok(info)
     }
 
     async fn get_info_json(&self, path: &str) -> Result<serde_json::Value, BackendError> {
@@ -69,9 +92,8 @@ impl Endpoint {
         if let Some(model) = &self.config.model {
             body["model"] = model.as_str().into();
         }
-        let permit = self
-            .info()
-            .await?
+        let info = self.info().await?;
+        let permit = info
             .permits
             .acquire()
             .await
@@ -98,11 +120,13 @@ impl Endpoint {
         serde_json::from_str(&text).map_err(|e| BackendError(e.to_string()))
     }
 
-    async fn detect(&self) -> Result<Info, BackendError> {
-        let properties = self
-            .get_info_json("/props")
-            .await
-            .unwrap_or(serde_json::Value::Null);
+    async fn detect(&self, refresh: bool) -> Result<Info, BackendError> {
+        let properties = match self.get_info_json("/props").await {
+            Ok(properties) => properties,
+            // Without /props the fingerprint falls back to the model id, which would switch caches; keep the old one.
+            Err(e) if refresh => return Err(e),
+            Err(_) => serde_json::Value::Null,
+        };
         let mut models = serde_json::Value::Null;
         let kind = if let Some(kind) = self.config.kind {
             kind
@@ -135,22 +159,13 @@ impl Endpoint {
                 )));
             }
         };
-        let fingerprint = properties["model_path"].as_str().map_or_else(
-            || {
-                self.config
-                    .model
-                    .as_deref()
-                    .or_else(|| models["data"][0]["id"].as_str())
-                    .unwrap_or(&self.config.url)
-                    .into()
-            },
-            |path| {
-                format!(
-                    "{path}@{}",
-                    properties["build_info"].as_str().unwrap_or_default()
-                )
-            },
-        );
+        // The model file alone: a llama.cpp build bump, often daily, must not drop the cache and calibration.
+        let fingerprint = properties["model_path"]
+            .as_str()
+            .or(self.config.model.as_deref())
+            .or_else(|| models["data"][0]["id"].as_str())
+            .unwrap_or(&self.config.url)
+            .into();
         let concurrency = self
             .config
             .concurrency
@@ -169,16 +184,11 @@ impl Endpoint {
         })
     }
 
-    /// Fit only after `info()` when the endpoint kind is auto-detected.
     #[must_use]
-    pub fn fitted(&self, state: &str) -> String {
-        let kind = self
-            .info
-            .get()
-            .map_or(self.config.kind, |info| Some(info.kind));
-        let maximum = self.config.max_state_chars.or(match kind {
-            Some(BackendKind::Systemone | BackendKind::Rerank) => Some(2000),
-            _ => None,
+    pub fn fitted(&self, info: &Info, state: &str) -> String {
+        let maximum = self.config.max_state_chars.or(match info.kind {
+            BackendKind::Systemone | BackendKind::Rerank => Some(2000),
+            BackendKind::Logprob => None,
         });
 
         fit(state, maximum)
@@ -233,4 +243,12 @@ pub struct Info {
     pub fingerprint: String,
     pub concurrency: usize,
     permits: tokio::sync::Semaphore,
+}
+
+impl Info {
+    fn same_identity(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.fingerprint == other.fingerprint
+            && self.concurrency == other.concurrency
+    }
 }

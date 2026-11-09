@@ -50,4 +50,6 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 [dev-dependencies]
 rmcp = { version = "3.8.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 tempfile = "3.27.0"
+# Steps the clock in tests; the runtime features come from the main dependency.
+tokio = { version = "1.54.1", features = ["test-util"] }
 wiremock = "0.6.5"
