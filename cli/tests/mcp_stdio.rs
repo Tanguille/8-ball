@@ -1,9 +1,9 @@
-use rmcp::{RoleClient, ServiceExt, model::CallToolRequestParams, service::RunningService};
+use rmcp::ServiceExt;
 use wiremock::matchers;
 
-async fn check_client(client: RunningService<RoleClient, ()>, healthy: bool) {
+async fn check_client(client: rmcp::service::RunningService<rmcp::RoleClient, ()>, healthy: bool) {
     let tools = client.list_all_tools().await.unwrap();
-    let mut names: Vec<_> = tools.iter().map(|text| text.name.as_ref()).collect();
+    let mut names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
     names.sort_unstable();
     assert_eq!(
         names,
@@ -26,7 +26,7 @@ async fn check_client(client: RunningService<RoleClient, ()>, healthy: bool) {
     );
     let result = client
         .call_tool(
-            CallToolRequestParams::new("decision_ask")
+            rmcp::model::CallToolRequestParams::new("decision_ask")
                 .with_arguments(rmcp::object!({"state":"hi","spec":"greeting"})),
         )
         .await

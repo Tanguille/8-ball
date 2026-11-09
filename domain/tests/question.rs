@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use domain::question::{Kind, Question};
+use domain::question::{self, Kind, Question};
 
 #[test]
 fn choice_roundtrip_keeps_order() {
@@ -81,13 +81,13 @@ fn validate_rejects() {
     );
     question.instructions = "x".into();
     assert!(
-        domain::question::validate_all(&[question.clone(), question])
+        question::validate_all(&[question.clone(), question])
             .unwrap_err()
             .to_string()
             .contains("duplicate")
     );
     assert!(
-        domain::question::validate_all(&[])
+        question::validate_all(&[])
             .unwrap_err()
             .to_string()
             .contains("no questions")

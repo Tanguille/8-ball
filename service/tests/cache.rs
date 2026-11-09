@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
 use domain::{question::Question, verdict};
-use service::{AskRequest, Decision, Service};
+use service::{AskRequest, Service};
 use store::Store;
 
 async fn fixture(ad_hoc: bool) -> (Service, Store, MockServer, tempfile::TempDir) {
@@ -17,6 +17,7 @@ async fn fixture(ad_hoc: bool) -> (Service, Store, MockServer, tempfile::TempDir
                 .keys()
                 .map(|id| (id.clone(), json!({"type":"noul","noul":0.97})))
                 .collect();
+
             wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
         })
         .mount(&mock)
@@ -33,12 +34,13 @@ async fn fixture(ad_hoc: bool) -> (Service, Store, MockServer, tempfile::TempDir
     let store = Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
+
     (Service::new(config, store.clone()), store, mock, directory)
 }
 fn request(state: &str) -> AskRequest {
     serde_json::from_value(json!({"spec":"greeting","state":state})).unwrap()
 }
-async fn ask_one(service: &Service, request: AskRequest) -> Decision {
+async fn ask_one(service: &Service, request: AskRequest) -> service::Decision {
     service.ask(request).await.unwrap().results.remove(0)
 }
 #[tokio::test]
@@ -96,7 +98,7 @@ async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
     let (service, store, mock, _dir) = fixture(learning_ad_hoc).await;
     let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
-    let cid = verdict::calibration_id(
+    let calibration_id = verdict::calibration_id(
         &verdict::question_hash(&question),
         domain::config::BackendKind::Systemone,
         &mock.uri(),
@@ -113,7 +115,7 @@ async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
     };
     store
         .put_calibration(
-            &cid,
+            &calibration_id,
             Some("greeting"),
             &verdict::Bands::Noul {
                 yes_at: 1.01,
@@ -145,14 +147,14 @@ async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
 #[tokio::test]
 async fn cache_ids_and_labels_stay_in_the_requested_scope() {
     let (service, store, _mock, _dir) = fixture(false).await;
-    let adhoc: AskRequest = serde_json::from_value(json!({
+    let adhoc_request: AskRequest = serde_json::from_value(json!({
         "state":"hello", "questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]
     }))
     .unwrap();
-    let ad = ask_one(&service, adhoc).await;
+    let adhoc = ask_one(&service, adhoc_request).await;
     let named = ask_one(&service, request("hello")).await;
     assert!(!named.cached);
-    assert_ne!(ad.id, named.id);
+    assert_ne!(adhoc.id, named.id);
     service.label(named.id, "yes".into()).await.unwrap();
     let copy_request: AskRequest =
         serde_json::from_value(json!({"spec":"greeting-copy","state":"hello"})).unwrap();
@@ -165,14 +167,22 @@ async fn cache_ids_and_labels_stay_in_the_requested_scope() {
     assert_eq!(again.id, copy.id);
     let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
-    let qh = verdict::question_hash(&question);
+    let question_hash = verdict::question_hash(&question);
     assert_eq!(
-        store.labelled(Some("greeting"), &qh).await.unwrap()[0].label,
+        store
+            .labelled(Some("greeting"), &question_hash)
+            .await
+            .unwrap()[0]
+            .label,
         "yes"
     );
     assert_eq!(
-        store.labelled(Some("greeting-copy"), &qh).await.unwrap()[0].label,
+        store
+            .labelled(Some("greeting-copy"), &question_hash)
+            .await
+            .unwrap()[0]
+            .label,
         "no"
     );
-    assert!(service.label(ad.id, "yes".into()).await.is_err());
+    assert!(service.label(adhoc.id, "yes".into()).await.is_err());
 }

@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
+use tokio::process::Command;
 use wiremock::{MockServer, matchers};
 
 use domain::{config::Config, verdict};
-use service::{Decision, Service};
+use service::Service;
 use store::Store;
 
 #[path = "../../service/tests/common.rs"]
@@ -40,9 +41,11 @@ async fn app() -> App {
                         "score" => json!({"type":"score","probabilities":{"0":0.1,"1":0.9}}),
                         _ => unreachable!(),
                     };
+
                     (id.clone(), answer)
                 })
                 .collect();
+
             wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
         })
         .mount(&model)
@@ -56,6 +59,7 @@ async fn app() -> App {
     .unwrap();
     let (service, store, directory) = common::service(config.clone()).await;
     let url = common::serve(service.clone(), None).await;
+
     App {
         service,
         model,
@@ -73,7 +77,7 @@ async fn post(app: &App, path: &str, body: Value) -> reqwest::Response {
         .await
         .unwrap()
 }
-async fn ask(service: &Service, spec: &str, state: &str) -> Decision {
+async fn ask(service: &Service, spec: &str, state: &str) -> service::Decision {
     service
         .ask(serde_json::from_value(json!({"spec":spec,"state":state})).unwrap())
         .await
@@ -93,12 +97,12 @@ async fn posts(app: &App) -> usize {
 #[tokio::test]
 async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     let app = app().await;
-    for i in 0..50 {
-        let yes = i < 25;
+    for number in 0..50 {
+        let yes = number < 25;
         let state = if yes {
-            format!("hello message {i}")
+            format!("hello message {number}")
         } else {
-            format!("invoice message {i}")
+            format!("invoice message {number}")
         };
         let decision = ask(&app.service, "greeting", &state).await;
         assert_eq!(
@@ -258,7 +262,7 @@ async fn conflicting_labels_are_excluded() {
 #[tokio::test]
 async fn cli_supports_spec_labels_calibration_and_exit_codes() {
     let app = app().await;
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
             "--spec",
@@ -278,19 +282,19 @@ async fn cli_supports_spec_labels_calibration_and_exit_codes() {
     );
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     let id = result["results"][0]["id"].as_i64().unwrap().to_string();
-    let label = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let label = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args(["label", &id, "yes", "--url", &app.url])
         .output()
         .await
         .unwrap();
     assert!(label.status.success());
-    let bad = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let bad = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args(["label", &id, "maybe", "--url", &app.url])
         .output()
         .await
         .unwrap();
     assert_eq!(bad.status.code(), Some(4));
-    let calibration = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let calibration = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args(["calibrate", "greeting", "--dry-run", "--url", &app.url])
         .output()
         .await
@@ -298,7 +302,7 @@ async fn cli_supports_spec_labels_calibration_and_exit_codes() {
     assert!(calibration.status.success());
     let report: Value = serde_json::from_slice(&calibration.stdout).unwrap();
     assert_eq!(report["stored"], false);
-    let no = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let no = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
             "--spec",

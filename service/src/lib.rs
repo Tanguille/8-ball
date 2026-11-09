@@ -1,12 +1,13 @@
 //! The decision service, and its REST, MCP and metrics front ends.
 
-pub mod http;
-pub mod mcp;
-mod metrics;
+use std::{slice, time::Instant};
 
+use futures::future;
 use indexmap::IndexMap;
-use rmcp::schemars;
+// The JsonSchema derive expands to `schemars::` paths, so the module must be in scope too.
+use rmcp::schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use backend::{Endpoint, embed::Embedder};
 use domain::{
@@ -15,13 +16,17 @@ use domain::{
     question::{Kind, Question},
     verdict::{self, Bands},
 };
-use store::{NewDecision, Store, StoreError};
+use store::{NewDecision, Store};
 
 use crate::metrics::Metrics;
 
+pub mod http;
+pub mod mcp;
+mod metrics;
+
 // The flags are separate wire fields that callers read one by one.
 #[expect(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Decision {
     pub id: i64,          // row id in the decisions table
     pub question: String, // the question id
@@ -46,11 +51,11 @@ pub struct Decision {
     pub remembered: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AskResponse {
     pub results: Vec<Decision>,
 }
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct AskRequest {
     /// The text to judge. Treated as data, never as instructions.
     pub state: String,
@@ -68,10 +73,10 @@ pub struct AskRequest {
     pub learn: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct TriageRequest {
     /// Items to judge (strings or JSON objects), at most 64.
-    pub items: Vec<serde_json::Value>,
+    pub items: Vec<Value>,
     /// Shared evidence for every item, treated as data. Contextual inputs must fit the endpoint limit.
     #[serde(default)]
     pub context: Option<String>,
@@ -97,7 +102,7 @@ const fn learn_default() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TriageResponse {
     pub kept: Vec<TriageItem>,
     pub unsure: Vec<TriageItem>,
@@ -109,7 +114,7 @@ pub struct TriageResponse {
     pub warning: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TriageItem {
     pub index: usize,
     pub decision: Decision,
@@ -121,28 +126,28 @@ pub enum ServiceError {
     #[error("backend {endpoint}: {message}")]
     Backend { endpoint: String, message: String },
     #[error("store: {0}")]
-    Store(#[from] StoreError),
+    Store(#[from] store::StoreError),
 }
 
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct QuestionsRequest {
     /// 1 to 500, default 50.
     pub limit: Option<usize>,
 }
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct QuestionsResponse {
     pub questions: Vec<QuestionSummary>,
 }
 /// Stored decisions of one spec version or one ad-hoc question.
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct QuestionSummary {
     pub spec: Option<String>,
     pub question_hash: String,
     /// Instructions and kind. Null for an ad-hoc question that 8-ball answered before it stored question text.
-    pub question: Option<serde_json::Value>,
-    pub decisions: i64,
-    pub unsure: i64,
-    pub labelled: i64,
+    pub question: Option<Value>,
+    pub decisions: u64,
+    pub unsure: u64,
+    pub labelled: u64,
     pub last_at: String,
     /// `label` accepts its decisions: the current version of a configured spec, or an ad-hoc question with stored text when `learning.ad_hoc` is on.
     pub labelable: bool,
@@ -160,7 +165,7 @@ pub struct DecisionsRequest {
 pub struct DecisionsResponse {
     pub spec: Option<String>,
     pub question_hash: String,
-    pub question: Option<serde_json::Value>,
+    pub question: Option<Value>,
     pub labelable: bool,
     pub decisions: Vec<StoredDecision>,
 }
@@ -170,12 +175,12 @@ pub struct StoredDecision {
     pub at: String,
     pub verdict: String,
     /// label -> probability when the question is known, else the raw probabilities in label order.
-    pub probabilities: serde_json::Value,
+    pub probabilities: Value,
     pub state: String,
     pub label: Option<String>,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReviewRequest {
     /// A configured spec. Only its current version can be labelled.
     pub spec: String,
@@ -183,27 +188,27 @@ pub struct ReviewRequest {
     pub limit: Option<usize>,
 }
 /// Unlabelled decisions without the model's answer, so a label stays independent of it.
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct ReviewResponse {
     pub spec: String,
-    pub question: serde_json::Value,
+    pub question: Value,
     /// The values `label` accepts.
     pub labels: Vec<String>,
     pub decisions: Vec<ReviewItem>,
 }
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct ReviewItem {
     pub id: i64,
     pub state: String,
 }
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct LabelRequest {
     /// A decision id from `review` or `decisions`.
     pub id: i64,
     /// yes or no for a noul question, else an option or level name.
     pub value: String,
 }
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct LabelResponse {
     pub id: i64,
     pub label: String,
@@ -222,8 +227,8 @@ pub struct CalibrateResponse {
 pub struct DoctorReport {
     pub default: String,
     pub endpoints: Vec<DoctorEndpoint>,
-    pub embedder: Option<serde_json::Value>,
-    pub specs: Vec<serde_json::Value>,
+    pub embedder: Option<Value>,
+    pub specs: Vec<Value>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -233,7 +238,7 @@ pub struct DoctorEndpoint {
     pub kind: Option<BackendKind>,
     pub fingerprint: Option<String>,
     pub concurrency: Option<usize>,
-    pub probe: Option<serde_json::Value>,
+    pub probe: Option<Value>,
     pub error: Option<String>,
 }
 
@@ -351,6 +356,7 @@ impl Service {
             if !question.kind.labels().contains(&value) {
                 return Err(ServiceError::BadRequest(format!("invalid label {value}")));
             }
+
             value
         };
         if !self.store.set_label(id, &value).await? {
@@ -377,7 +383,7 @@ impl Service {
             ServiceError::BadRequest("question text unknown: ask it again first".into())
         })?;
         // The stored text leaves out the caller's id, which `Question` needs.
-        let mut question: serde_json::Map<String, serde_json::Value> =
+        let mut question: serde_json::Map<String, Value> =
             serde_json::from_str(&text).map_err(|e| ServiceError::BadRequest(e.to_string()))?;
         question.insert("id".into(), "q".into());
 
@@ -438,6 +444,7 @@ impl Service {
                     &row.question_hash,
                     row.question,
                 );
+
                 QuestionSummary {
                     spec: row.spec,
                     question_hash: row.question_hash,
@@ -498,7 +505,7 @@ impl Service {
                     Some(labels) if labels.len() == row.answer.len() => labels
                         .iter()
                         .cloned()
-                        .zip(row.answer.into_iter().map(serde_json::Value::from))
+                        .zip(row.answer.into_iter().map(Value::from))
                         .collect::<serde_json::Map<_, _>>()
                         .into(),
                     _ => row.answer.into(),
@@ -525,7 +532,7 @@ impl Service {
         current: Option<Question>,
         question_hash: &str,
         stored: Option<String>,
-    ) -> (bool, Option<serde_json::Value>) {
+    ) -> (bool, Option<Value>) {
         let labelable = if spec.is_some() {
             current
                 .as_ref()
@@ -638,6 +645,7 @@ impl Service {
                     .collect::<Vec<_>>()
                     .join(", ");
                 warnings.push(format!("conflicting labels for decision ids {ids}"));
+
                 continue;
             }
             let probabilities = if let Some((_, probabilities)) = self
@@ -651,13 +659,7 @@ impl Service {
             } else {
                 // Never remember here: a fit must use the model's answers, not the labels themselves.
                 let judgments = self
-                    .judge(
-                        &first.state,
-                        spec,
-                        std::slice::from_ref(question),
-                        name,
-                        false,
-                    )
+                    .judge(&first.state, spec, slice::from_ref(question), name, false)
                     .await?;
                 self.persist(judgments, name, spec)
                     .await?
@@ -698,7 +700,7 @@ impl Service {
 
     pub async fn doctor(&self) -> DoctorReport {
         let endpoints =
-            futures::future::join_all(self.endpoints.iter().map(|(name, endpoint)| async move {
+            future::join_all(self.endpoints.iter().map(|(name, endpoint)| async move {
                 let mut report = DoctorEndpoint {
                     name: name.clone(),
                     url: self.config.endpoints[name].url.clone(),
@@ -721,16 +723,16 @@ impl Service {
                         instructions: "Is the sky blue on a clear day?".into(),
                         kind: Kind::Noul { criteria: None },
                     };
-                    let start = std::time::Instant::now();
+                    let start = Instant::now();
                     let result = endpoint
                         .ask(
                             "The sky is clear and blue today.",
-                            std::slice::from_ref(&question),
+                            slice::from_ref(&question),
                         )
                         .await;
                     let milliseconds = start.elapsed().as_millis();
                     report.probe = Some(match result {
-                        Ok(probabilities) => serde_json::json!({
+                        Ok(probabilities) => json!({
                             "verdict": verdict::verdict(
                                 &question.kind, &probabilities[0],
                                 Bands::default_for(&question.kind)
@@ -738,7 +740,7 @@ impl Service {
                             "p_yes": probabilities[0][0],
                             "ms": milliseconds
                         }),
-                        Err(e) => serde_json::json!({
+                        Err(e) => json!({
                             "error": self.backend_error(name, e).to_string(), "ms": milliseconds
                         }),
                     });
@@ -752,7 +754,7 @@ impl Service {
             let (questions, endpoint) = self
                 .resolve_questions(Some(name), &[], None)
                 .expect("validated config");
-            let mut status = serde_json::json!({
+            let mut status = json!({
                 "name": name,
                 "type": spec.kind.type_name(),
                 "instructions": spec.instructions,
@@ -765,20 +767,19 @@ impl Service {
                         info.kind,
                         &info.fingerprint,
                     );
-                    status["calibration_id"] = serde_json::json!(calibration_id);
+                    status["calibration_id"] = json!(calibration_id);
                     match self.store.calibration(&calibration_id, Some(name)).await {
                         Ok(Some((_, report))) => {
-                            status["calibrated"] = serde_json::json!(true);
-                            status["report"] = serde_json::json!(report);
+                            status["calibrated"] = json!(true);
+                            status["report"] = json!(report);
                         }
 
                         Ok(None) => {}
-                        Err(e) => status["error"] = serde_json::json!(e.to_string()),
+                        Err(e) => status["error"] = json!(e.to_string()),
                     }
                 }
                 Err(e) => {
-                    status["error"] =
-                        serde_json::json!(self.backend_error(&endpoint, e).to_string());
+                    status["error"] = json!(self.backend_error(&endpoint, e).to_string());
                 }
             }
             specs.push(status);
@@ -788,7 +789,7 @@ impl Service {
             default: self.config.default.clone(),
             endpoints,
             embedder: self.config.embedder.as_ref().map(|configuration| {
-                serde_json::json!({
+                json!({
                     "url": configuration.url,
                     "model": configuration.model
                 })
@@ -834,11 +835,11 @@ impl Service {
         } else {
             (Vec::new(), None)
         };
-        let questions = std::slice::from_ref(&question);
+        let questions = slice::from_ref(&question);
         let (endpoint, spec) = (&endpoint, request.spec.as_deref());
         let remember = request.learn && self.config.learning.remember;
         let mut decisions =
-            futures::future::try_join_all(items.into_iter().map(|(index, state)| async move {
+            future::try_join_all(items.into_iter().map(|(index, state)| async move {
                 let mut judgments = self
                     .judge(&state, spec, questions, endpoint, remember)
                     .await?;
@@ -900,16 +901,14 @@ impl Service {
     async fn triage_items(
         &self,
         endpoint: &str,
-        items: Vec<serde_json::Value>,
+        items: Vec<Value>,
         context: Option<&str>,
     ) -> Result<Vec<(usize, String)>, ServiceError> {
         let mut unique = IndexMap::new();
         for (index, item) in items.into_iter().enumerate() {
             let text = match (&context, item) {
-                (Some(context), item) => {
-                    serde_json::json!({"context":context,"item":item}).to_string()
-                }
-                (None, serde_json::Value::String(text)) => text,
+                (Some(context), item) => json!({"context":context,"item":item}).to_string(),
+                (None, Value::String(text)) => text,
                 (None, other) => other.to_string(),
             };
             unique.entry(text).or_insert(index);
@@ -1088,7 +1087,7 @@ impl Service {
         let mut answers = if uncached.is_empty() {
             Vec::new()
         } else {
-            let started = std::time::Instant::now();
+            let started = Instant::now();
             let answers = endpoint.ask(&state, &uncached).await;
             self.metrics.record_backend_call(name, started.elapsed());
             answers.map_err(backend_error)?
@@ -1243,6 +1242,7 @@ impl Service {
                 }
                 self.metrics
                     .record_decision(endpoint, spec, &judgment.decision);
+
                 judgment.decision
             })
             .collect())
@@ -1250,15 +1250,15 @@ impl Service {
 }
 
 /// Default 50, at most 500: enough to review in one go without unbounded responses.
-fn list_limit(limit: Option<usize>) -> Result<i64, ServiceError> {
+fn list_limit(limit: Option<usize>) -> Result<u32, ServiceError> {
     match limit.unwrap_or(50) {
         0 => Err(ServiceError::BadRequest("limit must be at least 1".into())),
-        limit => Ok(i64::try_from(limit.min(500)).expect("at most 500")),
+        limit => Ok(u32::try_from(limit.min(500)).expect("at most 500")),
     }
 }
 
 /// The stored form of a question: its JSON without the caller's id, which is not part of the hash.
-fn stored_question(question: &Question) -> serde_json::Value {
+fn stored_question(question: &Question) -> Value {
     let mut value = serde_json::to_value(question).expect("question serializes");
     value
         .as_object_mut()

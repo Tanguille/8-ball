@@ -2,13 +2,12 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Request, State},
     http::{StatusCode, header},
     middleware,
     response::{IntoResponse, Response},
     routing,
 };
-use serde_json::json;
 
 use crate::{Service, ServiceError};
 
@@ -125,7 +124,7 @@ impl IntoResponse for ServiceError {
 }
 
 fn error(status: StatusCode, message: &str) -> Response {
-    (status, Json(json!({"error": message}))).into_response()
+    (status, Json(serde_json::json!({"error": message}))).into_response()
 }
 
 async fn metrics(State(service): State<Arc<Service>>) -> impl IntoResponse {
@@ -140,7 +139,7 @@ async fn metrics(State(service): State<Arc<Service>>) -> impl IntoResponse {
 
 async fn require_bearer(
     State(key): State<Option<Arc<str>>>,
-    request: axum::extract::Request,
+    request: Request,
     next: middleware::Next,
 ) -> Response {
     let Some(key) = key else {
@@ -174,7 +173,7 @@ async fn require_bearer(
     }
 }
 /// The Host header (or the HTTP/2 authority) names `localhost`, `127.0.0.1` or `::1`, the hosts rmcp allows by default.
-fn local_host(request: &axum::extract::Request) -> bool {
+fn local_host(request: &Request) -> bool {
     request
         .headers()
         .get(header::HOST)

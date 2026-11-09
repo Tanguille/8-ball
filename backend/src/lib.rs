@@ -1,9 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
-use domain::{
-    Probs,
-    config::{BackendKind, EndpointConfig},
+use reqwest::{Client, Error, RequestBuilder};
+use serde_json::Value;
+use tokio::{
+    sync::{Mutex, Semaphore},
+    time::Instant,
 };
+
+use domain::config::{BackendKind, EndpointConfig};
 
 pub mod embed;
 mod logprob;
@@ -14,9 +18,9 @@ pub struct Endpoint {
     name: String,
     config: EndpointConfig,
     api_key: Option<String>,
-    client: reqwest::Client,
+    client: Client,
     /// The last detected info and when it was detected.
-    info: tokio::sync::Mutex<Option<(tokio::time::Instant, Arc<Info>)>>,
+    info: Mutex<Option<(Instant, Arc<Info>)>>,
 }
 
 // Decision models answer in under 1 s; 20 s only absorbs a cold model load.
@@ -28,8 +32,8 @@ const INFO_TTL: Duration = Duration::from_secs(60);
 #[error("{0}")]
 pub struct BackendError(pub String);
 
-impl From<reqwest::Error> for BackendError {
-    fn from(error: reqwest::Error) -> Self {
+impl From<Error> for BackendError {
+    fn from(error: Error) -> Self {
         Self(error.to_string())
     }
 }
@@ -41,8 +45,8 @@ impl Endpoint {
             name: name.into(),
             config: config.clone(),
             api_key,
-            client: reqwest::Client::new(),
-            info: tokio::sync::Mutex::new(None),
+            client: Client::new(),
+            info: Mutex::new(None),
         }
     }
 
@@ -64,13 +68,13 @@ impl Endpoint {
             (Err(_), Some(previous)) => previous,
             (Err(e), None) => return Err(e),
         };
-        *slot = Some((tokio::time::Instant::now(), info.clone()));
+        *slot = Some((Instant::now(), info.clone()));
         drop(slot);
 
         Ok(info)
     }
 
-    async fn get_info_json(&self, path: &str) -> Result<serde_json::Value, BackendError> {
+    async fn get_info_json(&self, path: &str) -> Result<Value, BackendError> {
         let request = self
             .client
             .get(format!("{}{path}", self.config.url))
@@ -89,8 +93,8 @@ impl Endpoint {
         &self,
         info: &Info,
         path: &str,
-        mut body: serde_json::Value,
-    ) -> Result<serde_json::Value, BackendError> {
+        mut body: Value,
+    ) -> Result<Value, BackendError> {
         if let Some(model) = &self.config.model {
             body["model"] = model.as_str().into();
         }
@@ -126,9 +130,9 @@ impl Endpoint {
             Ok(properties) => properties,
             // Without /props the fingerprint falls back to the model id, which would switch caches; keep the old one.
             Err(e) if refresh => return Err(e),
-            Err(_) => serde_json::Value::Null,
+            Err(_) => Value::Null,
         };
-        let mut models = serde_json::Value::Null;
+        let mut models = Value::Null;
         let kind = if let Some(kind) = self.config.kind {
             kind
         } else {
@@ -181,7 +185,7 @@ impl Endpoint {
             kind,
             fingerprint,
             concurrency,
-            permits: tokio::sync::Semaphore::new(concurrency),
+            permits: Semaphore::new(concurrency),
         })
     }
 
@@ -200,7 +204,7 @@ impl Endpoint {
         &self,
         state: &str,
         questions: &[domain::question::Question],
-    ) -> Result<Vec<Probs>, BackendError> {
+    ) -> Result<Vec<domain::Probs>, BackendError> {
         tokio::time::timeout(DECISION_TIMEOUT, async {
             let info = self.info().await?;
 
@@ -215,7 +219,7 @@ impl Endpoint {
     }
 }
 
-pub fn authed(request: reqwest::RequestBuilder, key: Option<&str>) -> reqwest::RequestBuilder {
+pub fn authed(request: RequestBuilder, key: Option<&str>) -> RequestBuilder {
     match key {
         Some(key) => request.bearer_auth(key),
         None => request,
@@ -243,7 +247,7 @@ pub struct Info {
     pub kind: BackendKind,
     pub fingerprint: String,
     pub concurrency: usize,
-    permits: tokio::sync::Semaphore,
+    permits: Semaphore,
 }
 
 impl Info {

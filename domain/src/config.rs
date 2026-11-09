@@ -1,21 +1,24 @@
-use std::path::PathBuf;
+use std::{env, path::PathBuf};
 
-#[derive(Debug, Clone, serde::Deserialize)]
+use indexmap::IndexMap;
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub default: String,
     #[serde(default = "default_retention")]
     pub retention_days: u32,
-    pub endpoints: indexmap::IndexMap<String, EndpointConfig>,
+    pub endpoints: IndexMap<String, EndpointConfig>,
     pub embedder: Option<EmbedderConfig>,
     #[serde(default)]
-    pub specs: indexmap::IndexMap<String, SpecConfig>,
+    pub specs: IndexMap<String, SpecConfig>,
     #[serde(default)]
     pub learning: Learning,
 }
 
 /// How 8-ball learns from answers that agents report. Each part can be turned off.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Learning {
     /// Mark decisions whose answer the agent should report with `label`.
@@ -42,7 +45,7 @@ impl Default for Learning {
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EndpointConfig {
     pub url: String,
@@ -54,7 +57,7 @@ pub struct EndpointConfig {
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
     Systemone,
@@ -62,7 +65,7 @@ pub enum BackendKind {
     Rerank,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EmbedderConfig {
     pub url: String,
@@ -71,7 +74,7 @@ pub struct EmbedderConfig {
 }
 
 // No deny_unknown_fields here: it doesn't work together with #[serde(flatten)].
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SpecConfig {
     pub instructions: String,
     #[serde(flatten)]
@@ -182,10 +185,10 @@ pub fn default_config_path() -> PathBuf {
 /// `$variable/relative`, else `$HOME/fallback/relative` when the XDG variable is unset or empty.
 #[must_use]
 pub fn xdg_path(variable: &str, fallback: &str, relative: &str) -> PathBuf {
-    std::env::var_os(variable)
+    env::var_os(variable)
         .filter(|value| !value.is_empty())
         .map_or_else(
-            || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(fallback),
+            || PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(fallback),
             PathBuf::from,
         )
         .join(relative)

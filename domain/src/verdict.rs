@@ -1,10 +1,11 @@
 use std::fmt::Write as _;
 
+use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
 
 use crate::question::Kind;
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Bands {
     Noul { yes_at: f64, no_at: f64 },
@@ -163,7 +164,7 @@ pub struct Example {
     pub label: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     pub examples: usize,
     pub decided: usize,
@@ -203,6 +204,7 @@ pub fn calibrate(
             warnings.push("no side: not enough evidence for the target".into());
             -0.01
         });
+
         Bands::Noul { yes_at, no_at }
     } else {
         let data: Vec<_> = examples
@@ -218,6 +220,7 @@ pub fn calibrate(
             warnings.push("not enough evidence for the target".into());
             1.01
         });
+
         Bands::Level { min_confidence }
     };
     let bands = previous.map_or(bands, |previous| merge(kind, bands, previous));

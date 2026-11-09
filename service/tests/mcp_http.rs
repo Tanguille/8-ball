@@ -1,5 +1,6 @@
 use rmcp::ServiceExt;
 use serde_json::json;
+use tempfile::Builder;
 use tokio_util::sync::CancellationToken;
 use wiremock::{MockServer, matchers};
 
@@ -40,11 +41,11 @@ async fn authenticated_http_client_survives_server_restart() {
         )
         .mount(&mock)
         .await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
     let database_path = directory.path().join("db.sqlite");
     for restart in [false, true] {
         let (url, token, task) = serve(&mock, &database_path).await;
-        let client  =  ()
+        let client = ()
             .serve(rmcp::transport::StreamableHttpClientTransport::from_config(
                 rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(format!("{url}/mcp"))
                     .auth_header("k"),
@@ -70,7 +71,7 @@ async fn authenticated_http_client_survives_server_restart() {
 #[tokio::test]
 async fn bearer_allows_non_loopback_host_header() {
     let mock = MockServer::start().await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
     let (url, ..) = serve(&mock, &directory.path().join("db.sqlite")).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/mcp"))

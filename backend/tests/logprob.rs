@@ -9,13 +9,14 @@ fn question(kind: &str) -> Question {
     if kind == "choice" {
         question["criteria"] = json!({"billing":"Charges","shipping":"","technical":"Software"});
     }
+
     serde_json::from_value(question).unwrap()
 }
 async fn endpoint(tokens: &[(&str, f64)], extra: &str) -> (Endpoint, MockServer) {
     let mock = MockServer::start().await;
     let logs: Vec<_> = tokens
         .iter()
-        .map(|(token, probabilities)| json!({"token":token,"logprob":probabilities.ln()}))
+        .map(|(token, probability)| json!({"token":token,"logprob":probability.ln()}))
         .collect();
     Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/chat/completions"))
@@ -56,22 +57,22 @@ async fn trailing_whitespace_and_punctuation_match_labels() {
 #[tokio::test]
 async fn lowercase_choice_does_not_match_and_low_mass_errors() {
     let (endpoint, _mock) = endpoint(&[("a", 0.5), ("B", 0.45)], "").await;
-    let e = endpoint
+    let error = endpoint
         .ask("hi", &[question("choice")])
         .await
         .unwrap_err()
         .to_string();
     assert!(
-        e.contains("model did not answer with a label (mass 0.45)"),
-        "{e}"
+        error.contains("model did not answer with a label (mass 0.45)"),
+        "{error}"
     );
 }
 #[tokio::test]
 async fn letters_map_in_option_order() {
     let (endpoint, _mock) = endpoint(&[("A", 0.7), ("B", 0.2), ("C", 0.1)], "").await;
     let probabilities = endpoint.ask("hi", &[question("choice")]).await.unwrap();
-    for (a, e) in probabilities[0].iter().zip([0.7, 0.2, 0.1]) {
-        assert!((a - e).abs() < 1e-9);
+    for (probability, expected) in probabilities[0].iter().zip([0.7, 0.2, 0.1]) {
+        assert!((probability - expected).abs() < 1e-9);
     }
 }
 #[tokio::test]

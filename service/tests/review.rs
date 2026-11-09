@@ -1,13 +1,13 @@
 use serde_json::{Value, json};
-use wiremock::{MockServer, ResponseTemplate, matchers};
+use wiremock::{MockServer, matchers};
 
-use service::{AskRequest, DecisionsRequest, QuestionsRequest, ReviewRequest};
+use service::{DecisionsRequest, QuestionsRequest, ReviewRequest, Service};
 
 mod common;
 
 /// A systemone mock that answers P(yes) = 0.97 for every noul question.
 async fn app() -> (
-    std::sync::Arc<service::Service>,
+    std::sync::Arc<Service>,
     String,
     MockServer,
     tempfile::TempDir,
@@ -23,7 +23,8 @@ async fn app() -> (
                 .keys()
                 .map(|id| (id.clone(), json!({"type":"noul","noul":0.97})))
                 .collect();
-            ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
+
+            wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
         })
         .mount(&mock)
         .await;
@@ -38,8 +39,8 @@ async fn app() -> (
     (service, url, mock, directory)
 }
 
-async fn ask(service: &service::Service, request: Value) {
-    let request: AskRequest = serde_json::from_value(request).unwrap();
+async fn ask(service: &Service, request: Value) {
+    let request: service::AskRequest = serde_json::from_value(request).unwrap();
     service.ask(request).await.unwrap();
 }
 

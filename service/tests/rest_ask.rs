@@ -1,3 +1,4 @@
+use reqwest::Client;
 use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
@@ -25,7 +26,7 @@ async fn app(status: u16) -> (String, MockServer, tempfile::TempDir) {
 #[tokio::test]
 async fn noul_ask_returns_probabilities_and_verdict() {
     let (url, _mock, _dir) = app(200).await;
-    let response = reqwest::Client::new()
+    let response = Client::new()
         .post(format!("{url}/v1/ask"))
         .json(&json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}))
         .send()
@@ -43,7 +44,7 @@ async fn noul_ask_returns_probabilities_and_verdict() {
 #[tokio::test]
 async fn backend_failure_is_502() {
     let (url, _mock, _dir) = app(500).await;
-    let response = reqwest::Client::new()
+    let response = Client::new()
         .post(format!("{url}/v1/ask"))
         .json(&json!({"state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}))
         .send()
@@ -60,7 +61,7 @@ async fn backend_failure_is_502() {
 #[tokio::test]
 async fn empty_questions_is_400() {
     let (url, _mock, _dir) = app(200).await;
-    let response = reqwest::Client::new()
+    let response = Client::new()
         .post(format!("{url}/v1/ask"))
         .json(&json!({"state":"hi","questions":[]}))
         .send()

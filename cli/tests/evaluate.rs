@@ -2,20 +2,23 @@ use std::process::Stdio;
 
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
-use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+use wiremock::{MockServer, ResponseTemplate, matchers};
 
 async fn server() -> MockServer {
     let server = MockServer::start().await;
-    Mock::given(matchers::method("POST"))
+    wiremock::Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/triage"))
         .respond_with(|request: &wiremock::Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap();
             let item = body["items"][0].as_str().unwrap();
             if item == "error" {
-                return ResponseTemplate::new(502).set_body_json(json!({"error":"model unavailable"}));
+                return ResponseTemplate::new(502)
+                    .set_body_json(json!({"error":"model unavailable"}));
             }
             if item == "malformed" {
-                return ResponseTemplate::new(200).set_body_json(json!({"kept":[],"unsure":[],"rejected":[],"dropped":0,"prefiltered":[]}));
+                return ResponseTemplate::new(200).set_body_json(
+                    json!({"kept":[],"unsure":[],"rejected":[],"dropped":0,"prefiltered":[]}),
+                );
             }
             let (verdict, field) = match item {
                 "skip" => ("no", "rejected"),
@@ -30,9 +33,14 @@ async fn server() -> MockServer {
             }}]);
             let response = ResponseTemplate::new(200).set_body_json(response);
 
-            if item == "slow" { response.set_delay(std::time::Duration::from_secs(10)) } else { response }
+            if item == "slow" {
+                response.set_delay(std::time::Duration::from_secs(10))
+            } else {
+                response
+            }
         })
-        .mount(&server).await;
+        .mount(&server)
+        .await;
 
     server
 }
@@ -66,9 +74,12 @@ async fn evaluate(server: &MockServer, cases: &str, extra: &[&str]) -> std::proc
 }
 
 fn cases(rows: &[(&str, bool)]) -> String {
-    rows.iter().enumerate().map(|(index, (item, expected))| {
-        json!({"id":index.to_string(),"item":item,"context":format!("snapshot {index}"),"expected_keep":expected}).to_string() + "\n"
-    }).collect()
+    rows.iter()
+        .enumerate()
+        .map(|(index, (item, expected))| {
+            json!({"id":index.to_string(),"item":item,"context":format!("snapshot {index}"),"expected_keep":expected}).to_string() + "\n"
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -143,10 +154,15 @@ async fn validates_entire_dataset_before_any_requests() {
         "{\"id\":\"a\",\"item\":\"one\",\"expected_keep\":true}\n{\"id\":\"a\",\"item\":\"two\",\"expected_keep\":false}".to_string(),
         "{\"id\":\"a\",\"item\":\"one\"}".to_string(),
         "{\"id\":\"\",\"item\":\"one\",\"expected_keep\":true}".to_string(),
-        cases(&[("keep",true)]) + "not json\n",
+        cases(&[("keep", true)]) + "not json\n",
     ] {
         let output = evaluate(&server, &input, &[]).await;
-        assert_eq!(output.status.code(), Some(4), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(4),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(output.stdout.is_empty());
     }
     assert!(server.received_requests().await.unwrap().is_empty());

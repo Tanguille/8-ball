@@ -35,9 +35,9 @@ pub struct QuestionRow {
     pub spec: Option<String>,
     pub question_hash: String,
     pub question: Option<String>,
-    pub decisions: i64,
-    pub unsure: i64,
-    pub labelled: i64,
+    pub decisions: u64,
+    pub unsure: u64,
+    pub labelled: u64,
     pub last_at: String,
 }
 pub struct DecisionRow {
@@ -126,16 +126,16 @@ impl Store {
             let result = sqlx::query(
                 "INSERT INTO decisions (spec,question_hash,calibration_id,state_hash,state,answer,verdict,endpoint) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
             )
-                .bind(decision.spec)
-                .bind(decision.question_hash)
-                .bind(decision.calibration_id)
-                .bind(decision.state_hash)
-                .bind(decision.state)
-                .bind(answer)
-                .bind(decision.verdict)
-                .bind(decision.endpoint)
-                .execute(&mut *transaction)
-                .await?;
+            .bind(decision.spec)
+            .bind(decision.question_hash)
+            .bind(decision.calibration_id)
+            .bind(decision.state_hash)
+            .bind(decision.state)
+            .bind(answer)
+            .bind(decision.verdict)
+            .bind(decision.endpoint)
+            .execute(&mut *transaction)
+            .await?;
             ids.push(result.last_insert_rowid());
         }
         transaction.commit().await?;
@@ -152,11 +152,11 @@ impl Store {
         let row: Option<(i64, String)> = sqlx::query_as(
             "SELECT id,answer FROM decisions WHERE calibration_id=?1 AND state_hash=?2 AND spec IS ?3 ORDER BY id DESC LIMIT 1",
         )
-            .bind(calibration_id)
-            .bind(state_hash)
-            .bind(spec)
-            .fetch_optional(&self.pool)
-            .await?;
+        .bind(calibration_id)
+        .bind(state_hash)
+        .bind(spec)
+        .fetch_optional(&self.pool)
+        .await?;
 
         row.map(|(id, answer)| Ok((id, serde_json::from_str(&answer)?)))
             .transpose()
@@ -194,10 +194,10 @@ impl Store {
         let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
             "SELECT id,state,state_hash,label FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL ORDER BY id",
         )
-            .bind(spec)
-            .bind(question_hash)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(spec)
+        .bind(question_hash)
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(rows
             .into_iter()
@@ -257,13 +257,13 @@ impl Store {
         sqlx::query(
             "INSERT INTO calibrations (calibration_id,spec,bands,report) VALUES (?1,?2,?3,?4) ON CONFLICT(calibration_id) DO UPDATE SET bands=excluded.bands,report=excluded.report",
         )
-            .bind(verdict::calibration_key(calibration_id, spec))
-            // The column is NOT NULL: an ad-hoc calibration stores an empty spec.
-            .bind(spec.unwrap_or(""))
-            .bind(serde_json::to_string(bands)?)
-            .bind(serde_json::to_string(report)?)
-            .execute(&self.pool)
-            .await?;
+        .bind(verdict::calibration_key(calibration_id, spec))
+        // The column is NOT NULL: an ad-hoc calibration stores an empty spec.
+        .bind(spec.unwrap_or(""))
+        .bind(serde_json::to_string(bands)?)
+        .bind(serde_json::to_string(report)?)
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
@@ -303,26 +303,25 @@ impl Store {
         usize::try_from(result.rows_affected()).map_err(|e| StoreError(e.to_string()))
     }
 
-    pub async fn questions(&self, limit: i64) -> Result<Vec<QuestionRow>, StoreError> {
+    pub async fn questions(&self, limit: u32) -> Result<Vec<QuestionRow>, StoreError> {
         // spec, question_hash, question, decisions, unsure, labelled, last_at
         type Row = (
             Option<String>,
             String,
             Option<String>,
-            i64,
-            i64,
-            i64,
+            u64,
+            u64,
+            u64,
             String,
         );
-        let rows: Vec<Row> =
-            sqlx::query_as(
-                "SELECT d.spec,d.question_hash,q.question,COUNT(*),SUM(d.verdict='unsure'),COUNT(d.label),MAX(d.ts) \
-                 FROM decisions d LEFT JOIN questions q ON q.question_hash=d.question_hash \
-                 GROUP BY d.spec,d.question_hash ORDER BY COUNT(*) DESC,MAX(d.ts) DESC LIMIT ?1",
-            )
-            .bind(limit)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT d.spec,d.question_hash,q.question,COUNT(*),SUM(d.verdict='unsure'),COUNT(d.label),MAX(d.ts) \
+             FROM decisions d LEFT JOIN questions q ON q.question_hash=d.question_hash \
+             GROUP BY d.spec,d.question_hash ORDER BY COUNT(*) DESC,MAX(d.ts) DESC LIMIT ?1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(rows
             .into_iter()
@@ -357,7 +356,7 @@ impl Store {
         spec: Option<&str>,
         question_hash: &str,
         unlabelled: bool,
-        limit: i64,
+        limit: u32,
     ) -> Result<Vec<DecisionRow>, StoreError> {
         let rows: Vec<(i64, String, String, String, String, Option<String>)> = sqlx::query_as(
             "SELECT id,ts,verdict,answer,state,label FROM decisions \

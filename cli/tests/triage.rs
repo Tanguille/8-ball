@@ -2,7 +2,7 @@ use std::process::Stdio;
 
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
-use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers};
 
 #[path = "../../service/tests/common.rs"]
 mod common;
@@ -12,8 +12,8 @@ async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::
     let embedding = MockServer::start().await;
     Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/systemone"))
-        .respond_with(|response: &wiremock::Request| {
-            let body: Value = serde_json::from_slice(&response.body).unwrap();
+        .respond_with(|request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
             let probabilities = match body["state"].as_str().unwrap() {
                 "bad" => return ResponseTemplate::new(500),
                 "no" => 0.01,
@@ -34,7 +34,7 @@ async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::
     if let Some(healthy) = embed {
         Mock::given(matchers::method("POST"))
             .and(matchers::path("/v1/embeddings"))
-            .respond_with(move |request: &wiremock::Request| {
+            .respond_with(move |request: &Request| {
                 if !healthy {
                     return ResponseTemplate::new(500);
                 }
