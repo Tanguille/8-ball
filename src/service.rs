@@ -95,7 +95,86 @@ pub enum ServiceError {
     Store(#[from] StoreError),
 }
 
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct QuestionsRequest {
+    /// Default 50, at most 500.
+    pub limit: Option<usize>,
+}
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct QuestionsResponse {
+    pub questions: Vec<QuestionSummary>,
+}
+/// Stored decisions of one spec version or one ad-hoc question.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct QuestionSummary {
+    pub spec: Option<String>,
+    pub question_hash: String,
+    /// Instructions and kind. Null for an ad-hoc question that 8-ball answered before it stored question text.
+    pub question: Option<serde_json::Value>,
+    pub decisions: i64,
+    pub unsure: i64,
+    pub labelled: i64,
+    pub last_at: String,
+    /// The current version of a configured spec: `label` accepts its decisions.
+    pub labelable: bool,
+}
+/// `spec` alone selects its current version; `question` alone selects an ad-hoc question; both select an older spec version.
+#[derive(Debug, Default, Deserialize)]
+pub struct DecisionsRequest {
+    pub spec: Option<String>,
+    pub question: Option<String>,
+    #[serde(default)]
+    pub unlabelled: bool,
+    pub limit: Option<usize>,
+}
 #[derive(Debug, Serialize)]
+pub struct DecisionsResponse {
+    pub spec: Option<String>,
+    pub question_hash: String,
+    pub question: Option<serde_json::Value>,
+    pub labelable: bool,
+    pub decisions: Vec<StoredDecision>,
+}
+#[derive(Debug, Serialize)]
+pub struct StoredDecision {
+    pub id: i64,
+    pub at: String,
+    pub verdict: String,
+    /// label -> probability when the question is known, else the raw probabilities in label order.
+    pub probabilities: serde_json::Value,
+    pub state: String,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ReviewRequest {
+    /// A configured spec. Only its current version can be labelled.
+    pub spec: String,
+    /// Default 50, at most 500.
+    pub limit: Option<usize>,
+}
+/// Unlabelled decisions without the model's answer, so a label stays independent of it.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct ReviewResponse {
+    pub spec: String,
+    pub question: serde_json::Value,
+    /// The values `label` accepts.
+    pub labels: Vec<String>,
+    pub decisions: Vec<ReviewItem>,
+}
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct ReviewItem {
+    pub id: i64,
+    pub state: String,
+}
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LabelRequest {
+    /// A decision id from `review` or `decisions`.
+    pub id: i64,
+    /// yes or no for a noul spec, else an option or level name.
+    pub value: String,
+}
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct LabelResponse {
     pub id: i64,
     pub label: String,
@@ -223,6 +302,152 @@ impl Service {
         }
 
         Ok(LabelResponse { id, label: value })
+    }
+
+    pub async fn questions(
+        &self,
+        request: QuestionsRequest,
+    ) -> Result<QuestionsResponse, ServiceError> {
+        let rows = self.store.questions(list_limit(request.limit)).await?;
+        let questions = rows
+            .into_iter()
+            .map(|row| {
+                let current = row
+                    .spec
+                    .as_deref()
+                    .and_then(|spec| self.spec_question(spec));
+                let labelable = current
+                    .as_ref()
+                    .is_some_and(|question| verdict::question_hash(question) == row.question_hash);
+                // Decisions from before the questions table still show the current spec text.
+                let question = row
+                    .question
+                    .as_deref()
+                    .and_then(parse_question)
+                    .or_else(|| {
+                        current
+                            .filter(|_| labelable)
+                            .map(|question| stored_question(&question))
+                    });
+                QuestionSummary {
+                    spec: row.spec,
+                    question_hash: row.question_hash,
+                    question,
+                    decisions: row.decisions,
+                    unsure: row.unsure,
+                    labelled: row.labelled,
+                    last_at: row.last_at,
+                    labelable,
+                }
+            })
+            .collect();
+
+        Ok(QuestionsResponse { questions })
+    }
+
+    pub async fn decisions(
+        &self,
+        request: DecisionsRequest,
+    ) -> Result<DecisionsResponse, ServiceError> {
+        let current = match request.spec.as_deref() {
+            Some(spec) => Some(
+                self.spec_question(spec)
+                    .ok_or_else(|| ServiceError::BadRequest(format!("unknown spec {spec}")))?,
+            ),
+            None => None,
+        };
+        let question_hash = match (&request.question, &current) {
+            (Some(hash), _) => hash.clone(),
+            (None, Some(question)) => verdict::question_hash(question),
+            (None, None) => {
+                return Err(ServiceError::BadRequest("give spec or question".into()));
+            }
+        };
+        let labelable = current
+            .as_ref()
+            .is_some_and(|question| verdict::question_hash(question) == question_hash);
+        let question = self.store.question(&question_hash).await?.map_or_else(
+            || {
+                current
+                    .filter(|_| labelable)
+                    .map(|question| stored_question(&question))
+            },
+            |text| parse_question(&text),
+        );
+        let labels = question
+            .clone()
+            .and_then(|question| serde_json::from_value::<Kind>(question).ok())
+            .map(|kind| kind.labels());
+        let decisions = self
+            .store
+            .decisions(
+                request.spec.as_deref(),
+                &question_hash,
+                request.unlabelled,
+                list_limit(request.limit),
+            )
+            .await?
+            .into_iter()
+            .map(|row| StoredDecision {
+                id: row.id,
+                at: row.at,
+                verdict: row.verdict,
+                probabilities: match &labels {
+                    Some(labels) if labels.len() == row.answer.len() => labels
+                        .iter()
+                        .cloned()
+                        .zip(row.answer.into_iter().map(serde_json::Value::from))
+                        .collect::<serde_json::Map<_, _>>()
+                        .into(),
+                    _ => row.answer.into(),
+                },
+                state: row.state,
+                label: row.label,
+            })
+            .collect();
+
+        Ok(DecisionsResponse {
+            spec: request.spec,
+            question_hash,
+            question,
+            labelable,
+            decisions,
+        })
+    }
+
+    pub async fn review(&self, request: ReviewRequest) -> Result<ReviewResponse, ServiceError> {
+        let question = self
+            .spec_question(&request.spec)
+            .ok_or_else(|| ServiceError::BadRequest(format!("unknown spec {}", request.spec)))?;
+        let decisions = self
+            .store
+            .decisions(
+                Some(&request.spec),
+                &verdict::question_hash(&question),
+                true,
+                list_limit(request.limit),
+            )
+            .await?
+            .into_iter()
+            .map(|row| ReviewItem {
+                id: row.id,
+                state: row.state,
+            })
+            .collect();
+
+        Ok(ReviewResponse {
+            spec: request.spec,
+            labels: question.kind.labels(),
+            question: stored_question(&question),
+            decisions,
+        })
+    }
+
+    /// The configured spec as a question, or None for an unknown spec.
+    fn spec_question(&self, spec: &str) -> Option<Question> {
+        self.resolve_questions(Some(spec), &[], None)
+            .ok()
+            .map(|(mut questions, _)| questions.remove(0))
     }
 
     pub async fn calibrate(
@@ -695,6 +920,7 @@ impl Service {
             let outcome = verdict::verdict(&question.kind, &probabilities, bands);
             let fresh = (!cached).then(|| NewDecision {
                 spec: spec.map(Into::into),
+                question: stored_question(question).to_string(),
                 question_hash,
                 calibration_id,
                 state_hash: state_hash.clone(),
@@ -754,4 +980,24 @@ impl Service {
             })
             .collect())
     }
+}
+
+/// Default 50, at most 500: enough to review in one go without unbounded responses.
+fn list_limit(limit: Option<usize>) -> i64 {
+    i64::try_from(limit.unwrap_or(50).min(500)).expect("at most 500")
+}
+
+/// The stored form of a question: its JSON without the caller's id, which is not part of the hash.
+fn stored_question(question: &Question) -> serde_json::Value {
+    let mut value = serde_json::to_value(question).expect("question serializes");
+    value
+        .as_object_mut()
+        .expect("question is an object")
+        .remove("id");
+
+    value
+}
+
+fn parse_question(text: &str) -> Option<serde_json::Value> {
+    serde_json::from_str(text).ok()
 }

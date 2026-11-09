@@ -15,6 +15,8 @@ pub struct Store {
 pub struct NewDecision {
     pub spec: Option<String>,
     pub question_hash: String,
+    /// The question as JSON, without the caller's id, which is not part of the hash.
+    pub question: String,
     pub calibration_id: String,
     pub state_hash: String,
     pub state: String,
@@ -27,6 +29,24 @@ pub struct Labelled {
     pub state: String,
     pub state_hash: String,
     pub label: String,
+}
+/// Stored decisions grouped by spec and question version.
+pub struct QuestionRow {
+    pub spec: Option<String>,
+    pub question_hash: String,
+    pub question: Option<String>,
+    pub decisions: i64,
+    pub unsure: i64,
+    pub labelled: i64,
+    pub last_at: String,
+}
+pub struct DecisionRow {
+    pub id: i64,
+    pub at: String,
+    pub verdict: String,
+    pub answer: Probs,
+    pub state: String,
+    pub label: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -71,14 +91,19 @@ impl Store {
             .await?;
         // Lock so concurrent first opens cannot both run the migrator.
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
-        let migrator =
-            sqlx::migrate::Migrator::with_migrations(vec![sqlx::migrate::Migration::new(
-                1,
-                "storage".into(),
+        let migration = |version, description: &str, sql: &'static str| {
+            sqlx::migrate::Migration::new(
+                version,
+                description.to_owned().into(),
                 sqlx::migrate::MigrationType::Simple,
-                SCHEMA.into_sql_str(),
+                sql.into_sql_str(),
                 false,
-            )]);
+            )
+        };
+        let migrator = sqlx::migrate::Migrator::with_migrations(vec![
+            migration(1, "storage", SCHEMA),
+            migration(2, "questions", QUESTIONS),
+        ]);
         migrator
             .run(&mut *transaction)
             .await
@@ -92,6 +117,11 @@ impl Store {
         let mut transaction = self.pool.begin().await?;
         let mut ids = Vec::with_capacity(decisions.len());
         for decision in decisions {
+            sqlx::query("INSERT OR IGNORE INTO questions (question_hash,question) VALUES (?1,?2)")
+                .bind(&decision.question_hash)
+                .bind(decision.question)
+                .execute(&mut *transaction)
+                .await?;
             let answer = serde_json::to_string(&decision.answer)?;
             let result = sqlx::query(
                 "INSERT INTO decisions (spec,question_hash,calibration_id,state_hash,state,answer,verdict,endpoint) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -224,9 +254,96 @@ impl Store {
                 .bind(format!("-{retention_days} days"))
                 .execute(&self.pool)
                 .await?;
+        sqlx::query(
+            "DELETE FROM questions WHERE question_hash NOT IN (SELECT question_hash FROM decisions)",
+        )
+        .execute(&self.pool)
+        .await?;
 
         usize::try_from(result.rows_affected()).map_err(|e| StoreError(e.to_string()))
+    }
+
+    pub async fn questions(&self, limit: i64) -> Result<Vec<QuestionRow>, StoreError> {
+        // spec, question_hash, question, decisions, unsure, labelled, last_at
+        type Row = (
+            Option<String>,
+            String,
+            Option<String>,
+            i64,
+            i64,
+            i64,
+            String,
+        );
+        let rows: Vec<Row> =
+            sqlx::query_as(
+                "SELECT d.spec,d.question_hash,q.question,COUNT(*),SUM(d.verdict='unsure'),COUNT(d.label),MAX(d.ts) \
+                 FROM decisions d LEFT JOIN questions q ON q.question_hash=d.question_hash \
+                 GROUP BY d.spec,d.question_hash ORDER BY COUNT(*) DESC,MAX(d.ts) DESC LIMIT ?1",
+            )
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(spec, question_hash, question, decisions, unsure, labelled, last_at)| {
+                    QuestionRow {
+                        spec,
+                        question_hash,
+                        question,
+                        decisions,
+                        unsure,
+                        labelled,
+                        last_at,
+                    }
+                },
+            )
+            .collect())
+    }
+
+    pub async fn question(&self, question_hash: &str) -> Result<Option<String>, StoreError> {
+        Ok(
+            sqlx::query_scalar("SELECT question FROM questions WHERE question_hash=?1")
+                .bind(question_hash)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
+    }
+
+    /// Newest first. `spec` None selects ad-hoc decisions.
+    pub async fn decisions(
+        &self,
+        spec: Option<&str>,
+        question_hash: &str,
+        unlabelled: bool,
+        limit: i64,
+    ) -> Result<Vec<DecisionRow>, StoreError> {
+        let rows: Vec<(i64, String, String, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT id,ts,verdict,answer,state,label FROM decisions \
+             WHERE spec IS ?1 AND question_hash=?2 AND (?3=0 OR label IS NULL) ORDER BY id DESC LIMIT ?4",
+        )
+        .bind(spec)
+        .bind(question_hash)
+        .bind(unlabelled)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|(id, at, verdict, answer, state, label)| {
+                Ok(DecisionRow {
+                    id,
+                    at,
+                    verdict,
+                    answer: serde_json::from_str(&answer)?,
+                    state,
+                    label,
+                })
+            })
+            .collect()
     }
 }
 
 const SCHEMA: &str = include_str!("../migrations/0001_storage.sql");
+const QUESTIONS: &str = include_str!("../migrations/0002_questions.sql");
