@@ -41,11 +41,13 @@ impl Default for Metrics {
 }
 
 impl Metrics {
-    pub(crate) fn render(&self) -> Result<String, std::fmt::Error> {
+    pub(crate) fn render(&self) -> String {
         let mut text = String::new();
-        prometheus_client::encoding::text::encode(&mut text, &self.registry)?;
+        // Only a writer error or a bucketless native histogram fails encode; neither occurs here.
+        prometheus_client::encoding::text::encode(&mut text, &self.registry)
+            .expect("writing to String");
 
-        Ok(text)
+        text
     }
 
     pub(crate) fn record_backend_error(&self, endpoint: &str) {
@@ -56,7 +58,7 @@ impl Metrics {
             .inc();
     }
 
-    pub(crate) fn record_decision(&self, endpoint: String, spec: Option<String>, verdict: &str) {
+    pub(crate) fn record_decision(&self, endpoint: &str, spec: Option<&str>, verdict: &str) {
         let verdict = if spec.is_some() || verdict == "unsure" {
             verdict
         } else {
@@ -64,8 +66,8 @@ impl Metrics {
         };
         self.decisions
             .get_or_create(&DecisionLabels {
-                endpoint,
-                spec: spec.unwrap_or_default(),
+                endpoint: endpoint.into(),
+                spec: spec.unwrap_or_default().into(),
                 verdict: verdict.into(),
             })
             .inc();

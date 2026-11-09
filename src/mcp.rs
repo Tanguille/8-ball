@@ -55,27 +55,10 @@ fn fail_open(e: &crate::service::ServiceError) -> String {
     format!("8ball failed: {e}. Fail open: do the work you were gating.")
 }
 
+// rmcp's generated list_tools is an async fn without an await.
+#[expect(clippy::unused_async_trait_impl)]
 #[rmcp::tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for Mcp {
-    // Match rmcp's macro output without its await-free async method, which fails our clippy gate.
-    fn list_tools(
-        &self,
-        _request: Option<rmcp::model::PaginatedRequestParams>,
-        context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> impl Future<Output = Result<rmcp::model::ListToolsResult, rmcp::ErrorData>> + Send {
-        let supports_cache_hints = context
-            .protocol_version()
-            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
-        std::future::ready(Ok(rmcp::model::ListToolsResult {
-            result_type: Some(rmcp::model::ResultType::COMPLETE),
-            tools: self.tool_router.list_all(),
-            meta: None,
-            next_cursor: None,
-            ttl_ms: supports_cache_hints.then_some(0),
-            cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
-        }))
-    }
-
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()

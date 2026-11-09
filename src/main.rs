@@ -124,10 +124,6 @@ impl Remote {
             .await
     }
 
-    async fn get(&self, path: &str) -> anyhow::Result<Value> {
-        self.send(self.client()?.get(self.at(path))).await
-    }
-
     fn at(&self, path: &str) -> String {
         format!("{}{path}", self.url.trim_end_matches('/'))
     }
@@ -366,10 +362,8 @@ fn make_question(
             criteria: options
                 .into_iter()
                 .map(|text| {
-                    text.split_once('=').map_or_else(
-                        || (text.clone(), String::new()),
-                        |(name, description)| (name.into(), description.into()),
-                    )
+                    let (name, description) = text.split_once('=').unwrap_or((&text, ""));
+                    (name.into(), description.into())
                 })
                 .collect(),
         },
@@ -405,11 +399,7 @@ async fn ask(
         };
         vec![make_question(&kind, instructions, options, levels)]
     };
-    let state = if let Some(state) = state {
-        state
-    } else {
-        std::io::read_to_string(std::io::stdin())?
-    };
+    let state = state.map_or_else(|| std::io::read_to_string(std::io::stdin()), Ok)?;
     let body = remote
         .post(
             "/v1/ask",
@@ -442,7 +432,9 @@ async fn build_service(config: ConfigArgs, db: Option<PathBuf>) -> anyhow::Resul
 }
 
 async fn doctor(remote: &Remote) -> anyhow::Result<i32> {
-    let report = remote.get("/v1/doctor").await?;
+    let report = remote
+        .send(remote.client()?.get(remote.at("/v1/doctor")))
+        .await?;
     println!("{report}");
     let default = report["endpoints"].as_array().and_then(|endpoints| {
         endpoints
@@ -556,10 +548,8 @@ async fn observe(mut args: ObserveArgs) -> anyhow::Result<i32> {
             }),
         )
         .await;
-    let (result, error) = match response {
-        Ok(result) => (Some(result), None),
-        Err(e) => (None, Some(format!("{e:#}"))),
-    };
+    let error = response.as_ref().err().map(|e| format!("{e:#}"));
+    let result = response.ok();
     let record = json!({"mode":"observe", "spec":args.spec, "endpoint":args.endpoint,
         "snapshot":snapshot, "result":result, "error":error,
         "elapsed_ms":start.elapsed().as_secs_f64() * 1000.0,
