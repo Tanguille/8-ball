@@ -269,6 +269,7 @@ fn merge(kind: &Kind, fitted: Bands, previous: Bands) -> Bands {
             default
         }
     };
+
     match (fitted, previous, Bands::default_for(kind)) {
         (
             Bands::Noul { yes_at, no_at },

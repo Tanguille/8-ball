@@ -220,11 +220,11 @@ impl Store {
         let row: Option<(i64, String, String)> = sqlx::query_as(
             "SELECT id,answer,label FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND state_hash=?3 AND label IS NOT NULL ORDER BY id DESC LIMIT 1",
         )
-            .bind(spec)
-            .bind(question_hash)
-            .bind(state_hash)
-            .fetch_optional(&self.pool)
-            .await?;
+        .bind(spec)
+        .bind(question_hash)
+        .bind(state_hash)
+        .fetch_optional(&self.pool)
+        .await?;
 
         row.map(|(id, answer, label)| Ok((id, serde_json::from_str(&answer)?, label)))
             .transpose()
@@ -235,13 +235,13 @@ impl Store {
         spec: Option<&str>,
         question_hash: &str,
     ) -> Result<usize, StoreError> {
-        let count: i64 = sqlx::query_scalar(
+        let count: u64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL",
         )
-            .bind(spec)
-            .bind(question_hash)
-            .fetch_one(&self.pool)
-            .await?;
+        .bind(spec)
+        .bind(question_hash)
+        .fetch_one(&self.pool)
+        .await?;
 
         usize::try_from(count).map_err(|e| StoreError(e.to_string()))
     }

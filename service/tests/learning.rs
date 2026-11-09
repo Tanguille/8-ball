@@ -1,22 +1,15 @@
-use std::sync::Arc;
-
 use serde_json::{Value, json};
 use sqlx::Connection;
 use wiremock::{MockServer, matchers};
 
-use domain::{
-    config::BackendKind,
-    question::Question,
-    verdict::{self, Bands},
-};
-use service::{AskRequest, Decision, QuestionsRequest, Service, TriageRequest, TriageResponse};
-use store::Store;
+use domain::verdict;
+use service::{Decision, TriageResponse};
 
 mod common;
 
 struct App {
-    service: Arc<Service>,
-    store: Store,
+    service: std::sync::Arc<service::Service>,
+    store: store::Store,
     mock: MockServer,
     directory: tempfile::TempDir,
 }
@@ -46,9 +39,11 @@ async fn fixture(learning: &str) -> App {
                     } else {
                         json!({"type":"noul","noul":noul})
                     };
+
                     (id.clone(), answer)
                 })
                 .collect();
+
             wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
         })
         .mount(&mock)
@@ -68,13 +63,13 @@ async fn fixture(learning: &str) -> App {
     }
 }
 
-fn greeting() -> Question {
+fn greeting() -> domain::question::Question {
     serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
         .unwrap()
 }
 
 async fn ask(app: &App, request: Value) -> Decision {
-    let request: AskRequest = serde_json::from_value(request).unwrap();
+    let request: service::AskRequest = serde_json::from_value(request).unwrap();
     app.service.ask(request).await.unwrap().results.remove(0)
 }
 
@@ -83,7 +78,7 @@ async fn spec(app: &App, state: &str) -> Decision {
 }
 
 async fn triage(app: &App, request: Value) -> TriageResponse {
-    let request: TriageRequest = serde_json::from_value(request).unwrap();
+    let request: service::TriageRequest = serde_json::from_value(request).unwrap();
     app.service.triage(request).await.unwrap()
 }
 
@@ -252,7 +247,7 @@ async fn labels_refit_at_every_multiple_of_recalibrate_after() {
     let app = fixture("recalibrate_after = 25").await;
     let calibration_id = verdict::calibration_id(
         &verdict::question_hash(&greeting()),
-        BackendKind::Systemone,
+        domain::config::BackendKind::Systemone,
         &app.mock.uri(),
     );
     for i in 1..=24 {
@@ -278,7 +273,7 @@ async fn labels_refit_at_every_multiple_of_recalibrate_after() {
         .unwrap();
     assert_eq!(
         bands,
-        Bands::Noul {
+        verdict::Bands::Noul {
             yes_at: 0.97,
             no_at: 0.15
         }
@@ -310,7 +305,7 @@ async fn ad_hoc_questions_learn_by_their_stored_text() {
     );
     let questions = app
         .service
-        .questions(QuestionsRequest::default())
+        .questions(service::QuestionsRequest::default())
         .await
         .unwrap()
         .questions;

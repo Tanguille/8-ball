@@ -7,12 +7,12 @@ use indexmap::IndexMap;
 // The JsonSchema derive expands to `schemars::` paths, so the module must be in scope too.
 use rmcp::schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
+use tokio::sync::Mutex;
 
 use backend::{Endpoint, embed::Embedder};
 use domain::{
-    Probs,
-    config::{BackendKind, Config, Learning},
+    config::{BackendKind, Config},
     question::{Kind, Question},
     verdict::{self, Bands},
 };
@@ -261,7 +261,7 @@ enum Action {
 }
 
 /// A stored answer that saves a model call: `(id, probabilities, remembered label)`.
-type Stored = Option<(i64, Probs, Option<String>)>;
+type Stored = Option<(i64, domain::Probs, Option<String>)>;
 
 pub struct Service {
     config: Config,
@@ -270,7 +270,7 @@ pub struct Service {
     store: Store,
     metrics: Metrics,
     /// Held during an automatic refit, so concurrent labels skip theirs.
-    refit: tokio::sync::Mutex<()>,
+    refit: Mutex<()>,
 }
 
 impl Service {
@@ -298,11 +298,11 @@ impl Service {
             embedder,
             store,
             metrics: Metrics::default(),
-            refit: tokio::sync::Mutex::new(()),
+            refit: Mutex::new(()),
         }
     }
 
-    pub(crate) const fn learning(&self) -> &Learning {
+    pub(crate) const fn learning(&self) -> &domain::config::Learning {
         &self.config.learning
     }
 
@@ -342,6 +342,7 @@ impl Service {
                     "decision {id} was made for an older version of spec {spec}"
                 )));
             }
+
             question
         } else {
             self.ad_hoc_question(&question_hash).await?
@@ -383,7 +384,7 @@ impl Service {
             ServiceError::BadRequest("question text unknown: ask it again first".into())
         })?;
         // The stored text leaves out the caller's id, which `Question` needs.
-        let mut question: serde_json::Map<String, Value> =
+        let mut question: Map<String, Value> =
             serde_json::from_str(&text).map_err(|e| ServiceError::BadRequest(e.to_string()))?;
         question.insert("id".into(), "q".into());
 
@@ -506,7 +507,7 @@ impl Service {
                         .iter()
                         .cloned()
                         .zip(row.answer.into_iter().map(Value::from))
-                        .collect::<serde_json::Map<_, _>>()
+                        .collect::<Map<_, _>>()
                         .into(),
                     _ => row.answer.into(),
                 },
@@ -661,6 +662,7 @@ impl Service {
                 let judgments = self
                     .judge(&first.state, spec, slice::from_ref(question), name, false)
                     .await?;
+
                 self.persist(judgments, name, spec)
                     .await?
                     .remove(0)
@@ -843,6 +845,7 @@ impl Service {
                 let mut judgments = self
                     .judge(&state, spec, questions, endpoint, remember)
                     .await?;
+
                 Ok::<_, ServiceError>((index, judgments.remove(0)))
             }))
             .await?;
@@ -1206,6 +1209,7 @@ impl Service {
         if !learning.report || !judgment.learnable || decision.remembered {
             return;
         }
+
         match action {
             Action::Skip if judgment.explore_draw < learning.explore => {
                 decision.verdict = "unsure".into();
