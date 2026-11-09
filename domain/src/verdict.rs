@@ -140,6 +140,24 @@ pub fn calibration_id(
     short_hash(&format!("{question_hash}\n{kind:?}\n{fingerprint}"))
 }
 
+/// Deterministic draw in [0, 1) for one question and state, so exploration never flips an answer.
+#[must_use]
+pub fn explore_draw(question_hash: &str, state_hash: &str) -> f64 {
+    let hash = short_hash(&format!("{question_hash}\n{state_hash}"));
+    let draw = u32::from_str_radix(&hash[..8], 16).expect("short_hash is hex");
+
+    f64::from(draw) / (f64::from(u32::MAX) + 1.0)
+}
+
+/// Spec questions learn under their calibration id. Ad-hoc questions get a separate key, so they never share a spec's labels.
+#[must_use]
+pub fn calibration_key(calibration_id: &str, spec: Option<&str>) -> String {
+    match spec {
+        Some(_) => calibration_id.into(),
+        None => short_hash(&format!("{calibration_id}\nad-hoc")),
+    }
+}
+
 pub struct Example {
     pub probs: crate::Probs,
     pub label: String,
@@ -161,6 +179,7 @@ pub fn calibrate(
     kind: &Kind,
     examples: &[Example],
     target: f64,
+    previous: Option<Bands>,
 ) -> Result<(Bands, Report), String> {
     if !(0.5..=0.99).contains(&target) {
         return Err("precision must be between 0.5 and 0.99".into());
@@ -201,6 +220,7 @@ pub fn calibrate(
         });
         Bands::Level { min_confidence }
     };
+    let bands = previous.map_or(bands, |previous| merge(kind, bands, previous));
     let mut decided = 0;
     let mut correct = 0;
     for example in examples {
@@ -227,6 +247,61 @@ pub fn calibrate(
     };
 
     Ok((bands, report))
+}
+
+/// A threshold outside [0, 1] never decides.
+fn decides(threshold: f64) -> bool {
+    (0.0..=1.0).contains(&threshold)
+}
+
+/// Thin evidence never makes a question less certain: a side without a deciding threshold
+/// keeps the previous one, else the default.
+fn merge(kind: &Kind, fitted: Bands, previous: Bands) -> Bands {
+    let pick = |fitted: f64, previous: Option<f64>, default: f64| {
+        if decides(fitted) {
+            fitted
+        } else {
+            previous.filter(|value| decides(*value)).unwrap_or(default)
+        }
+    };
+    match (fitted, Bands::default_for(kind)) {
+        (
+            Bands::Noul { yes_at, no_at },
+            Bands::Noul {
+                yes_at: default_yes,
+                no_at: default_no,
+            },
+        ) => {
+            let (previous_yes, previous_no) = match previous {
+                Bands::Noul { yes_at, no_at } => (Some(yes_at), Some(no_at)),
+                Bands::Level { .. } => (None, None),
+            };
+            let yes_at = pick(yes_at, previous_yes, default_yes);
+            let no_at = pick(no_at, previous_no, default_no);
+            if yes_at <= no_at {
+                return previous;
+            }
+
+            Bands::Noul { yes_at, no_at }
+        }
+        (
+            Bands::Level { min_confidence },
+            Bands::Level {
+                min_confidence: default,
+            },
+        ) => {
+            let previous = match previous {
+                Bands::Level { min_confidence } => Some(min_confidence),
+                Bands::Noul { .. } => None,
+            };
+
+            Bands::Level {
+                min_confidence: pick(min_confidence, previous, default),
+            }
+        }
+        // calibrate fits bands of the kind's own shape, so this never happens.
+        _ => fitted,
+    }
 }
 
 fn threshold(

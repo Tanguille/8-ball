@@ -490,7 +490,7 @@ impl Service {
             });
         }
         let (bands, mut report) =
-            verdict::calibrate(&question.kind, &examples, precision.unwrap_or(0.95))
+            verdict::calibrate(&question.kind, &examples, precision.unwrap_or(0.95), None)
                 .map_err(ServiceError::BadRequest)?;
         report.warnings.extend(warnings);
         if !dry_run {

@@ -196,7 +196,7 @@ All chunks run one after another in the same worktree. Two chunks in one tree wo
 ### Progress Tracker
 
 #### Wave 1 (sequential) — Domain
-- [ ] Chunk 1: `domain`: `Learning`, `explore_draw`, `calibration_key`, merging `calibrate`
+- [x] Chunk 1: `domain`: `Learning`, `explore_draw`, `calibration_key`, merging `calibrate`
 
 #### Wave 2 (sequential) — Store
 - [ ] Chunk 2: `store`: `remembered`, `labelled_count`, `labelled(Option)`, `metadata` with endpoint (depends on Chunk 1)
@@ -220,7 +220,7 @@ Each wave holds one chunk, so no write sets overlap within a wave.
 ---
 
 ### Chunk 1: `domain`: config and verdict helpers
-**Status:** Not Started
+**Status:** Complete
 **Wave:** 1
 **Estimated Context:** ~35k tokens
 **Complexity:** Low
