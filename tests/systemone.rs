@@ -83,7 +83,8 @@ async fn long_state_is_fitted() {
     let mut config = endpoint_config(&server.uri());
     config.max_state_chars = Some(10);
     let endpoint = Endpoint::new("d3", &config, None);
-    let sent = endpoint.fitted("abcdefghijklmnopqrstuvwxyz0123");
+    let info = endpoint.info().await.unwrap();
+    let sent = endpoint.fitted(&info, "abcdefghijklmnopqrstuvwxyz0123");
     assert_eq!(sent, "abcde\n…\nz0123");
     endpoint.ask(&sent, &[question()]).await.unwrap();
     let requests = server.received_requests().await.unwrap();

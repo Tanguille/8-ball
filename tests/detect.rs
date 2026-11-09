@@ -34,9 +34,44 @@ async fn decisions_props_and_fingerprint() {
     let info = endpoint.info().await.unwrap();
     assert_eq!(info.kind, BackendKind::Systemone);
     assert_eq!(info.concurrency, 4);
-    assert_eq!(info.fingerprint, "/m/a.gguf@b1-x");
+    // build_info is left out: a llama.cpp bump must not drop the cache and calibration.
+    assert_eq!(info.fingerprint, "/m/a.gguf");
     endpoint.info().await.unwrap();
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+/// Steps the clock past the info refresh interval between real HTTP calls.
+async fn a_minute_later() {
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(61)).await;
+    tokio::time::resume();
+}
+#[tokio::test]
+async fn info_refreshes_after_a_minute_and_keeps_its_identity_through_a_props_outage() {
+    let server = MockServer::start().await;
+    for (model_path, status) in [("/m/a.gguf", 200), ("/m/b.gguf", 200), ("", 500)] {
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path("/props"))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .set_body_json(json!({"total_slots":1,"model_path":model_path})),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+    }
+    let endpoint = Endpoint::new(
+        "d3",
+        &endpoint_config(&server.uri(), "kind='systemone'"),
+        None,
+    );
+    assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/a.gguf");
+    assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/a.gguf");
+    a_minute_later().await;
+    assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/b.gguf");
+    a_minute_later().await;
+    // The fallback fingerprint would be the URL; the last model path is kept instead.
+    assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/b.gguf");
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
 }
 #[tokio::test]
 async fn text_architecture_and_model_detect_logprob() {
