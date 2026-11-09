@@ -102,21 +102,28 @@ async fn binary_stdio_lists_tools_and_preserves_fail_open_errors() {
             .mount(&mock)
             .await;
         let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-        let endpoint_config = directory.path().join("config.toml");
         let database_path = directory.path().join("db.sqlite");
-        std::fs::write(
-            &endpoint_config,
-            format!("default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'", mock.uri()),
-        )
-        .unwrap();
+        let text = format!(
+            "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'",
+            mock.uri()
+        );
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"));
+        // Config variables from the developer's shell would conflict with the source chosen below.
         command
             .arg("mcp")
-            .arg("--config")
-            .arg(endpoint_config)
             .arg("--db")
             .arg(database_path)
+            .env_remove("EIGHTBALL_CONFIG")
+            .env_remove("EIGHTBALL_CONFIG_TOML")
             .kill_on_drop(true);
+        // Cover both config sources: a file in one run, the environment in the other.
+        if status == 200 {
+            let endpoint_config = directory.path().join("config.toml");
+            std::fs::write(&endpoint_config, text).unwrap();
+            command.arg("--config").arg(endpoint_config);
+        } else {
+            command.env("EIGHTBALL_CONFIG_TOML", text);
+        }
         let client =
             ().serve(rmcp::transport::TokioChildProcess::new(command).unwrap())
                 .await

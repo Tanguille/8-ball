@@ -239,6 +239,7 @@ A flag overrides its variable.
 | Variable | Flag | Purpose |
 | --- | --- | --- |
 | `EIGHTBALL_CONFIG` | `--config` | Configuration path for `serve` and `mcp` |
+| `EIGHTBALL_CONFIG_TOML` | `--config-toml` | Configuration TOML text for `serve` and `mcp`, instead of a file. You cannot also set `EIGHTBALL_CONFIG`. |
 | `EIGHTBALL_LISTEN` | `--listen` | `serve` listen address (default `127.0.0.1:8080`, image default `0.0.0.0:8080`) |
 | `EIGHTBALL_DB` | `--db` | SQLite path for `serve` and `mcp` (default `$XDG_STATE_HOME/8ball/8ball.db`, otherwise `$HOME/.local/state/8ball/8ball.db`) |
 | `EIGHTBALL_API_KEY` | `--api-key` | Bearer key for the server and the client |
@@ -456,8 +457,10 @@ These options are off by default. Set them to `true` to turn them on:
 
 The chart expects a ConfigMap `<release>-config` with a `config.toml` key, and it creates a 1 GiB PVC for the database. `helm uninstall` keeps that PVC. Set `persistence.data.existingClaim` to use your own PVC.
 
+To use no ConfigMap, set `persistence.config.enabled: false`. Then, in `controllers.eightball.containers.app.env`, set `EIGHTBALL_CONFIG` to `null` and put the TOML in `EIGHTBALL_CONFIG_TOML`.
+
 The image contains the `8ball` CLI and server, not models or server configuration. Publishing an image does not enable filtering or deploy the Hermes observation pilot. To run the image:
 
-- Mount a TOML configuration read-only.
+- Mount a TOML configuration read-only, or set `EIGHTBALL_CONFIG_TOML`.
 - Provide writable storage for `EIGHTBALL_DB`.
 - Set `EIGHTBALL_API_KEY`.
