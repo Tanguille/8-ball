@@ -13,7 +13,6 @@
     "from": "now-7d",
     "to": "now"
   },
-  "timezone": "",
   "templating": {
     "list": [
       {
@@ -28,10 +27,6 @@
       }
     ]
   },
-  "annotations": {
-    "list": []
-  },
-  "links": [],
   "panels": [
     {
       "id": 1,
@@ -63,18 +58,12 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "sum(increase(eightball_decisions_total[$__range]))",
-          "legendFormat": "",
           "instant": true,
           "range": false
         }
@@ -130,18 +119,12 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "sum(increase(eightball_decisions_total{verdict=\"unsure\"}[$__range])) / sum(increase(eightball_decisions_total[$__range]))",
-          "legendFormat": "",
           "instant": true,
           "range": false
         }
@@ -193,18 +176,12 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "sum(increase(eightball_backend_errors_total[$__range])) or vector(0)",
-          "legendFormat": "",
           "instant": true,
           "range": false
         }
@@ -252,18 +229,12 @@
               }
             ]
           }
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "count(sum by (spec) (increase(eightball_decisions_total{spec!=\"\"}[$__range])) > 0) or vector(0)",
-          "legendFormat": "",
           "instant": true,
           "range": false
         }
@@ -308,15 +279,10 @@
             },
             "lineWidth": 1
           }
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "sum by (verdict) (increase(eightball_decisions_total[$__interval]))",
           "legendFormat": "{{verdict}}"
@@ -364,15 +330,10 @@
             },
             "lineWidth": 1
           }
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "label_replace(sum by (spec) (increase(eightball_decisions_total[$__interval])), \"spec\", \"ad-hoc\", \"spec\", \"\")",
           "legendFormat": "{{spec}}"
@@ -419,15 +380,10 @@
           },
           "min": 0,
           "max": 1
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "sum(increase(eightball_decisions_total{verdict=\"unsure\"}[1h])) / sum(increase(eightball_decisions_total[1h]))",
           "legendFormat": "unsure"
@@ -475,15 +431,10 @@
             },
             "lineWidth": 1
           }
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "sum by (endpoint) (increase(eightball_backend_errors_total[$__interval]))",
           "legendFormat": "{{endpoint}}"
@@ -531,15 +482,10 @@
             },
             "lineWidth": 1
           }
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "sum by (endpoint) (increase(eightball_decisions_total[$__interval]))",
           "legendFormat": "{{endpoint}}"
@@ -578,15 +524,10 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short"
-        },
-        "overrides": []
+        }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
           "refId": "A",
           "expr": "label_replace(sum by (spec, verdict) (increase(eightball_decisions_total[$__range])), \"spec\", \"ad-hoc\", \"spec\", \"\")",
           "instant": true,

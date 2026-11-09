@@ -15,7 +15,6 @@ unused_qualifications = "warn"
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-style = { level = "warn", priority = -1 }
 unnecessary_self_imports = "warn"
 assert_is_empty = "allow"
 # Doc sections for every error/panic are noise in a small binary crate.

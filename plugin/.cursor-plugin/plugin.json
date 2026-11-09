@@ -12,6 +12,5 @@
     "mcp",
     "cursor"
   ],
-  "skills": "./skills/",
   "mcpServers": "./.mcp.cursor.json"
 }

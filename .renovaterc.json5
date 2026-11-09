@@ -5,9 +5,6 @@
     "github>home-operations/renovate-presets#11.0.0",
   ],
   labels: ["dependencies"],
-  automerge: false,
-  automergeType: "pr",
-  platformAutomerge: false,
   // The Renovate operator watches this checkbox to trigger a repository run.
   dependencyDashboardFooter: "- [ ] <!-- manual job -->Check this box to trigger a request for Renovate to run again on this repository",
   packageRules: [
