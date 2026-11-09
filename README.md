@@ -42,7 +42,7 @@ In another terminal:
 8ball ask --spec greeting --state "hey there"
 ```
 
-The dev stack downloads about 4.5 GB to `~/.cache/8ball-models`. For CPU inference, use `EIGHTBALL_DEV_NGL=0 dev/models.sh up`. To stop the stack, use `dev/models.sh down`. On rootless Podman with SELinux enforcing, `dev/models.sh up` fails, because the containers cannot write to the model cache.
+The dev stack downloads about 4.5 GB to `~/.cache/8ball-models`. For CPU inference, use `EIGHTBALL_DEV_NGL=0 dev/models.sh up`. To stop the stack, use `dev/models.sh down`. The stack works with Docker and with rootless Podman, also with SELinux enforcing.
 
 ## Quickstart: shared server
 

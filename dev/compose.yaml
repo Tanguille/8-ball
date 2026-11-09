@@ -9,7 +9,7 @@ x-llama: &llama
     LLAMA_CACHE: /cache
     LLAMA_ARG_N_GPU_LAYERS: "${EIGHTBALL_DEV_NGL:-all}"
   volumes:
-    - ${HOME}/.cache/8ball-models:/cache
+    - ${HOME}/.cache/8ball-models:/cache:z
   restart: unless-stopped
   healthcheck:
     test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]

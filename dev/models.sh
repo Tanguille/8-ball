@@ -4,6 +4,11 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 EIGHTBALL_DEV_UID="$(id -u)"
 EIGHTBALL_DEV_GID="$(id -g)"
+# Rootless Podman maps only container root to the host user, so any other id cannot write the cache.
+if [ "$(docker info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" = true ]; then
+  EIGHTBALL_DEV_UID=0
+  EIGHTBALL_DEV_GID=0
+fi
 export EIGHTBALL_DEV_UID EIGHTBALL_DEV_GID
 mkdir -p "$HOME/.cache/8ball-models"
 case "${1:-status}" in
