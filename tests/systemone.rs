@@ -142,11 +142,7 @@ async fn bearer_only_when_set() {
             ResponseTemplate::new(200).set_body_json(response()),
         )
         .await;
-        let mut config = endpoint_config(&server.uri());
-        if key.is_some() {
-            config.api_key_env = Some("EIGHTBALL_TEST_KEY".into());
-        }
-        let endpoint = Endpoint::new("d3", &config, key.clone());
+        let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), key.clone());
         endpoint.ask("hi", &[question()]).await.unwrap();
         let requests: Vec<_> = server
             .received_requests()

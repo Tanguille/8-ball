@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
+mod common;
+
 async fn app(status: u16) -> (String, MockServer, tempfile::TempDir) {
     let mock = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
@@ -16,23 +18,9 @@ async fn app(status: u16) -> (String, MockServer, tempfile::TempDir) {
         mock.uri()
     ))
     .unwrap();
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    let service = std::sync::Arc::new(eightball::service::Service::new(endpoint_config, store));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            eightball::http::router(service, None, &tokio_util::sync::CancellationToken::new()),
-        )
-        .await
-        .unwrap();
-    });
+    let (service, _, directory) = common::service(endpoint_config).await;
 
-    (url, mock, directory)
+    (common::serve(service, None).await, mock, directory)
 }
 #[tokio::test]
 async fn noul_ask_returns_probabilities_and_verdict() {

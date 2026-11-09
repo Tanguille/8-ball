@@ -1,17 +1,17 @@
-use std::sync::Arc;
-
 use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
 use eightball::{
     config::Config,
-    service::{AskRequest, Decision, Service},
+    service::{Decision, Service},
     store::Store,
     verdict,
 };
 
+mod common;
+
 struct App {
-    service: Arc<Service>,
+    service: std::sync::Arc<Service>,
     model: MockServer,
     directory: tempfile::TempDir,
     url: String,
@@ -56,22 +56,8 @@ async fn app() -> App {
         ),
     )
     .unwrap();
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    let service = Arc::new(Service::new(config.clone(), store.clone()));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    let served = service.clone();
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            eightball::http::router(served, None, &tokio_util::sync::CancellationToken::new()),
-        )
-        .await
-        .unwrap();
-    });
+    let (service, store, directory) = common::service(config.clone()).await;
+    let url = common::serve(service.clone(), None).await;
     App {
         service,
         model,
@@ -89,17 +75,9 @@ async fn post(app: &App, path: &str, body: Value) -> reqwest::Response {
         .await
         .unwrap()
 }
-fn request(spec: &str, state: &str) -> AskRequest {
-    AskRequest {
-        spec: Some(spec.into()),
-        state: state.into(),
-        questions: vec![],
-        endpoint: None,
-    }
-}
 async fn ask(service: &Service, spec: &str, state: &str) -> Decision {
     service
-        .ask(request(spec, state))
+        .ask(serde_json::from_value(json!({"spec":spec,"state":state})).unwrap())
         .await
         .unwrap()
         .results
@@ -203,7 +181,7 @@ async fn label_validation_rejects_unknown_adhoc_old_and_invalid_values() {
             .to_string()
             .contains("no decision")
     );
-    let adhoc: AskRequest = serde_json::from_value(
+    let adhoc: eightball::service::AskRequest = serde_json::from_value(
         json!({"state":"hello","questions":[{"id":"q","type":"noul","instructions":"Ad hoc?"}]}),
     )
     .unwrap();

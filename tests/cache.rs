@@ -45,29 +45,12 @@ async fn ask_one(service: &Service, request: AskRequest) -> Decision {
     service.ask(request).await.unwrap().results.remove(0)
 }
 #[tokio::test]
-async fn repeated_ask_reuses_answer_and_row_id() {
-    let (service, _store, mock, _dir) = fixture().await;
-    let first = ask_one(&service, request("hello")).await;
-    let second = ask_one(&service, request("hello")).await;
-    assert!(first.id > 0);
-    assert!(!first.cached);
-    assert!(second.cached);
-    assert_eq!(first.id, second.id);
-    assert_eq!(
-        mock.received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .filter(|request| request.method == "POST")
-            .count(),
-        1
-    );
-}
-#[tokio::test]
 async fn cache_hashes_exactly_the_fitted_state() {
     let (service, _store, mock, _dir) = fixture().await;
     let first = ask_one(&service, request("abcde first middle z0123")).await;
     let second = ask_one(&service, request("abcde different middle z0123")).await;
+    assert!(first.id > 0);
+    assert!(!first.cached);
     assert!(second.cached);
     assert_eq!(first.id, second.id);
     let requests = mock.received_requests().await.unwrap();

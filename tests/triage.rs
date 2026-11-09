@@ -4,6 +4,8 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
+mod common;
+
 async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::TempDir) {
     let model = MockServer::start().await;
     let embedding = MockServer::start().await;
@@ -68,21 +70,8 @@ async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::
         model.uri()
     ))
     .unwrap();
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-    let service = std::sync::Arc::new(eightball::service::Service::new(config, store));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            eightball::http::router(service, None, &tokio_util::sync::CancellationToken::new()),
-        )
-        .await
-        .unwrap();
-    });
+    let (service, _, directory) = common::service(config).await;
+    let url = common::serve(service, None).await;
 
     (url, model, embedding, directory)
 }
@@ -105,6 +94,25 @@ async fn posts(model: &MockServer) -> usize {
         .iter()
         .filter(|request| request.method == "POST")
         .count()
+}
+async fn cli_triage(args: &[&str], items: &[u8]) -> std::process::Output {
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+        .arg("triage")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(items).await.unwrap();
+    let output = child.wait_with_output().await.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    output
 }
 #[tokio::test]
 async fn dedupes_and_partitions_verdicts() {
@@ -227,26 +235,7 @@ async fn one_failed_judgment_fails_whole_triage() {
 #[tokio::test]
 async fn cli_reads_json_items_from_stdin() {
     let (url, _model, _embedding, _dir) = app(None).await;
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
-        .args(["triage", "Is this relevant?", "--url", &url])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(br#"["yes1","no"]"#)
-        .await
-        .unwrap();
-    let output = child.wait_with_output().await.unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let output = cli_triage(&["Is this relevant?", "--url", &url], br#"["yes1","no"]"#).await;
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body["kept"][0]["index"], 0);
     assert_eq!(body["dropped"], 1);
@@ -360,34 +349,18 @@ async fn cli_supports_named_spec_and_context_file() {
     let (url, model, _embedding, directory) = app(None).await;
     let context_path = directory.path().join("context.txt");
     std::fs::write(&context_path, "uses kopiur").unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
-        .args([
-            "triage",
+    cli_triage(
+        &[
             "--spec",
             "relevant",
             "--context-file",
             context_path.to_str().unwrap(),
             "--url",
             &url,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(br#"["backup change"]"#)
-        .await
-        .unwrap();
-    let output = child.wait_with_output().await.unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+        ],
+        br#"["backup change"]"#,
+    )
+    .await;
     let requests = model.received_requests().await.unwrap();
     let call = requests
         .iter()

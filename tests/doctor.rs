@@ -1,8 +1,14 @@
 use wiremock::{MockServer, matchers};
 
-use eightball::service::Service;
+mod common;
 
-async fn service(default: &str) -> (Service, MockServer, tempfile::TempDir) {
+async fn service(
+    default: &str,
+) -> (
+    std::sync::Arc<eightball::service::Service>,
+    MockServer,
+    tempfile::TempDir,
+) {
     let mock = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/systemone"))
@@ -24,12 +30,9 @@ async fn service(default: &str) -> (Service, MockServer, tempfile::TempDir) {
             ),
         )
         .unwrap();
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = eightball::store::Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
+    let (service, _, directory) = common::service(config).await;
 
-    (Service::new(config, store), mock, directory)
+    (service, mock, directory)
 }
 #[tokio::test]
 async fn reports_healthy_probe_and_dead_error() {
@@ -55,20 +58,7 @@ async fn reports_healthy_probe_and_dead_error() {
 async fn cli_exit_depends_on_default_endpoint() {
     for (default, want) in [("healthy", 0), ("dead", 4)] {
         let (service, _mock, _dir) = service(default).await;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let task = tokio::spawn(async move {
-            axum::serve(
-                listener,
-                eightball::http::router(
-                    std::sync::Arc::new(service),
-                    None,
-                    &tokio_util::sync::CancellationToken::new(),
-                ),
-            )
-            .await
-            .unwrap();
-        });
+        let url = common::serve(service, None).await;
         let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args(["doctor", "--url", &url])
             .output()
@@ -82,6 +72,5 @@ async fn cli_exit_depends_on_default_endpoint() {
         );
         let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(body["endpoints"].as_array().unwrap().len(), 2);
-        task.abort();
     }
 }
