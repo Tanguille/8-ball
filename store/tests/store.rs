@@ -225,7 +225,7 @@ async fn pruned_ids_never_label_replacement_rows() {
     );
 }
 
-const LEGACY_SCHEMA: &str  =  "
+const LEGACY_SCHEMA: &str = "
 CREATE TABLE decisions (
  id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  spec TEXT, question_hash TEXT NOT NULL, calibration_id TEXT NOT NULL,

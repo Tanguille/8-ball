@@ -1,4 +1,4 @@
-use std::io::BufRead;
+use std::{io::BufRead, process::Command};
 
 use serde_json::{Value, json};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
@@ -17,7 +17,7 @@ impl Drop for Server {
 fn serve(mock: &MockServer) -> Server {
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let database_path = directory.path().join("db.sqlite");
-    let child = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let child = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "serve",
             "--db",
@@ -49,6 +49,7 @@ fn serve(mock: &MockServer) -> Server {
             return server;
         }
     }
+
     panic!("server exited before logging listening address");
 }
 async fn mock(probabilities: f64) -> MockServer {
@@ -69,7 +70,7 @@ async fn noul_exit_codes() {
     for (probabilities, code, want) in [(0.97, 0, "yes"), (0.02, 1, "no"), (0.5, 3, "unsure")] {
         let mock = mock(probabilities).await;
         let server = serve(&mock);
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+        let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args([
                 "ask",
                 "noul",
@@ -137,7 +138,7 @@ async fn choice_prints_billing() {
         .mount(&mock)
         .await;
     let server = serve(&mock);
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
             "choice",
@@ -166,7 +167,7 @@ fn dead_server_exits_four() {
     let unused = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let dead = unused.local_addr().unwrap();
     drop(unused);
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
             "noul",

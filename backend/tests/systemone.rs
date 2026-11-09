@@ -1,9 +1,6 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use serde_json::{Value, json};
@@ -33,7 +30,7 @@ async fn mount(server: &MockServer, template: ResponseTemplate) {
 #[tokio::test]
 async fn three_questions_one_request() {
     let server = MockServer::start().await;
-    let test_questions: Vec<Question>  =  serde_json::from_value(json!([
+    let test_questions: Vec<Question> = serde_json::from_value(json!([
         {"id":"q1","type":"noul","instructions":"Is this a greeting?"},
         {"id":"q2","type":"choice","instructions":"Which team?","criteria":{"billing":"","shipping":""}},
         {"id":"q3","type":"score","instructions":"How urgent?","criteria":["can wait","today","now"]}
@@ -50,8 +47,8 @@ async fn three_questions_one_request() {
             .zip([vec![0.97, 0.03], vec![0.9, 0.1], vec![0.1, 0.6, 0.3]])
     {
         assert_eq!(actual.len(), expected.len());
-        for (a, e) in actual.iter().zip(expected) {
-            assert!((a - e).abs() < 1e-9);
+        for (probability, expected_probability) in actual.iter().zip(expected) {
+            assert!((probability - expected_probability).abs() < 1e-9);
         }
     }
     let requests: Vec<_> = server
@@ -114,12 +111,15 @@ async fn http_400_is_error_with_body() {
     )
     .await;
     let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), None);
-    let err = endpoint
+    let error = endpoint
         .ask("hi", &[question()])
         .await
         .unwrap_err()
         .to_string();
-    assert!(err.contains("400") && err.contains("too long"), "{err}");
+    assert!(
+        error.contains("400") && error.contains("too long"),
+        "{error}"
+    );
 }
 #[tokio::test]
 async fn http_501_is_not_decision_model() {
@@ -184,7 +184,7 @@ async fn concurrency_one_serializes() {
                             // Both handlers must be in flight; serial execution times out instead.
                             barrier.wait().await;
                         } else {
-                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         }
                         active.fetch_sub(1, Ordering::SeqCst);
 
@@ -202,12 +202,12 @@ async fn concurrency_one_serializes() {
         config.concurrency = Some(concurrency);
         let endpoint = Endpoint::new("d3", &config, None);
         let test_questions = [question()];
-        let (a, b) = tokio::join!(
+        let (first, second) = tokio::join!(
             endpoint.ask("hi", &test_questions),
             endpoint.ask("hi", &test_questions)
         );
-        a.unwrap();
-        b.unwrap();
+        first.unwrap();
+        second.unwrap();
         assert_eq!(peak.load(Ordering::SeqCst), concurrency);
         task.abort();
     }

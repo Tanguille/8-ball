@@ -18,8 +18,8 @@ async fn ten_texts_use_two_ordered_batches() {
     let mock = MockServer::start().await;
     Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/embeddings"))
-        .respond_with(|response: &wiremock::Request| {
-            let body: Value = serde_json::from_slice(&response.body).unwrap();
+        .respond_with(|request: &wiremock::Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
             let data: Vec<_> = body["input"]
                 .as_array()
                 .unwrap()
@@ -27,6 +27,7 @@ async fn ten_texts_use_two_ordered_batches() {
                 .enumerate()
                 .map(|(i, _)| json!({"index":i,"embedding":[1.0,0.0]}))
                 .collect();
+
             ResponseTemplate::new(200).set_body_json(json!({"data":data}))
         })
         .mount(&mock)

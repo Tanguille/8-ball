@@ -1,5 +1,3 @@
-use serde_json::json;
-
 use crate::BackendError;
 
 pub async fn ask(
@@ -7,7 +5,7 @@ pub async fn ask(
     info: &crate::Info,
     state: &str,
     questions: &[domain::question::Question],
-) -> Result<Vec<crate::Probs>, BackendError> {
+) -> Result<Vec<domain::Probs>, BackendError> {
     if questions
         .iter()
         .any(|question| !matches!(question.kind, domain::question::Kind::Noul { .. }))
@@ -16,7 +14,7 @@ pub async fn ask(
     }
 
     futures::future::try_join_all(questions.iter().map(|question| async move {
-        let body = json!({"query":question.instructions,"documents":[state]});
+        let body = serde_json::json!({"query":question.instructions,"documents":[state]});
         let response = endpoint.post_json(info, "/v1/rerank", body).await?;
         let score = response["results"][0]["relevance_score"]
             .as_f64()

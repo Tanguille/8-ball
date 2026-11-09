@@ -1,6 +1,6 @@
 use std::{fmt::Write, sync::Arc};
 
-use rmcp::{Json, handler::server::wrapper::Parameters, model::ServerConfig, tool, tool_router};
+use rmcp::{Json, handler::server::wrapper::Parameters, model::ServerConfig, tool};
 
 use crate::Service;
 
@@ -10,7 +10,7 @@ pub struct Mcp {
     tool_router: rmcp::handler::server::router::tool::ToolRouter<Self>,
 }
 
-#[tool_router]
+#[rmcp::tool_router]
 impl Mcp {
     #[must_use]
     pub fn new(service: Arc<Service>) -> Self {

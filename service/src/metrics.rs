@@ -1,10 +1,6 @@
 use prometheus_client::{
     encoding::EncodeLabelSet,
-    metrics::{
-        counter::Counter,
-        family::Family,
-        histogram::{Histogram, exponential_buckets},
-    },
+    metrics::{counter::Counter, family::Family, histogram::Histogram},
     registry::Registry,
 };
 
@@ -35,8 +31,11 @@ impl Default for Metrics {
         let decisions = Family::<DecisionLabels, Counter>::default();
         let backend_errors = Family::<EndpointLabels, Counter>::default();
         // 25 ms to 12.8 s: decision calls take about 1 s, and the 20 s timeout lands in +Inf.
-        let backend_seconds: Latency =
-            Family::new_with_constructor(|| Histogram::new(exponential_buckets(0.025, 2.0, 10)));
+        let backend_seconds: Latency = Family::new_with_constructor(|| {
+            Histogram::new(prometheus_client::metrics::histogram::exponential_buckets(
+                0.025, 2.0, 10,
+            ))
+        });
         let trimmed_states = Family::<EndpointLabels, Counter>::default();
         registry.register("eightball_decisions", "Decision results", decisions.clone());
         registry.register(

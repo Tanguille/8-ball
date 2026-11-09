@@ -1,14 +1,18 @@
 use std::{
+    fs,
     io::{BufRead, Read},
+    path::Path,
     process::Command,
 };
 
 use rmcp::{ServiceExt, model::CallToolRequestParams, object, transport::TokioChildProcess};
 use serde_json::json;
+use tempfile::Builder;
 
 use backend::{Endpoint, embed};
 use domain::{config::Config, question::Question, verdict};
 use service::Service;
+use store::Store;
 
 async fn require(port: u16) {
     let healthy = reqwest::Client::builder()
@@ -24,21 +28,27 @@ async fn require(port: u16) {
         "model server on :{port} is not up; run dev/models.sh up"
     );
 }
+
 fn dev_config_path() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../dev/config.toml")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../dev/config.toml")
 }
+
 fn dev_config() -> Config {
     Config::load(&dev_config_path()).unwrap()
 }
+
 fn api_key(variable: Option<&str>) -> Option<String> {
     variable.and_then(|name| std::env::var(name).ok())
 }
+
 fn endpoint(name: &str, config: &domain::config::EndpointConfig) -> Endpoint {
     Endpoint::new(name, config, api_key(config.api_key_env.as_deref()))
 }
+
 fn d3() -> Endpoint {
     endpoint("d3", &dev_config().endpoints["d3"])
 }
+
 fn questions() -> Vec<Question> {
     serde_json::from_value(json!([
         {"id":"greeting","type":"noul","instructions":"Is this message a greeting?"},
@@ -46,6 +56,7 @@ fn questions() -> Vec<Question> {
         {"id":"urgency","type":"score","instructions":"How urgent is this?","criteria":["can wait","this week","today","right now"]}
     ])).unwrap()
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_noul_clear_cases() {
@@ -70,6 +81,7 @@ async fn live_systemone_noul_clear_cases() {
         );
     }
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_choice() {
@@ -91,6 +103,7 @@ async fn live_systemone_choice() {
         );
     }
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_score() {
@@ -119,6 +132,7 @@ async fn live_systemone_score() {
     assert!(verdict::expected_score(&high[0]) > 2.0);
     assert!(verdict::expected_score(&low[0]) < 1.5);
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_three_questions_one_call() {
@@ -136,6 +150,7 @@ async fn live_systemone_three_questions_one_call() {
         assert!((probabilities.iter().sum::<f64>() - 1.0).abs() < 1e-6);
     }
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_long_state_fits() {
@@ -160,7 +175,7 @@ async fn live_systemone_long_state_fits() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_cli_ask() {
     require(9931).await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
     let config = dev_config_path();
     let server = live_server(&config, &directory.path().join("db.sqlite"), None);
     let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
@@ -200,6 +215,7 @@ async fn live_detect_d3() {
         info.fingerprint
     );
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_detect_chat() {
@@ -249,6 +265,7 @@ async fn live_logprob_noul() {
         }
     }
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_choice() {
@@ -273,6 +290,7 @@ async fn live_logprob_choice() {
     eprintln!("chat choice correct: {correct}/3");
     assert!(correct >= 2);
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_mass() {
@@ -405,20 +423,21 @@ async fn live_cache_skips_model() {
 }
 
 async fn calibration_service(config: Config) -> (Service, tempfile::TempDir) {
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = store::Store::open(&directory.path().join("db.sqlite"))
+    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
+    let store = Store::open(&directory.path().join("db.sqlite"))
         .await
         .unwrap();
 
     (Service::new(config, store), directory)
 }
+
 fn spec_request(state: &str, spec: &str) -> service::AskRequest {
     serde_json::from_value(json!({"state":state,"spec":spec})).unwrap()
 }
+
 fn fixture_rows(spec: &str) -> Vec<(String, String)> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("tests/fixtures/{spec}.jsonl"));
-    let rows: Vec<_> = std::fs::read_to_string(path)
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/{spec}.jsonl"));
+    let rows: Vec<_> = fs::read_to_string(path)
         .unwrap()
         .lines()
         .map(|line| {
@@ -442,6 +461,7 @@ fn fixture_rows(spec: &str) -> Vec<(String, String)> {
 
     rows
 }
+
 async fn fit_fixture(service: &Service, spec: &str) -> service::CalibrateResponse {
     for (index, (state, label)) in fixture_rows(spec).into_iter().enumerate() {
         if index % 3 == 0 {
@@ -476,6 +496,7 @@ async fn fit_fixture(service: &Service, spec: &str) -> service::CalibrateRespons
 
     result
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_calibrate_holdout() {
@@ -514,22 +535,23 @@ async fn live_calibrate_holdout() {
         }
     }
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_question_edit_invalidates() {
     require(9931).await;
     let (service, directory) = calibration_service(dev_config()).await;
     fit_fixture(&service, "greeting").await;
-    let original = std::fs::read_to_string(dev_config_path()).unwrap();
+    let original = fs::read_to_string(dev_config_path()).unwrap();
     let edited = original.replace(
         "Is this message a greeting?",
         "Is this message a greeting exactly?",
     );
     let path = directory.path().join("edited.toml");
-    std::fs::write(&path, edited).unwrap();
+    fs::write(&path, edited).unwrap();
     let changed = Service::new(
         Config::load(&path).unwrap(),
-        store::Store::open(&directory.path().join("db.sqlite"))
+        Store::open(&directory.path().join("db.sqlite"))
             .await
             .unwrap(),
     );
@@ -546,10 +568,7 @@ async fn live_question_edit_invalidates() {
     assert_eq!(calibration.report.examples, 0);
 }
 
-fn mcp_command(
-    config: &std::path::Path,
-    database_path: &std::path::Path,
-) -> tokio::process::Command {
+fn mcp_command(config: &Path, database_path: &Path) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"));
     command
         .arg("mcp")
@@ -561,11 +580,13 @@ fn mcp_command(
 
     command
 }
+
 struct LiveServer {
     child: std::process::Child,
     url: String,
     stderr: Option<std::thread::JoinHandle<String>>,
 }
+
 impl Drop for LiveServer {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -575,11 +596,8 @@ impl Drop for LiveServer {
         }
     }
 }
-fn live_server(
-    config: &std::path::Path,
-    database_path: &std::path::Path,
-    key: Option<&str>,
-) -> LiveServer {
+
+fn live_server(config: &Path, database_path: &Path, key: Option<&str>) -> LiveServer {
     let mut command = Command::new(env!("CARGO_BIN_EXE_8ball"));
     command
         .arg("serve")
@@ -616,8 +634,10 @@ fn live_server(
         }
         errors.push_str(&line);
     }
+
     panic!("HTTP server did not start: {errors}");
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_handler_ask() {
@@ -648,11 +668,12 @@ async fn live_mcp_handler_ask() {
     );
     client.cancel().await.unwrap();
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_stdio_ask() {
     require(9931).await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
     let config = dev_config_path();
     let client = ()
         .serve(
@@ -680,12 +701,13 @@ async fn live_mcp_stdio_ask() {
     );
     client.cancel().await.unwrap();
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_http_triage() {
     require(9931).await;
     require(9932).await;
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
     let config = dev_config_path();
     let server = live_server(&config, &directory.path().join("db.sqlite"), Some("k"));
     let transport = rmcp::transport::StreamableHttpClientTransport::from_config(
@@ -713,12 +735,13 @@ async fn live_mcp_http_triage() {
     );
     client.cancel().await.unwrap();
 }
+
 #[tokio::test]
 #[ignore = "needs dev/models.sh up"]
 async fn live_mcp_failure_is_fail_open() {
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
+    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
     let config = directory.path().join("dead.toml");
-    std::fs::write(
+    fs::write(
         &config,
         "default='d3'\n[endpoints.d3]\nurl='http://127.0.0.1:9'\nkind='systemone'",
     )

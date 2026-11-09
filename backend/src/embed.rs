@@ -1,10 +1,13 @@
-use crate::BackendError;
+use reqwest::Client;
+
 use domain::config::EmbedderConfig;
+
+use crate::BackendError;
 
 pub struct Embedder {
     config: EmbedderConfig,
     api_key: Option<String>,
-    client: reqwest::Client,
+    client: Client,
 }
 
 impl Embedder {
@@ -13,7 +16,7 @@ impl Embedder {
         Self {
             config: config.clone(),
             api_key,
-            client: reqwest::Client::new(),
+            client: Client::new(),
         }
     }
 

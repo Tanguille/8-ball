@@ -1,7 +1,10 @@
-use std::{fs, os::unix::fs::PermissionsExt};
+use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::Command,
+};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 struct Fixture {
@@ -25,7 +28,7 @@ impl Fixture {
 
     async fn run(&self, url: &str, extra: &[&str]) -> Value {
         // A child-only umask makes the privacy check independent of the test runner's umask.
-        let output = tokio::process::Command::new("sh")
+        let output = Command::new("sh")
             .args(["-c", "umask 000; exec \"$@\"", "8ball-test"])
             .arg(env!("CARGO_BIN_EXE_8ball"))
             .args([
@@ -121,7 +124,7 @@ async fn backend_errors_malformed_json_and_timeouts_keep_original_snapshot() {
         ResponseTemplate::new(200).set_body_string("broken json"),
         ResponseTemplate::new(200)
             .set_body_json(json!({}))
-            .set_delay(std::time::Duration::from_secs(10)),
+            .set_delay(Duration::from_secs(10)),
     ] {
         let server = server(response).await;
         let fixture = Fixture::new();
@@ -213,11 +216,11 @@ async fn calibration_is_not_limited_by_the_decision_deadline() {
             ResponseTemplate::new(200)
                 .set_body_json(json!({"stored":true}))
                 // Recalibration may re-infer many labelled states after a model change.
-                .set_delay(std::time::Duration::from_secs(26)),
+                .set_delay(Duration::from_secs(26)),
         )
         .mount(&server)
         .await;
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+    let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args(["calibrate", "relevant", "--url", &server.uri()])
         .output()
         .await

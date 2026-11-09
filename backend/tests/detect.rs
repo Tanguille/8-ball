@@ -1,4 +1,5 @@
 use serde_json::json;
+use tokio::time;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 use backend::Endpoint;
@@ -42,9 +43,9 @@ async fn decisions_props_and_fingerprint() {
 }
 /// Steps the clock past the info refresh interval between real HTTP calls.
 async fn a_minute_later() {
-    tokio::time::pause();
-    tokio::time::advance(std::time::Duration::from_secs(61)).await;
-    tokio::time::resume();
+    time::pause();
+    time::advance(std::time::Duration::from_secs(61)).await;
+    time::resume();
 }
 #[tokio::test]
 async fn info_refreshes_after_a_minute_and_keeps_its_identity_through_a_props_outage() {

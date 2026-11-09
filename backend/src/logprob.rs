@@ -7,7 +7,7 @@ pub async fn ask(
     info: &crate::Info,
     state: &str,
     questions: &[Question],
-) -> Result<Vec<crate::Probs>, BackendError> {
+) -> Result<Vec<domain::Probs>, BackendError> {
     futures::future::try_join_all(questions.iter().map(|question| async move {
         let (prompt, labels) = prompt(question, state)?;
         let mut body = serde_json::json!({

@@ -1,3 +1,4 @@
+use reqwest::Client;
 use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
@@ -30,9 +31,7 @@ fn ask() -> Value {
 async fn bearer_required_for_rest_and_mcp() {
     let (url, _mock, _dir) = app(Some("k")).await;
     for key in [None, Some("wrong"), Some("k")] {
-        let mut request = reqwest::Client::new()
-            .post(format!("{url}/v1/ask"))
-            .json(&ask());
+        let mut request = Client::new().post(format!("{url}/v1/ask")).json(&ask());
         if let Some(key) = key {
             request = request.bearer_auth(key);
         }
@@ -43,7 +42,7 @@ async fn bearer_required_for_rest_and_mcp() {
     }
     for path in ["/v1/triage", "/v1/label", "/v1/calibrate", "/mcp"] {
         assert_eq!(
-            reqwest::Client::new()
+            Client::new()
                 .post(format!("{url}{path}"))
                 .send()
                 .await
@@ -79,7 +78,7 @@ async fn health_metrics_and_oauth_probes_are_public() {
             .unwrap()
             .contains("OAuth")
     );
-    let response = reqwest::Client::new()
+    let response = Client::new()
         .post(format!("{url}/register"))
         .send()
         .await
@@ -113,7 +112,7 @@ async fn cli_passes_key_and_reports_unauthorized_status() {
 #[tokio::test]
 async fn keyless_server_accepts_empty_bearer_header() {
     let (url, _mock, _dir) = app(None).await;
-    let response = reqwest::Client::new()
+    let response = Client::new()
         .post(format!("{url}/v1/ask"))
         .header("authorization", "Bearer ")
         .json(&ask())
@@ -133,17 +132,17 @@ async fn keyless_server_rejects_other_hosts() {
         (format!("localhost:{port}"), 200),
         (format!("[::1]:{port}"), 200),
     ] {
-        let response = reqwest::Client::new()
+        let response = Client::new()
             .post(format!("{url}/v1/questions"))
             .header("host", &host)
-            .json(&serde_json::json!({}))
+            .json(&json!({}))
             .send()
             .await
             .unwrap();
         assert_eq!(response.status(), status, "{host}");
     }
     // Public routes stay reachable.
-    let health = reqwest::Client::new()
+    let health = Client::new()
         .get(format!("{url}/healthz"))
         .header("host", "rebind.example")
         .send()

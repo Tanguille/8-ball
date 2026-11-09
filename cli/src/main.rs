@@ -1,8 +1,18 @@
-use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf, sync::Arc};
+use std::{
+    fs,
+    io::{self, Write},
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
+    sync::Arc,
+    time::Instant,
+};
 
-use clap::Parser;
+use anyhow::{Result, bail};
+use clap::{Args, Parser, Subcommand};
+use reqwest::Client;
 use rmcp::ServiceExt;
 use serde_json::{Value, json};
+use tracing::info;
 
 use domain::{
     config::{self, Config},
@@ -12,7 +22,7 @@ use service::Service;
 
 mod evaluate;
 
-#[derive(clap::Parser)]
+#[derive(Parser)]
 #[command(
     name = "8ball",
     version,
@@ -23,7 +33,7 @@ struct Cli {
     command: Command,
 }
 
-#[derive(clap::Args)]
+#[derive(Args)]
 struct AskArgs {
     #[arg(value_parser = ["noul", "choice", "score"])]
     kind: Option<String>,
@@ -47,7 +57,7 @@ struct AskArgs {
     remote: Remote,
 }
 
-#[derive(clap::Args)]
+#[derive(Args)]
 struct TriageArgs {
     #[arg(required_unless_present = "spec", conflicts_with = "spec")]
     instructions: Option<String>,
@@ -72,7 +82,7 @@ struct TriageArgs {
     remote: Remote,
 }
 
-#[derive(clap::Args)]
+#[derive(Args)]
 struct EvaluateArgs {
     #[arg(long)]
     spec: String,
@@ -84,7 +94,7 @@ struct EvaluateArgs {
     remote: Remote,
 }
 
-#[derive(clap::Args)]
+#[derive(Args)]
 struct ObserveArgs {
     #[arg(long)]
     spec: String,
@@ -100,7 +110,7 @@ struct ObserveArgs {
 }
 
 /// Where the CLI client finds the `8ball serve` REST API.
-#[derive(clap::Args)]
+#[derive(Args)]
 struct Remote {
     /// Total request deadline; defaults to 25000 for observe/evaluate, otherwise unset.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
@@ -112,8 +122,8 @@ struct Remote {
 }
 
 impl Remote {
-    fn client(&self) -> anyhow::Result<reqwest::Client> {
-        let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+    fn client(&self) -> Result<Client> {
+        let mut builder = Client::builder().redirect(reqwest::redirect::Policy::none());
         if let Some(timeout_ms) = self.timeout_ms {
             builder = builder.timeout(std::time::Duration::from_millis(timeout_ms));
         }
@@ -121,12 +131,12 @@ impl Remote {
         Ok(builder.build()?)
     }
 
-    async fn post(&self, path: &str, body: &Value) -> anyhow::Result<Value> {
+    async fn post(&self, path: &str, body: &Value) -> Result<Value> {
         self.send(self.client()?.post(self.at(path)).json(body))
             .await
     }
 
-    async fn print(&self, path: &str, body: &Value) -> anyhow::Result<i32> {
+    async fn print(&self, path: &str, body: &Value) -> Result<i32> {
         println!("{}", self.post(path, body).await?);
 
         Ok(0)
@@ -136,14 +146,14 @@ impl Remote {
         format!("{}{path}", self.url.trim_end_matches('/'))
     }
 
-    async fn send(&self, request: reqwest::RequestBuilder) -> anyhow::Result<Value> {
+    async fn send(&self, request: reqwest::RequestBuilder) -> Result<Value> {
         let response = backend::authed(request, self.api_key.as_deref())
             .send()
             .await?;
         let status = response.status();
         let body: Value = response.json().await?;
         if !status.is_success() {
-            anyhow::bail!(
+            bail!(
                 "HTTP {status}: {}",
                 body["error"].as_str().unwrap_or("request failed")
             );
@@ -154,7 +164,7 @@ impl Remote {
 }
 
 /// Where `serve` and `mcp` read their configuration.
-#[derive(clap::Args)]
+#[derive(Args)]
 struct ConfigArgs {
     #[arg(long, env = "EIGHTBALL_CONFIG")]
     config: Option<PathBuf>,
@@ -169,7 +179,7 @@ struct ConfigArgs {
 }
 
 impl ConfigArgs {
-    fn load(self) -> anyhow::Result<Config> {
+    fn load(self) -> Result<Config> {
         Ok(match self.config_toml {
             Some(text) => Config::parse(&text, "EIGHTBALL_CONFIG_TOML")?,
             None => Config::load(&self.config.unwrap_or_else(config::default_config_path))?,
@@ -177,7 +187,7 @@ impl ConfigArgs {
     }
 }
 
-#[derive(clap::Subcommand)]
+#[derive(Subcommand)]
 enum Command {
     /// Run the HTTP server (REST + MCP).
     Serve {
@@ -254,7 +264,8 @@ enum Command {
         action: ConfigAction,
     },
 }
-#[derive(clap::Subcommand)]
+
+#[derive(Subcommand)]
 enum ConfigAction {
     Check { path: Option<PathBuf> },
 }
@@ -262,7 +273,7 @@ enum ConfigAction {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
+        .with_writer(io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 // rmcp logs every MCP session at info; a polling client buried everything else.
@@ -276,10 +287,11 @@ async fn main() {
             4
         }
     };
+
     std::process::exit(code);
 }
 
-async fn run() -> anyhow::Result<i32> {
+async fn run() -> Result<i32> {
     match Cli::parse().command {
         Command::Serve {
             config,
@@ -364,7 +376,7 @@ async fn serve(
     listen: String,
     db: Option<PathBuf>,
     api_key: Option<String>,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     let service = build_service(config, db).await?;
     let cancellation_token = tokio_util::sync::CancellationToken::new();
     let listener = tokio::net::TcpListener::bind(&listen).await?;
@@ -374,7 +386,7 @@ async fn serve(
             "no EIGHTBALL_API_KEY set and listening on {address}: anyone on the network can use this server"
         );
     }
-    tracing::info!("listening on {address}");
+    info!("listening on {address}");
     axum::serve(
         listener,
         service::http::router(service, api_key.as_deref(), &cancellation_token),
@@ -428,16 +440,17 @@ async fn ask(
         exit_code,
         remote,
     }: AskArgs,
-) -> anyhow::Result<i32> {
+) -> Result<i32> {
     let questions = if spec.is_some() {
         Vec::new()
     } else {
         let (Some(kind), Some(instructions)) = (kind, instructions) else {
-            anyhow::bail!("give --spec or <kind> <instructions>");
+            bail!("give --spec or <kind> <instructions>");
         };
+
         vec![make_question(&kind, instructions, options, levels)]
     };
-    let state = state.map_or_else(|| std::io::read_to_string(std::io::stdin()), Ok)?;
+    let state = state.map_or_else(|| io::read_to_string(io::stdin()), Ok)?;
     let body = remote
         .post(
             "/v1/ask",
@@ -456,7 +469,7 @@ async fn ask(
     })
 }
 
-async fn build_service(config: ConfigArgs, db: Option<PathBuf>) -> anyhow::Result<Arc<Service>> {
+async fn build_service(config: ConfigArgs, db: Option<PathBuf>) -> Result<Arc<Service>> {
     let config = config.load()?;
     let store =
         store::Store::open(&db.unwrap_or_else(|| {
@@ -464,12 +477,12 @@ async fn build_service(config: ConfigArgs, db: Option<PathBuf>) -> anyhow::Resul
         }))
         .await?;
     let pruned = store.prune(config.retention_days).await?;
-    tracing::info!("pruned {pruned} old decisions");
+    info!("pruned {pruned} old decisions");
 
     Ok(Arc::new(Service::new(config, store)))
 }
 
-async fn doctor(remote: &Remote) -> anyhow::Result<i32> {
+async fn doctor(remote: &Remote) -> Result<i32> {
     let report = remote
         .send(remote.client()?.get(remote.at("/v1/doctor")))
         .await?;
@@ -491,12 +504,12 @@ async fn doctor(remote: &Remote) -> anyhow::Result<i32> {
     )
 }
 
-async fn triage(args: TriageArgs) -> anyhow::Result<i32> {
+async fn triage(args: TriageArgs) -> Result<i32> {
     let question = args
         .instructions
         .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
     let context = args.context_file.map(fs::read_to_string).transpose()?;
-    let items: Vec<Value> = serde_json::from_str(&std::io::read_to_string(std::io::stdin())?)?;
+    let items: Vec<Value> = serde_json::from_str(&io::read_to_string(io::stdin())?)?;
 
     args.remote
         .print(
@@ -509,13 +522,13 @@ async fn triage(args: TriageArgs) -> anyhow::Result<i32> {
         .await
 }
 
-async fn evaluate(mut args: EvaluateArgs) -> anyhow::Result<i32> {
+async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
     args.remote.timeout_ms.get_or_insert(25_000);
-    let cases = evaluate::parse(&std::io::read_to_string(std::io::stdin())?)?;
+    let cases = evaluate::parse(&io::read_to_string(io::stdin())?)?;
     let client = args.remote.client()?;
     let mut observations = Vec::with_capacity(cases.len());
     for case in cases {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let response = async {
             let body = args
                 .remote
@@ -542,10 +555,10 @@ async fn evaluate(mut args: EvaluateArgs) -> anyhow::Result<i32> {
     Ok(code)
 }
 
-async fn observe(mut args: ObserveArgs) -> anyhow::Result<i32> {
+async fn observe(mut args: ObserveArgs) -> Result<i32> {
     args.remote.timeout_ms.get_or_insert(25_000);
     let mut context = json!({"mode":"observe"});
-    let snapshot = (|| -> anyhow::Result<Value> {
+    let snapshot = (|| -> Result<Value> {
         let snapshot: Value = serde_json::from_str(&fs::read_to_string(&args.input)?)?;
         anyhow::ensure!(
             snapshot["context"].is_string()
@@ -566,7 +579,7 @@ async fn observe(mut args: ObserveArgs) -> anyhow::Result<i32> {
             return Ok(0);
         }
     };
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let response = args
         .remote
         .post(
@@ -583,7 +596,7 @@ async fn observe(mut args: ObserveArgs) -> anyhow::Result<i32> {
         "snapshot":snapshot, "result":result, "error":error,
         "elapsed_ms":start.elapsed().as_secs_f64() * 1000.0,
         "observed_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|elapsed| elapsed.as_millis())});
-    let saved = (|| -> std::io::Result<()> {
+    let saved = (|| -> io::Result<()> {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)

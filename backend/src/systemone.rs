@@ -1,14 +1,15 @@
-use serde_json::{Value, json};
+use serde_json::json;
+
+use domain::question::Kind;
 
 use crate::BackendError;
-use domain::question::Kind;
 
 pub async fn ask(
     endpoint: &crate::Endpoint,
     info: &crate::Info,
     state: &str,
     requested_questions: &[domain::question::Question],
-) -> Result<Vec<crate::Probs>, BackendError> {
+) -> Result<Vec<domain::Probs>, BackendError> {
     let mut questions = serde_json::Map::new();
     for question in requested_questions {
         let mut wire = json!(question.kind);
@@ -16,7 +17,7 @@ pub async fn ask(
         if let Kind::Choice { criteria } = &question.kind {
             for (name, description) in criteria {
                 if description.is_empty() {
-                    wire["criteria"][name] = Value::Null;
+                    wire["criteria"][name] = serde_json::Value::Null;
                 }
             }
         }
