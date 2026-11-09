@@ -5,7 +5,16 @@ async fn check_client(client: RunningService<RoleClient, ()>, healthy: bool) {
     let tools = client.list_all_tools().await.unwrap();
     let mut names: Vec<_> = tools.iter().map(|text| text.name.as_ref()).collect();
     names.sort_unstable();
-    assert_eq!(names, ["decision_ask", "decision_triage"]);
+    assert_eq!(
+        names,
+        [
+            "decision_ask",
+            "decision_label",
+            "decision_questions",
+            "decision_review",
+            "decision_triage"
+        ]
+    );
     assert!(
         client
             .peer_info()

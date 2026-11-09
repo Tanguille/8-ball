@@ -45,6 +45,7 @@ fn decision(state_hash: &str) -> NewDecision {
     NewDecision {
         spec: Some("greeting".into()),
         question_hash: "question".into(),
+        question: r#"{"instructions":"Greeting?","type":"noul"}"#.into(),
         calibration_id: "model-question".into(),
         state_hash: state_hash.into(),
         state: "hello".into(),

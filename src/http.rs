@@ -40,6 +40,8 @@ pub fn router(
         .route("/v1/doctor", routing::get(doctor))
         .route("/v1/label", routing::post(label))
         .route("/v1/calibrate", routing::post(calibrate))
+        .route("/v1/questions", routing::post(questions))
+        .route("/v1/decisions", routing::post(decisions))
         .layer(middleware::from_fn_with_state(
             api_key.map(Arc::<str>::from),
             require_bearer,
@@ -61,6 +63,20 @@ async fn ask(
     service.ask(request).await.map(Json)
 }
 
+async fn questions(
+    State(service): State<Arc<Service>>,
+    Json(request): Json<crate::service::QuestionsRequest>,
+) -> Result<Json<crate::service::QuestionsResponse>, ServiceError> {
+    service.questions(request).await.map(Json)
+}
+
+async fn decisions(
+    State(service): State<Arc<Service>>,
+    Json(request): Json<crate::service::DecisionsRequest>,
+) -> Result<Json<crate::service::DecisionsResponse>, ServiceError> {
+    service.decisions(request).await.map(Json)
+}
+
 async fn triage(
     State(service): State<Arc<Service>>,
     Json(request): Json<crate::service::TriageRequest>,
@@ -68,11 +84,6 @@ async fn triage(
     service.triage(request).await.map(Json)
 }
 
-#[derive(serde::Deserialize)]
-struct LabelRequest {
-    id: i64,
-    value: String,
-}
 #[derive(serde::Deserialize)]
 struct CalibrateRequest {
     spec: String,
@@ -83,7 +94,7 @@ struct CalibrateRequest {
 
 async fn label(
     State(service): State<Arc<Service>>,
-    Json(request): Json<LabelRequest>,
+    Json(request): Json<crate::service::LabelRequest>,
 ) -> Result<Json<crate::service::LabelResponse>, ServiceError> {
     service.label(request.id, request.value).await.map(Json)
 }

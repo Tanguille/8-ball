@@ -209,6 +209,27 @@ enum Command {
         #[command(flatten)]
         remote: Remote,
     },
+    /// List stored questions, most decisions first, with decision, unsure and label counts.
+    Questions {
+        #[arg(long)]
+        limit: Option<usize>,
+        #[command(flatten)]
+        remote: Remote,
+    },
+    /// List the stored decisions of a spec (current version) or an ad-hoc question, to review and label.
+    Decisions {
+        #[arg(long, required_unless_present = "question")]
+        spec: Option<String>,
+        /// Question hash from `8ball questions`; with --spec, an older spec version.
+        #[arg(long)]
+        question: Option<String>,
+        #[arg(long)]
+        unlabelled: bool,
+        #[arg(long)]
+        limit: Option<usize>,
+        #[command(flatten)]
+        remote: Remote,
+    },
     /// Fit decision bands from labelled states.
     Calibrate {
         spec: String,
@@ -280,6 +301,35 @@ async fn run() -> anyhow::Result<i32> {
                 "{}",
                 remote
                     .post("/v1/label", &json!({"id":id,"value":value}))
+                    .await?
+            );
+
+            Ok(0)
+        }
+        Command::Questions { limit, remote } => {
+            println!(
+                "{}",
+                remote
+                    .post("/v1/questions", &json!({"limit":limit}))
+                    .await?
+            );
+
+            Ok(0)
+        }
+        Command::Decisions {
+            spec,
+            question,
+            unlabelled,
+            limit,
+            remote,
+        } => {
+            println!(
+                "{}",
+                remote
+                    .post(
+                        "/v1/decisions",
+                        &json!({"spec":spec,"question":question,"unlabelled":unlabelled,"limit":limit})
+                    )
                     .await?
             );
 

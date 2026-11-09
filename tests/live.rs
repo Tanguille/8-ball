@@ -666,7 +666,7 @@ async fn live_mcp_stdio_ask() {
         .await
         .unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 2);
+    assert_eq!(tools.len(), 5);
     let info = client.peer_info().unwrap();
     let instructions = info.instructions.as_deref().unwrap();
     assert!(instructions.contains("greeting") && instructions.contains("storage-risk"));

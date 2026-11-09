@@ -51,7 +51,7 @@ async fn authenticated_http_client_survives_server_restart() {
             ))
             .await
             .unwrap();
-        assert_eq!(client.list_all_tools().await.unwrap().len(), 2);
+        assert_eq!(client.list_all_tools().await.unwrap().len(), 5);
         let result = client
             .call_tool(
                 rmcp::model::CallToolRequestParams::new("decision_ask")
