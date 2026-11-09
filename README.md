@@ -181,7 +181,7 @@ A spec is a named question in the configuration. The state is the text to judge.
 
 ## HTTP routes
 
-If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authorization: Bearer <key>`. A missing or wrong key returns 401. Without a key, `/mcp` accepts only the hosts `localhost`, `127.0.0.1`, and `::1`.
+If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authorization: Bearer <key>`. A missing or wrong key returns 401. Without a key, `/mcp` and `/v1` accept only the hosts `localhost`, `127.0.0.1`, and `::1`, and other hosts get 403. This check stops a web page from reaching a local server through DNS rebinding. To serve other hosts, set a key.
 
 | Route | Protected | Purpose |
 | --- | --- | --- |
