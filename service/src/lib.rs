@@ -413,7 +413,7 @@ impl Service {
         let Ok(_refit) = self.refit.try_lock() else {
             return Ok(());
         };
-        let calibration_id = self
+        let (calibration_id, backend) = self
             .calibration_id(endpoint, &verdict::question_hash(question))
             .await?;
         let stored = self.store.calibration(&calibration_id, spec).await?;
@@ -423,8 +423,10 @@ impl Service {
         if count / every <= fitted / every {
             return Ok(());
         }
-        let previous =
-            stored.map_or_else(|| Bands::default_for(&question.kind), |(bands, _)| bands);
+        let previous = stored.map_or_else(
+            || Bands::default_for(&question.kind, backend),
+            |(bands, _)| bands,
+        );
         self.calibrate_question(spec, question, endpoint, None, false, Some(previous))
             .await?;
 
@@ -600,11 +602,12 @@ impl Service {
     }
 
     /// A question's calibration id under endpoint `name`.
+    /// The calibration id of a question on an endpoint, with the endpoint's backend kind.
     async fn calibration_id(
         &self,
         name: &str,
         question_hash: &str,
-    ) -> Result<String, ServiceError> {
+    ) -> Result<(String, BackendKind), ServiceError> {
         let endpoint = self
             .endpoints
             .get(name)
@@ -614,10 +617,9 @@ impl Service {
             .await
             .map_err(|e| self.backend_error(name, e))?;
 
-        Ok(verdict::calibration_id(
-            question_hash,
+        Ok((
+            verdict::calibration_id(question_hash, info.kind, &info.fingerprint),
             info.kind,
-            &info.fingerprint,
         ))
     }
 
@@ -634,7 +636,7 @@ impl Service {
         previous: Option<Bands>,
     ) -> Result<CalibrateResponse, ServiceError> {
         let question_hash = verdict::question_hash(question);
-        let calibration_id = self.calibration_id(name, &question_hash).await?;
+        let (calibration_id, backend) = self.calibration_id(name, &question_hash).await?;
         let mut groups: IndexMap<String, Vec<store::Labelled>> = IndexMap::new();
         for row in self.store.labelled(spec, &question_hash).await? {
             groups.entry(row.state_hash.clone()).or_default().push(row);
@@ -681,6 +683,7 @@ impl Service {
         }
         let (bands, mut report) = verdict::calibrate(
             &question.kind,
+            backend,
             &examples,
             precision.unwrap_or(0.95),
             previous,
@@ -741,7 +744,7 @@ impl Service {
                         Ok(probabilities) => json!({
                             "verdict": verdict::verdict(
                                 &question.kind, &probabilities[0],
-                                Bands::default_for(&question.kind)
+                                Bands::default_for(&question.kind, info.kind)
                             ),
                             "p_yes": probabilities[0][0],
                             "ms": milliseconds
@@ -1105,7 +1108,7 @@ impl Service {
             questions.iter().zip(lookups)
         {
             let calibrated = bands.is_some();
-            let bands = bands.unwrap_or_else(|| Bands::default_for(&question.kind));
+            let bands = bands.unwrap_or_else(|| Bands::default_for(&question.kind, info.kind));
             let explore_draw = verdict::explore_draw(&question_hash, &state_hash);
             let (id, probabilities, cached, label) = match stored {
                 Some((id, probabilities, label)) => (id, probabilities, true, label),

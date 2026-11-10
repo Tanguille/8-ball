@@ -3,7 +3,7 @@ use std::fmt::Write as _;
 use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
 
-use crate::question::Kind;
+use crate::{config::BackendKind, question::Kind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -14,10 +14,16 @@ pub enum Bands {
 
 impl Bands {
     /// Not tuned for any model: they only keep uncalibrated answers from deciding much.
+    /// A reranker scores how well the state matches the question's topic, not whether the answer
+    /// is yes, so its noul answers stay `unsure` until calibration fits real thresholds.
     #[must_use]
-    pub const fn default_for(kind: &Kind) -> Self {
-        match kind {
-            Kind::Noul { .. } => Self::Noul {
+    pub const fn default_for(kind: &Kind, backend: BackendKind) -> Self {
+        match (kind, backend) {
+            (Kind::Noul { .. }, BackendKind::Rerank) => Self::Noul {
+                yes_at: 1.01,
+                no_at: -0.01,
+            },
+            (Kind::Noul { .. }, _) => Self::Noul {
                 yes_at: 0.85,
                 no_at: 0.15,
             },
@@ -133,11 +139,7 @@ pub fn question_hash(question: &crate::question::Question) -> String {
 
 /// Identity of question + exact model. The url is excluded so a hostname change keeps calibrations.
 #[must_use]
-pub fn calibration_id(
-    question_hash: &str,
-    kind: crate::config::BackendKind,
-    fingerprint: &str,
-) -> String {
+pub fn calibration_id(question_hash: &str, kind: BackendKind, fingerprint: &str) -> String {
     short_hash(&format!("{question_hash}\n{kind:?}\n{fingerprint}"))
 }
 
@@ -178,6 +180,7 @@ pub struct Report {
 
 pub fn calibrate(
     kind: &Kind,
+    backend: BackendKind,
     examples: &[Example],
     target: f64,
     previous: Option<Bands>,
@@ -223,7 +226,9 @@ pub fn calibrate(
 
         Bands::Level { min_confidence }
     };
-    let bands = previous.map_or(bands, |previous| merge(kind, bands, previous));
+    let bands = previous.map_or(bands, |previous| {
+        merge(bands, previous, Bands::default_for(kind, backend))
+    });
     let mut decided = 0;
     let mut correct = 0;
     for example in examples {
@@ -259,7 +264,7 @@ fn decides(threshold: f64) -> bool {
 
 /// Thin evidence never makes a question less certain: a side without a deciding threshold
 /// keeps the previous one, else the default.
-fn merge(kind: &Kind, fitted: Bands, previous: Bands) -> Bands {
+fn merge(fitted: Bands, previous: Bands, default: Bands) -> Bands {
     let pick = |fitted: f64, previous: f64, default: f64| {
         if decides(fitted) {
             fitted
@@ -270,7 +275,7 @@ fn merge(kind: &Kind, fitted: Bands, previous: Bands) -> Bands {
         }
     };
 
-    match (fitted, previous, Bands::default_for(kind)) {
+    match (fitted, previous, default) {
         (
             Bands::Noul { yes_at, no_at },
             Bands::Noul {
