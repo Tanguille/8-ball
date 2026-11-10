@@ -22,7 +22,7 @@ impl Mcp {
 
     #[tool(
         name = "decision_ask",
-        description = "Call BEFORE doing expensive or noisy work (waking an agent, posting, a long search) to decide cheaply whether it is needed, or to bucket something. Asks a small decision model one or more typed questions about `state` and returns a verdict per question in ~0.5 s. Use `spec` for a named, calibrated question (listed in the server instructions), or `questions` for ad-hoc ones: type noul (yes/no), choice (criteria = {option: description}), score (criteria = [levels, lowest first]). Read each result: act only on verdict yes/no or an option; `unsure` means do the normal, expensive thing. `calibrated: false` means the verdict uses untuned default thresholds. `cached: true` means the same state was answered before. When a decision has `report: true`, do the work, then call decision_label with its id and what the work showed. Label only from what the work showed; skip it otherwise."
+        description = "Call BEFORE doing expensive or noisy work (waking an agent, posting, a long search) to decide cheaply whether it is needed, or to bucket something. Asks a small decision model one or more typed questions about `state` and returns a verdict per question in ~0.5 s. Use `spec` for a named, calibrated question (listed in the server instructions), or `questions` for ad-hoc ones: type noul (yes/no), choice (criteria = {option: description}), score (criteria = [levels, lowest first]). Read each result: act only on verdict yes/no or an option; `unsure` means do the normal, expensive thing. `calibrated: false` means the verdict uses untuned default thresholds. `cached: true` means the same state was answered before. `learn: false` answers from the model alone, without remembered labels or exploration."
     )]
     async fn decision_ask(
         &self,
@@ -37,7 +37,7 @@ impl Mcp {
 
     #[tool(
         name = "decision_triage",
-        description = "Call to filter a list (alerts, feed items, search hits; at most 64) down to the ones that matter, cheaply, before reading them yourself. Judges every item with one question (`spec` or `question`) and returns `kept` (verdict matched `keep`, default yes), `unsure` (read these yourself) a `rejected` list with model decisions, a `prefiltered` list of unjudged indices, and a `dropped` count covering both. Optional `context` is shared evidence included in each item state; the whole contextual input must fit the endpoint limit. `top_k` pre-filters by embedding similarity when the server has an embedder; those exclusions are not confident rejections. When a decision has `report: true`, do the work, then call decision_label with its id and what the work showed. Label only from what the work showed; skip it otherwise."
+        description = "Call to filter a list (alerts, feed items, search hits; at most 64) down to the ones that matter, cheaply, before reading them yourself. Judges every item with one question (`spec` or `question`) and returns `kept` (verdict matched `keep`, default yes), `unsure` (read these yourself) a `rejected` list with model decisions, a `prefiltered` list of unjudged indices, and a `dropped` count covering both. Optional `context` is shared evidence included in each item state; the whole contextual input must fit the endpoint limit. `top_k` pre-filters by embedding similarity when the server has an embedder; those exclusions are not confident rejections. `learn: false` answers from the model alone, without remembered labels or exploration."
     )]
     async fn decision_triage(
         &self,
@@ -129,7 +129,7 @@ Rules:
     );
     if service.learning().report {
         instructions.push_str(
-            "- When a decision has `report: true`, report what the work showed with decision_label.\n",
+            "- When a decision has `report: true`, do the work, then call decision_label with its id and what the work showed. Label only from what the work showed; skip it otherwise.\n",
         );
     }
     instructions.push_str(
