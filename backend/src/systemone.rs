@@ -4,11 +4,14 @@ use domain::question::Kind;
 
 use crate::BackendError;
 
+/// `path` and `answers` (a JSON pointer) differ between a System One server and a hosted decisions API.
 pub async fn ask(
     endpoint: &crate::Endpoint,
     info: &crate::Info,
     state: &str,
     requested_questions: &[domain::question::Question],
+    path: &str,
+    answers: &str,
 ) -> Result<Vec<domain::Probs>, BackendError> {
     let mut questions = serde_json::Map::new();
     for question in requested_questions {
@@ -24,12 +27,15 @@ pub async fn ask(
         questions.insert(question.id.clone(), wire);
     }
     let body = json!({"state":state,"questions":questions});
-    let response = endpoint.post_json(info, "/v1/systemone", body).await?;
+    let response = endpoint.post_json(info, path, body).await?;
+    let response = response
+        .pointer(answers)
+        .ok_or_else(|| BackendError(format!("no {answers} in the response")))?;
 
     requested_questions
         .iter()
         .map(|question| {
-            let answer = response["answers"]
+            let answer = response
                 .get(&question.id)
                 .ok_or_else(|| BackendError(format!("no answer for question {}", question.id)))?;
             let mut probabilities = match &question.kind {
