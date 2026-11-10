@@ -183,11 +183,11 @@ We compare every model of the local stack with Qwen3.8 27B, a large local model,
 
 | Method | Decided | Accuracy of decided | Correct of all | Mean time | Speed vs 27B |
 | --- | --- | --- | --- | --- | --- |
-| vllm-d3-nano (systemone) | 89% | 98.3% | 87.9% | 83 ms | 14.9x |
-| bge-reranker-v2-m3 (rerank) | 99% | 52.8% | 52.2% | 23 ms | 53.0x |
-| Qwen3.5 0.8B (logprob) | 23% | 85.3% | 20.0% | 85 ms | 14.5x |
-| Qwen3.8 27B (logprob) | 95% | 97.6% | 92.9% | 1229 ms | 1.0x |
-| d3, then 27B for `unsure` | 98% | 97.4% | 95.7% | 210 ms | 5.9x |
+| vllm-d3-nano (systemone) | 89% | 98.3% | 87.9% | 83 ms | 15.0x |
+| bge-reranker-v2-m3 (rerank) | 99% | 52.8% | 52.2% | 24 ms | 52.6x |
+| Qwen3.5 0.8B (logprob) | 23% | 85.3% | 20.0% | 76 ms | 16.5x |
+| Qwen3.8 27B (logprob) | 95% | 97.6% | 92.9% | 1252 ms | 1.0x |
+| d3, then 27B for `unsure` | 98% | 97.4% | 95.7% | 214 ms | 5.9x |
 
 On the cases that it decides, d3 is as accurate as the 27B model, and it is 15 times faster. d3 is `unsure` for 11% of the cases. If the 27B answers those cases, 98% of all cases get a verdict, 6 times faster than with the 27B alone.
 
@@ -212,7 +212,7 @@ The cases:
 How we keep it fair:
 
 - The labels come from public datasets. We did not write or label the cases.
-- The script pins each dataset revision. It takes the first cases per label in order of the SHA-256 of the text, so no person picks them.
+- The benchmark pins each dataset revision. It takes the first cases per label in order of the SHA-256 of the text, so no person picks them.
 - Every model gets the same question. No model gets a prompt that is tuned for it.
 - We show all models, also those that do badly.
 
@@ -230,11 +230,11 @@ To run it yourself (the 27B model is a 19 GB download):
 ```sh
 dev/models.sh up
 dev/models.sh bench
-cargo install --path cli
-uv run dev/bench.py
+cargo build --release -p cli -p bench
+cargo run --release -p bench
 ```
 
-The script prints these tables, with your hardware and the model files. It saves each answer to `target/bench/observations.json`.
+The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build, and saves each answer to `target/bench/observations.json`.
 
 ## Commands
 

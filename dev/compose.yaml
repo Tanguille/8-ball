@@ -40,7 +40,7 @@ services:
     ports: ["127.0.0.1:9934:8080"]
     command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/Qwen3.5-0.8B-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF/resolve/807dfd9a6fadbf703207aac3bfb0b2b3040d077c/Qwen3.5-0.8B-Q8_0.gguf",
               "-c", "4096", "-np", "2", "--reasoning-budget", "0", "--alias", "qwen3.5-0.8b"]
-  # Baseline for dev/bench.py only: the profile keeps its 19 GB download out of `dev/models.sh up`.
+  # Baseline for the bench crate only: the profile keeps its 19 GB download out of `dev/models.sh up`.
   big:
     <<: *llama
     profiles: [bench]

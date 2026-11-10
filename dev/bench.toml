@@ -1,4 +1,4 @@
-# Added to dev/config.toml by dev/bench.py. Every endpoint answers the same spec text.
+# Added to dev/config.toml by the bench crate (8ball-bench). Every endpoint answers the same spec text.
 
 [endpoints.big]
 url = "http://127.0.0.1:9935"
