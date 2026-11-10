@@ -95,6 +95,9 @@ struct Args {
     /// Drop endpoints that fail their doctor probe (no logprobs, no access) instead of stopping.
     #[arg(long)]
     skip_unavailable: bool,
+    /// Methods whose changes from `--baseline` are shown but never fail the run.
+    #[arg(long, value_delimiter = ',')]
+    report_only: Vec<String>,
     /// A summary.json of an earlier run: exit 1 if a task got worse by more than 1% of its cases.
     #[arg(long)]
     baseline: Option<PathBuf>,
@@ -178,7 +181,7 @@ async fn main() -> Result<()> {
     report(&methods, &runs);
     if let Some(path) = &args.baseline {
         let baseline: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
-        if !compare(&summary, &baseline)? {
+        if !compare(&summary, &baseline, &args.report_only)? {
             std::process::exit(1);
         }
     }
@@ -670,7 +673,7 @@ fn summary(methods: &Methods, runs: &[Runs], args: &Args) -> Value {
 /// Prints how each method and task changed from `baseline`. A task regresses when its wrong
 /// count rises, or its decided count drops, by more than 1% of its cases (at least 1 case):
 /// CPU and GPU builds can flip a borderline verdict. Returns false on a regression.
-fn compare(summary: &Value, baseline: &Value) -> Result<bool> {
+fn compare(summary: &Value, baseline: &Value, report_only: &[String]) -> Result<bool> {
     ensure!(
         summary["per_side"] == baseline["per_side"] && summary["split"] == baseline["split"],
         "the baseline used another --per-side or --split"
@@ -694,7 +697,9 @@ fn compare(summary: &Value, baseline: &Value) -> Result<bool> {
             let margin = (count(now, "cases") + 99) / 100;
             let decided = count(now, "decided") - count(before, "decided");
             let wrong = count(now, "wrong") - count(before, "wrong");
-            let result = if wrong > margin || -decided > margin {
+            let result = if (wrong > margin || -decided > margin) && report_only.contains(name) {
+                "worse (report only)"
+            } else if wrong > margin || -decided > margin {
                 ok = false;
                 "**regressed**"
             } else if wrong < -margin || decided > margin {
@@ -789,11 +794,12 @@ mod tests {
         };
         let baseline = run(180, 4);
         // 1% of 200 cases is 2.
-        assert!(super::compare(&run(178, 6), &baseline).unwrap());
-        assert!(!super::compare(&run(180, 7), &baseline).unwrap());
-        assert!(!super::compare(&run(177, 4), &baseline).unwrap());
+        assert!(super::compare(&run(178, 6), &baseline, &[]).unwrap());
+        assert!(!super::compare(&run(180, 7), &baseline, &[]).unwrap());
+        assert!(!super::compare(&run(177, 4), &baseline, &[]).unwrap());
+        assert!(super::compare(&run(180, 7), &baseline, &["d3".into()]).unwrap());
         let other_size = json!({"per_side": 200, "split": "test", "methods": {}});
-        assert!(super::compare(&other_size, &baseline).is_err());
+        assert!(super::compare(&other_size, &baseline, &[]).is_err());
     }
 
     #[test]

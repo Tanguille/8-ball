@@ -54,11 +54,12 @@ jobs:
       - run: cargo nextest run --test live --run-ignored only
       - run: cargo build --release -p cli -p bench
       # Fails when a task gets worse than bench/baseline.json by more than 1% of its cases. A PR that changes
-      # verdicts on purpose updates the baseline from this job's summary.json artifact.
+      # verdicts on purpose updates the baseline from this job's summary.json artifact. Qwen3.5 0.8B only reports:
+      # it flipped 20 of 600 verdicts between CPU and GPU, so its counts move between runner CPUs.
       - name: Benchmark
         run: |
           set -o pipefail
-          cargo run --release -p bench -- --endpoints d3,rerank,chat --reference d3 --per-side 100 \
+          cargo run --release -p bench -- --endpoints d3,rerank,chat --reference d3 --per-side 100 --report-only chat \
             --baseline bench/baseline.json | tee -a "$GITHUB_STEP_SUMMARY"
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

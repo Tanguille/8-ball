@@ -255,7 +255,7 @@ The `bench` crate prints these tables, with your hardware and the model files. I
 | `bench-logfare.yaml` | Main pushes, every night but Sunday, and by hand | d3, Qwen3.8 27B on Logfare, and the cascade |
 | `bench-logfare.yaml` | Sunday, and by hand | Every Logfare model that can answer a decision question, from its live catalog |
 
-The PR benchmark fails when a task gets worse than `bench/baseline.json` by more than 1% of its cases. CPU and GPU builds can flip a borderline verdict, so 1% is allowed. When a pull request changes verdicts on purpose, copy `summary.json` from the job's `bench` artifact to `bench/baseline.json` in the same pull request.
+The PR benchmark fails when a task of d3 or the reranker gets worse than `bench/baseline.json` by more than 1% of its cases. CPU and GPU builds can flip a borderline verdict, so 1% is allowed. On the same 600 cases, d3 gave the same verdicts on CPU and GPU, and Qwen3.5 0.8B gave 20 other verdicts. So Qwen3.5 0.8B changes are shown, but do not fail the run. When a pull request changes verdicts on purpose, copy `summary.json` from the job's `bench` artifact to `bench/baseline.json` in the same pull request.
 
 The Logfare runs need the `LOGFARE_API_KEY` repository secret. They compare with the last saved run of the same kind. The 27B run fails when it gets worse, and the weekly run only warns. After an intended change, run the workflow by hand with `accept` to save a new baseline. Pull requests never get the secret. `dev/logfare.sh` prints the Logfare endpoints that a run uses.
 
