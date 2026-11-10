@@ -1,0 +1,33 @@
+[package]
+name = "service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+backend = { workspace = true }
+domain = { workspace = true }
+store = { workspace = true }
+
+axum = { workspace = true }
+futures = { workspace = true }
+indexmap = { workspace = true }
+prometheus-client = { workspace = true }
+rmcp = { workspace = true, features = ["transport-streamable-http-server"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+toml = { workspace = true }
+wiremock = { workspace = true }

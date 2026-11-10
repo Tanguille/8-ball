@@ -6,8 +6,10 @@ on:
   push:
     branches: [main]
     paths:
-      - src/**
-      - migrations/**
+      # Quoted: a leading * starts a YAML alias.
+      - "*/src/**"
+      - "*/Cargo.toml"
+      - store/migrations/**
       - Cargo.toml
       - Cargo.lock
       - Dockerfile

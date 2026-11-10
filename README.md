@@ -10,7 +10,7 @@
 ## Quickstart: local
 
 ```sh
-cargo install --path .
+cargo install --path cli
 mkdir -p ~/.config/8ball
 ```
 
@@ -194,7 +194,7 @@ If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authoriz
 | `GET /metrics` | No | Return OpenMetrics: `eightball_decisions_total` (with a `cached` label), `eightball_backend_errors_total`, `eightball_trimmed_states_total`, and the histogram `eightball_backend_request_duration_seconds`. |
 | `POST /register`, `GET /.well-known/{*rest}` | No | Return 404, because 8-ball does not use OAuth. |
 
-Service and authentication errors are JSON with an `error` field. Rejected request bodies and rejected `/mcp` hosts return plain text.
+Service, authentication, and host errors are JSON with an `error` field. Rejected request bodies return plain text.
 
 ## MCP tools
 
@@ -415,6 +415,8 @@ Make sure that a decision tool call occurs and that the metric increases. If Cod
 To uninstall, remove only `mcp.servers.8ball` from the configuration and the skill symlink that you created.
 
 ## Development checks
+
+The code is a Cargo workspace. `domain` holds questions, configuration, and verdict math. `store` is the SQLite storage, `backend` calls the model servers, `service` is the logic with its REST and MCP routes, and `cli` is the `8ball` binary.
 
 Follow the [Rust style guide](docs/rust-style.md) for source and tests. Write commits in Commitizen style, and write docs in the Plain mode of [SimpleEnglish](https://github.com/AminBlg/SimpleEnglish). Do not loosen a live test assertion to make it pass.
 
