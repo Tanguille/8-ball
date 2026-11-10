@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # rustup installs the toolchain from rust-toolchain.toml on first use.
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+
+  tools:
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: shell
+            tool: aqua:koalaman/shellcheck aqua:mvdan/sh
+            run: git ls-files -z '*.sh' | xargs -0 shellcheck && git ls-files -z '*.sh' | xargs -0 shfmt -d
+          - name: hadolint
+            tool: aqua:hadolint/hadolint
+            run: hadolint Dockerfile
+          - name: zizmor
+            tool: aqua:zizmorcore/zizmor
+            run: zizmor --format=github .github/workflows
+          - name: markdown
+            tool: npm:markdownlint-cli2
+            run: markdownlint-cli2 '**/*.md'
+          - name: helm
+            tool: aqua:helm/helm
+            run: |
+              # A fresh runner has no Helm repos, and dependency build only downloads from added ones.
+              helm repo add bjw-s https://bjw-s-labs.github.io/helm-charts
+              helm dependency build charts/eightball
+              helm lint charts/eightball
+          - name: gitleaks
+            tool: aqua:gitleaks/gitleaks
+            run: gitleaks git --redact --verbose
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # gitleaks scans the full history.
+          fetch-depth: 0
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          # Save from main only; PR-scoped copies crowd the Actions cache quota.
+          cache_save: ${{ github.event_name == 'push' }}
+          install_args: ${{ matrix.tool }}
+      - env:
+          # zizmor's online audits (impostor commits, known-vulnerable actions) query the GitHub API.
+          GH_TOKEN: ${{ github.token }}
+        run: ${{ matrix.run }}
