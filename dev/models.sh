@@ -10,6 +10,10 @@ if [ "$(docker info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" = true 
   EIGHTBALL_DEV_GID=0
 fi
 export EIGHTBALL_DEV_UID EIGHTBALL_DEV_GID
+# Without a GPU device (CI runners), the Vulkan image runs on its CPU backend.
+if [ ! -e /dev/dri ]; then
+  export COMPOSE_FILE=compose.yaml:compose.cpu.yaml EIGHTBALL_DEV_NGL="${EIGHTBALL_DEV_NGL:-0}"
+fi
 mkdir -p "$HOME/.cache/8ball-models"
 case "${1:-status}" in
   up)     docker compose up -d --wait ;;
