@@ -289,6 +289,30 @@ async fn labels_refit_at_every_multiple_of_recalibrate_after() {
 }
 
 #[tokio::test]
+async fn a_missed_refit_runs_at_the_next_label() {
+    let app = fixture("recalibrate_after = 20").await;
+    let calibration_id = verdict::calibration_id(
+        &verdict::question_hash(&greeting()),
+        domain::config::BackendKind::Systemone,
+        &app.mock.uri(),
+    );
+    // Labels set straight in the store skip the refit, as a failed probe or a busy refit would.
+    for i in 1..=21 {
+        let id = spec(&app, &format!("yes-{i}")).await.id;
+        app.store.set_label(id, "yes").await.unwrap();
+    }
+    let id = spec(&app, "yes-22").await.id;
+    app.service.label(id, "yes".into()).await.unwrap();
+    let (_, report) = app
+        .store
+        .calibration(&calibration_id, Some("greeting"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.examples, 22);
+}
+
+#[tokio::test]
 async fn calibrate_reasks_the_model_instead_of_remembering() {
     let app = fixture("").await;
     label_under_old_model(&app, "yes-old", "yes").await;

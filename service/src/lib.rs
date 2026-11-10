@@ -407,7 +407,7 @@ impl Service {
             .store
             .labelled_count(spec, &verdict::question_hash(question))
             .await?;
-        if count % every != 0 {
+        if count < every {
             return Ok(());
         }
         let Ok(_refit) = self.refit.try_lock() else {
@@ -416,11 +416,15 @@ impl Service {
         let calibration_id = self
             .calibration_id(endpoint, &verdict::question_hash(question))
             .await?;
-        let previous = self
-            .store
-            .calibration(&calibration_id, spec)
-            .await?
-            .map_or_else(|| Bands::default_for(&question.kind), |(bands, _)| bands);
+        let stored = self.store.calibration(&calibration_id, spec).await?;
+        // Refit once the count has crossed a multiple since the last fit, so a refit that a failed probe or a busy
+        // lock skipped runs at the next label instead of the next multiple.
+        let fitted = stored.as_ref().map_or(0, |(_, report)| report.examples);
+        if count / every <= fitted / every {
+            return Ok(());
+        }
+        let previous =
+            stored.map_or_else(|| Bands::default_for(&question.kind), |(bands, _)| bands);
         self.calibrate_question(spec, question, endpoint, None, false, Some(previous))
             .await?;
 
