@@ -153,7 +153,7 @@ A spec is a named question in the configuration. The state is the text to judge.
 | `evaluate` | Replay labeled JSONL cases from stdin against a required `--spec`. Report misses, `unsure` verdicts, errors, and latency. Calibration does not change. |
 | `questions` | List the stored questions with their decision, `unsure`, and label counts. Find ad-hoc questions that come back often, and save them as specs. |
 | `decisions --spec <spec>` | List the stored decisions of the current spec version, newest first, with verdicts and states. `--unlabelled` hides labeled ones. `--question <hash>` lists an ad-hoc question, or an older spec version together with `--spec`. |
-| `label <id> <value>` | Label a saved decision of a current spec. The value is `yes`, `no`, an option name, or a level index. |
+| `label <id> <value>` | Label a saved decision of a current spec, or of an ad-hoc question when `learning.ad_hoc` is on. The value is `yes`, `no`, an option name, or a level index. |
 | `calibrate <spec>` | Fit bands (decision thresholds) from labeled states. `--precision` takes 0.5 to 0.99 and defaults to 0.95. `--dry-run` reports without a save. |
 | `doctor` | Report endpoint detection, health, model fingerprints, and spec calibration. |
 | `config check [<path>]` | Make sure that a TOML file is valid, without a server. `<path>` defaults to the [configuration path](#configuration-reference), not `EIGHTBALL_CONFIG`. |
@@ -179,6 +179,8 @@ A spec is a named question in the configuration. The state is the text to judge.
 
 `results[].id` is the saved row id for `label`. `results[].question` is the question id of the caller. `results[].type` is the question type. An identical request within a spec reuses a row. Ad-hoc questions and different specs have separate rows. Invalid backend probabilities return a backend error.
 
+A result can also have `report`, `explored`, and `remembered`. `report: true` asks the caller to do the work, then label the id with what the work showed. `explored: true` means that the model skipped the item (noul `no`, triage `rejected`), but 8-ball returns `unsure` so that the caller checks it. `remembered: true` means that the verdict is a label reported earlier for the same question and state. `/v1/ask` and `/v1/triage` take `"learn": false` (default `true`) to turn all 3 off for one request.
+
 ## HTTP routes
 
 If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authorization: Bearer <key>`. A missing or wrong key returns 401. Without a key, `/mcp` and `/v1` accept only the hosts `localhost`, `127.0.0.1`, and `::1`, and other hosts get 403. This check stops a web page from reaching a local server through DNS rebinding. To serve other hosts, set a key.
@@ -200,15 +202,15 @@ Service, authentication, and host errors are JSON with an `error` field. Rejecte
 
 | Tool | Purpose |
 | --- | --- |
-| `decision_ask` | Ask typed questions about `state`. It takes `spec` or `questions`, and an optional `endpoint`. |
-| `decision_triage` | Judge at most 64 `items` with one `spec` or `question`. It also takes optional `context`, `keep`, `top_k`, and `endpoint`. |
+| `decision_ask` | Ask typed questions about `state`. It takes `spec` or `questions`, and an optional `endpoint` and `learn`. |
+| `decision_triage` | Judge at most 64 `items` with one `spec` or `question`. It also takes optional `context`, `keep`, `top_k`, `endpoint`, and `learn`. |
 | `decision_questions` | List the stored questions with their decision, `unsure`, and label counts. |
 | `decision_review` | List the unlabeled decisions of a `spec` with their ids and states. It leaves out the model's answer, so a label stays independent. |
-| `decision_label` | Label a decision `id` with a `value`, as `label` does. |
+| `decision_label` | Label a decision `id` with a `value`, as `label` does. Agents call it for each decision with `report: true`, after the work. |
 
 ## Configuration reference
 
-The default path is `$XDG_CONFIG_HOME/8ball/config.toml`, otherwise `$HOME/.config/8ball/config.toml`. 8-ball rejects unknown fields at the top level, in `[endpoints.*]`, and in `[embedder]`. It ignores unknown fields in `[specs.*]`, but rejects invalid questions.
+The default path is `$XDG_CONFIG_HOME/8ball/config.toml`, otherwise `$HOME/.config/8ball/config.toml`. 8-ball rejects unknown fields at the top level, in `[endpoints.*]`, `[embedder]`, and `[learning]`. It ignores unknown fields in `[specs.*]`, but rejects invalid questions.
 
 ```toml
 default = "d3"            # required: name of the endpoint used when none is given
@@ -234,6 +236,13 @@ instructions = "Is this message a greeting?"
 # criteria = { billing = "", shipping = "Parcels" }          # choice: required, ≥2 options, order kept, "" = no description
 # criteria = ["can wait", "today", "now"]                    # score: required, 2..=10 levels, lowest first
 # endpoint = "d3"                                            # optional, else `default`
+
+[learning]                      # optional table; each part can be turned off
+report = true                   # mark decisions whose answer the agent should report with `label`
+remember = true                 # answer with a reported label when the same question and state come back
+explore = 0.05                  # share of skipped decisions returned as `unsure`, so the agent checks them; 0 to 1
+recalibrate_after = 20          # refit a question's bands at every multiple of this many labels; 0 turns it off
+ad_hoc = true                   # also learn ad-hoc questions, by their exact text
 ```
 
 `[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. Auto-detection reads `/props` and `/v1/models`. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
@@ -262,7 +271,16 @@ To calibrate a spec:
 2. Label at least 20 real decisions per side. `8ball decisions --spec <spec> --unlabelled` lists them, and `8ball label <id> <value>` saves a label. An agent can do the same with `decision_review` and `decision_label`. Label only from evidence, such as the outcome of the work.
 3. Run `8ball calibrate <spec>`.
 
-Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model file invalidates its calibration identity. A new llama.cpp build of the same file does not. 8-ball checks the model again every minute. Ad-hoc questions always use the default bands.
+Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model file invalidates its calibration identity. A new llama.cpp build of the same file does not. 8-ball checks the model again every minute. Ad-hoc questions learn by their exact text when `learning.ad_hoc` is on. They get their own calibration, apart from specs.
+
+8-ball also refits a question by itself at every multiple of `recalibrate_after` labels. This refit uses only cached answers, so it makes no model calls. A side without enough evidence keeps its threshold. Manual `8ball calibrate` still works for specs. Keep `recalibrate_after = 0` during a holdout comparison, so that the calibration stays fixed.
+
+### Learning upgrade notes
+
+- With the defaults, about `explore` (5%) of skipped answers come back as `unsure`. This is extra work by design. `report = false` also stops exploration.
+- Metrics count explored answers as `unsure`, and remembered answers as `cached`. The `questions` and `decisions` listings show the stored model verdict, so an explored answer keeps its model verdict there.
+- A label becomes the answer for that exact question and state. Anyone with the API key can set it. To fix a wrong label, label the same id again.
+- To turn learning off, set `report = false`, `remember = false`, `explore = 0.0`, `recalibrate_after = 0`, and `ad_hoc = false`.
 
 ## Hermes observation pilot
 

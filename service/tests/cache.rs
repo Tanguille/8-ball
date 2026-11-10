@@ -5,7 +5,7 @@ use domain::{question::Question, verdict};
 use service::{AskRequest, Service};
 use store::Store;
 
-async fn fixture() -> (Service, Store, MockServer, tempfile::TempDir) {
+async fn fixture(ad_hoc: bool) -> (Service, Store, MockServer, tempfile::TempDir) {
     let mock = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/systemone"))
@@ -25,7 +25,7 @@ async fn fixture() -> (Service, Store, MockServer, tempfile::TempDir) {
     let config: domain::config::Config =
         toml::from_str(
             &format!(
-                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'",
+                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc={ad_hoc}",
                 mock.uri(),
             ),
         )
@@ -45,7 +45,7 @@ async fn ask_one(service: &Service, request: AskRequest) -> service::Decision {
 }
 #[tokio::test]
 async fn cache_hashes_exactly_the_fitted_state() {
-    let (service, _store, mock, _dir) = fixture().await;
+    let (service, _store, mock, _dir) = fixture(false).await;
     let first = ask_one(&service, request("abcde first middle z0123")).await;
     let second = ask_one(&service, request("abcde different middle z0123")).await;
     assert!(first.id > 0);
@@ -63,7 +63,7 @@ async fn cache_hashes_exactly_the_fitted_state() {
 }
 #[tokio::test]
 async fn rejects_unknown_spec_and_mixed_question_sources() {
-    let (service, _store, _mock, _dir) = fixture().await;
+    let (service, _store, _mock, _dir) = fixture(false).await;
     let request: AskRequest =
         serde_json::from_value(json!({"spec":"unknown","state":"hi"})).unwrap();
     assert!(
@@ -87,7 +87,15 @@ async fn rejects_unknown_spec_and_mixed_question_sources() {
 }
 #[tokio::test]
 async fn spec_uses_bands_but_ad_hoc_uses_defaults() {
-    let (service, store, mock, _dir) = fixture().await;
+    spec_bands_and_ad_hoc_defaults(false).await;
+}
+#[tokio::test]
+async fn ad_hoc_question_with_a_spec_text_keeps_its_own_calibration() {
+    // The ad-hoc question shares the spec's stored text, so it is learnable, but its calibration key differs.
+    spec_bands_and_ad_hoc_defaults(true).await;
+}
+async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
+    let (service, store, mock, _dir) = fixture(learning_ad_hoc).await;
     let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
     let calibration_id = verdict::calibration_id(
@@ -108,7 +116,7 @@ async fn spec_uses_bands_but_ad_hoc_uses_defaults() {
     store
         .put_calibration(
             &calibration_id,
-            "greeting",
+            Some("greeting"),
             &verdict::Bands::Noul {
                 yes_at: 1.01,
                 no_at: -0.01,
@@ -127,6 +135,7 @@ async fn spec_uses_bands_but_ad_hoc_uses_defaults() {
             spec: None,
             questions: vec![question],
             endpoint: None,
+            learn: true,
         },
     )
     .await;
@@ -137,7 +146,7 @@ async fn spec_uses_bands_but_ad_hoc_uses_defaults() {
 
 #[tokio::test]
 async fn cache_ids_and_labels_stay_in_the_requested_scope() {
-    let (service, store, _mock, _dir) = fixture().await;
+    let (service, store, _mock, _dir) = fixture(false).await;
     let adhoc_request: AskRequest = serde_json::from_value(json!({
         "state":"hello", "questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]
     }))
@@ -160,12 +169,16 @@ async fn cache_ids_and_labels_stay_in_the_requested_scope() {
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
     let question_hash = verdict::question_hash(&question);
     assert_eq!(
-        store.labelled("greeting", &question_hash).await.unwrap()[0].label,
+        store
+            .labelled(Some("greeting"), &question_hash)
+            .await
+            .unwrap()[0]
+            .label,
         "yes"
     );
     assert_eq!(
         store
-            .labelled("greeting-copy", &question_hash)
+            .labelled(Some("greeting-copy"), &question_hash)
             .await
             .unwrap()[0]
             .label,

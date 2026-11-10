@@ -4,7 +4,7 @@ use sqlx::SqlSafeStr;
 
 use domain::{
     Probs,
-    verdict::{Bands, Report},
+    verdict::{self, Bands, Report},
 };
 
 #[derive(Clone)]
@@ -163,9 +163,13 @@ impl Store {
             .transpose()
     }
 
-    pub async fn metadata(&self, id: i64) -> Result<Option<(Option<String>, String)>, StoreError> {
+    /// Returns `(spec, question_hash, endpoint)`.
+    pub async fn metadata(
+        &self,
+        id: i64,
+    ) -> Result<Option<(Option<String>, String, String)>, StoreError> {
         Ok(
-            sqlx::query_as("SELECT spec,question_hash FROM decisions WHERE id=?1")
+            sqlx::query_as("SELECT spec,question_hash,endpoint FROM decisions WHERE id=?1")
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?,
@@ -185,11 +189,11 @@ impl Store {
 
     pub async fn labelled(
         &self,
-        spec: &str,
+        spec: Option<&str>,
         question_hash: &str,
     ) -> Result<Vec<Labelled>, StoreError> {
         let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
-            "SELECT id,state,state_hash,label FROM decisions WHERE spec=?1 AND question_hash=?2 AND label IS NOT NULL ORDER BY id",
+            "SELECT id,state,state_hash,label FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL ORDER BY id",
         )
         .bind(spec)
         .bind(question_hash)
@@ -207,18 +211,56 @@ impl Store {
             .collect())
     }
 
+    /// The newest labeled decision for this question and state, under any model: a label is the real answer.
+    pub async fn remembered(
+        &self,
+        spec: Option<&str>,
+        question_hash: &str,
+        state_hash: &str,
+    ) -> Result<Option<(i64, Probs, String)>, StoreError> {
+        let row: Option<(i64, String, String)> = sqlx::query_as(
+            "SELECT id,answer,label FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND state_hash=?3 AND label IS NOT NULL ORDER BY id DESC LIMIT 1",
+        )
+        .bind(spec)
+        .bind(question_hash)
+        .bind(state_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|(id, answer, label)| Ok((id, serde_json::from_str(&answer)?, label)))
+            .transpose()
+    }
+
+    pub async fn labelled_count(
+        &self,
+        spec: Option<&str>,
+        question_hash: &str,
+    ) -> Result<usize, StoreError> {
+        let count: u64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL",
+        )
+        .bind(spec)
+        .bind(question_hash)
+        .fetch_one(&self.pool)
+        .await?;
+
+        usize::try_from(count).map_err(|e| StoreError(e.to_string()))
+    }
+
+    /// Stores bands under `calibration_key`, so an ad-hoc question never shares a spec's calibration.
     pub async fn put_calibration(
         &self,
         calibration_id: &str,
-        spec: &str,
+        spec: Option<&str>,
         bands: &Bands,
         report: &Report,
     ) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO calibrations (calibration_id,spec,bands,report) VALUES (?1,?2,?3,?4) ON CONFLICT(calibration_id) DO UPDATE SET bands=excluded.bands,report=excluded.report",
         )
-        .bind(calibration_id)
-        .bind(spec)
+        .bind(verdict::calibration_key(calibration_id, spec))
+        // The column is NOT NULL: an ad-hoc calibration stores an empty spec.
+        .bind(spec.unwrap_or(""))
         .bind(serde_json::to_string(bands)?)
         .bind(serde_json::to_string(report)?)
         .execute(&self.pool)
@@ -230,10 +272,11 @@ impl Store {
     pub async fn calibration(
         &self,
         calibration_id: &str,
+        spec: Option<&str>,
     ) -> Result<Option<(Bands, Report)>, StoreError> {
         let row: Option<(String, String)> =
             sqlx::query_as("SELECT bands,report FROM calibrations WHERE calibration_id=?1")
-                .bind(calibration_id)
+                .bind(verdict::calibration_key(calibration_id, spec))
                 .fetch_optional(&self.pool)
                 .await?;
 

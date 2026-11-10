@@ -13,6 +13,36 @@ pub struct Config {
     pub embedder: Option<EmbedderConfig>,
     #[serde(default)]
     pub specs: IndexMap<String, SpecConfig>,
+    #[serde(default)]
+    pub learning: Learning,
+}
+
+/// How 8-ball learns from answers that agents report. Each part can be turned off.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Learning {
+    /// Mark decisions whose answer the agent should report with `label`.
+    pub report: bool,
+    /// Answer with a reported label when the same question and state come back.
+    pub remember: bool,
+    /// Share of skipped decisions (noul `no`, triage `rejected`) returned as `unsure`, so the agent checks them.
+    pub explore: f64,
+    /// Refit a question's bands at every multiple of this many labels; 0 turns it off.
+    pub recalibrate_after: usize,
+    /// Also learn ad-hoc questions, by their exact text.
+    pub ad_hoc: bool,
+}
+
+impl Default for Learning {
+    fn default() -> Self {
+        Self {
+            report: true,
+            remember: true,
+            explore: 0.05,
+            recalibrate_after: 20,
+            ad_hoc: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -100,6 +130,10 @@ impl Config {
     fn validate(&self) -> Result<(), String> {
         if !self.endpoints.contains_key(&self.default) {
             return Err(format!("unknown default endpoint {}", self.default));
+        }
+        // A NaN fails `contains` too.
+        if !(0.0..=1.0).contains(&self.learning.explore) {
+            return Err("learning.explore must be between 0 and 1".into());
         }
         for (name, endpoint) in &self.endpoints {
             if endpoint.concurrency == Some(0) {

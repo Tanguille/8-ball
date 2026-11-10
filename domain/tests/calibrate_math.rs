@@ -19,7 +19,7 @@ fn separable_noul() {
         .map(|i| example(0.80 + 0.19 * f64::from(i) / 23.0, "yes"))
         .chain((0_u32..24).map(|i| example(0.01 + 0.19 * f64::from(i) / 23.0, "no")))
         .collect();
-    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95).unwrap();
+    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95, None).unwrap();
     let Bands::Noul { yes_at, no_at } = bands else {
         panic!("noul bands")
     };
@@ -35,7 +35,7 @@ fn too_few_examples() {
         .map(|_| example(0.9, "yes"))
         .chain((0..5).map(|_| example(0.1, "no")))
         .collect();
-    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95).unwrap();
+    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95, None).unwrap();
     let Bands::Noul { yes_at, no_at } = bands else {
         panic!("noul bands")
     };
@@ -47,7 +47,7 @@ fn too_few_examples() {
 #[test]
 fn bad_target() {
     for target in [0.4, 1.0] {
-        assert!(verdict::calibrate(&noul(), &[], target).is_err());
+        assert!(verdict::calibrate(&noul(), &[], target, None).is_err());
     }
 }
 #[test]
@@ -73,7 +73,7 @@ fn choice_threshold() {
         .map(|_| example(0.9, "a"))
         .chain((0..10).map(|_| example(0.55, "b")))
         .collect();
-    let (bands, report) = verdict::calibrate(&kind, &examples, 0.95).unwrap();
+    let (bands, report) = verdict::calibrate(&kind, &examples, 0.95, None).unwrap();
     let Bands::Level { min_confidence } = bands else {
         panic!("level bands")
     };
@@ -107,4 +107,64 @@ fn calibration_id_changes_with_fingerprint() {
         verdict::calibration_id("q", BackendKind::Systemone, "file@b1"),
         verdict::calibration_id("q", BackendKind::Systemone, "file@b2")
     );
+}
+#[test]
+fn explore_draw_is_deterministic() {
+    let first = verdict::explore_draw("question", "state one");
+    assert!((first - verdict::explore_draw("question", "state one")).abs() < f64::EPSILON);
+    assert!((0.0..1.0).contains(&first));
+    let second = verdict::explore_draw("question", "state two");
+    assert!((0.0..1.0).contains(&second));
+    assert!((first - second).abs() > f64::EPSILON);
+}
+#[test]
+fn calibration_key_separates_ad_hoc() {
+    assert_eq!(verdict::calibration_key("abc", Some("s")), "abc");
+    assert_ne!(verdict::calibration_key("abc", None), "abc");
+}
+#[test]
+fn merge_keeps_previous_side_without_evidence() {
+    let examples: Vec<_> = (0..25).map(|_| example(0.97, "yes")).collect();
+    let previous = Bands::Noul {
+        yes_at: 0.85,
+        no_at: 0.15,
+    };
+    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95, Some(previous)).unwrap();
+    let Bands::Noul { yes_at, no_at } = bands else {
+        panic!("noul bands")
+    };
+    assert!((yes_at - 0.97).abs() < 1e-9);
+    assert!((no_at - 0.15).abs() < 1e-9);
+    assert_eq!(report.decided, 25);
+}
+#[test]
+fn merge_falls_back_to_defaults() {
+    let previous = Bands::Noul {
+        yes_at: 1.01,
+        no_at: -0.01,
+    };
+    let (bands, _) = verdict::calibrate(&noul(), &[], 0.95, Some(previous)).unwrap();
+    assert_eq!(bands, Bands::default_for(&noul()));
+}
+#[test]
+fn merge_crossing_returns_previous() {
+    // The no side decides at 0.9, above the previous yes_at of 0.85.
+    let examples: Vec<_> = (0..25).map(|_| example(0.9, "no")).collect();
+    let previous = Bands::Noul {
+        yes_at: 0.85,
+        no_at: 0.15,
+    };
+    let (bands, _) = verdict::calibrate(&noul(), &examples, 0.95, Some(previous)).unwrap();
+    assert_eq!(bands, previous);
+}
+#[test]
+fn merge_level_keeps_previous() {
+    let kind = Kind::Choice {
+        criteria: [("a".into(), String::new()), ("b".into(), String::new())].into(),
+    };
+    let previous = Bands::Level {
+        min_confidence: 0.7,
+    };
+    let (bands, _) = verdict::calibrate(&kind, &[], 0.95, Some(previous)).unwrap();
+    assert_eq!(bands, previous);
 }

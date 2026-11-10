@@ -57,6 +57,8 @@ The final stdout line contains `wakeAgent: true`. If the input is valid, `contex
 
 If `context.input_error` is present, `context.snapshot` is absent. The same holds for JSON that parsed but is not valid. In this case, Hermes must fetch valid evidence and must not conclude that there were no changes. The model verdicts stay in the observation file, outside the evidence that Hermes receives, to reduce evaluation bias.
 
+Report the outcomes so that 8-ball learns. The decision ids and `report` flags are in the `result` of the observation file. After Hermes investigates, label each candidate that has `report: true` with `decision_label` or `8ball label`. The label is `yes` if investigating was worthwhile, else `no`.
+
 Hermes supports pre-check scripts through its [native cron `script` interface](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron/#skipping-the-agent-entirely-wakeagent). A future approved installation can use a wrapper that collects a fresh snapshot, chooses a unique output path, and then invokes `8ball observe`. The two-line `examples/hermes/gitops-observe.sh` launcher executes the CLI. It contains no HTTP or decision logic. Hermes accepts a script file as the `script` value, not a shell command.
 
 ## Replay a separate labeled holdout
@@ -68,7 +70,7 @@ A holdout is a labeled set that calibration never sees. Prepare JSONL with a uni
 {"id":"unused-component","item":{"title":"VolSync maintenance release"},"context":"We use kopiur; VolSync is not installed.","expected_keep":false}
 ```
 
-The label records whether investigation was worthwhile, not whether Hermes happened to investigate. Review a sample of rejected and `unsure` items as well as kept items. Split by source, event, or time so that duplicate or near-duplicate items do not leak between calibration and evaluation. Never fit bands (the calibrated verdict thresholds) on the holdout. Keep the endpoint, spec, and calibration fixed during a comparison.
+The label records whether investigation was worthwhile, not whether Hermes happened to investigate. Review a sample of rejected and `unsure` items as well as kept items. Split by source, event, or time so that duplicate or near-duplicate items do not leak between calibration and evaluation. Never fit bands (the calibrated verdict thresholds) on the holdout. Keep the endpoint, spec, and calibration fixed during a comparison. Set `recalibrate_after = 0` in `[learning]`, so that new labels do not refit the bands.
 
 ```sh
 umask 077
@@ -78,7 +80,7 @@ umask 077
 # Repeat with another configured endpoint against the same reviewed holdout.
 ```
 
-`evaluate` makes sure that the complete dataset is valid before it sends requests. It replays one item per request through `/v1/triage` and writes one JSON report with per-case observations. It never sends expected labels to the server and never calls label or calibrate. Normal triage persistence still saves unlabeled decisions and can reuse cached answers.
+`evaluate` makes sure that the complete dataset is valid before it sends requests. It replays one item per request through `/v1/triage` and writes one JSON report with per-case observations. It never sends expected labels to the server and never calls label or calibrate. It sends `"learn": false`, so remembered labels and exploration do not change the verdicts. Normal triage persistence still saves unlabeled decisions and can reuse cached answers.
 
 Save the configuration and the `doctor` output with the experiment to identify model, spec, and calibration changes. The report does not repeat raw fixture text. Keep the original dataset beside the report.
 

@@ -72,3 +72,54 @@ fn zero_concurrency() {
 fn retention_default() {
     assert_eq!(Config::parse(MINIMAL, "test").unwrap().retention_days, 90);
 }
+
+#[test]
+fn learning_defaults() {
+    let learning = Config::parse(MINIMAL, "test").unwrap().learning;
+    assert!(learning.report);
+    assert!(learning.remember);
+    assert!((learning.explore - 0.05).abs() < 1e-9);
+    assert_eq!(learning.recalibrate_after, 20);
+    assert!(learning.ad_hoc);
+}
+
+#[test]
+fn learning_overrides() {
+    let learning = Config::parse(
+        &format!("{MINIMAL}[learning]\nexplore = 0.0\nad_hoc = false\n"),
+        "test",
+    )
+    .unwrap()
+    .learning;
+    assert!(learning.report);
+    assert!(learning.remember);
+    assert!(learning.explore.abs() < 1e-9);
+    assert_eq!(learning.recalibrate_after, 20);
+    assert!(!learning.ad_hoc);
+}
+
+#[test]
+fn learning_explore_range() {
+    for explore in ["1.5", "-0.1", "nan"] {
+        assert!(
+            Config::parse(
+                &format!("{MINIMAL}[learning]\nexplore = {explore}\n"),
+                "test"
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("learning.explore must be between 0 and 1"),
+            "explore = {explore}"
+        );
+    }
+}
+
+#[test]
+fn learning_unknown_key_rejected() {
+    assert!(
+        Config::parse(&format!("{MINIMAL}[learning]\ncolour = 1\n"), "test")
+            .unwrap_err()
+            .to_string()
+            .contains("colour")
+    );
+}

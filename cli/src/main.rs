@@ -220,7 +220,7 @@ enum Command {
         #[command(flatten)]
         remote: Remote,
     },
-    /// Label a saved spec decision.
+    /// Label a saved decision (a current spec, or an ad-hoc question when `learning.ad_hoc` is on).
     Label {
         id: i64,
         value: String,
@@ -534,7 +534,7 @@ async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
                 .remote
                 .send(client.post(args.remote.at("/v1/triage")).json(
                     &json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
-                    "items":[case.item],"context":case.context}),
+                    "items":[case.item],"context":case.context,"learn":false}),
                 ))
                 .await?;
 
