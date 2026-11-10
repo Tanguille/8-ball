@@ -745,8 +745,8 @@ fn hardware() -> String {
     } else {
         gpus.join("; ")
     };
-    // dev/models.sh runs on the CPU without /dev/dri, whatever EIGHTBALL_DEV_NGL says.
-    let offload = if Path::new("/dev/dri").exists() {
+    // dev/models.sh runs on the CPU without a GPU, whatever EIGHTBALL_DEV_NGL says.
+    let offload = if Path::new("/dev/dri").exists() && !gpus.is_empty() {
         let layers = std::env::var("EIGHTBALL_DEV_NGL").unwrap_or_else(|_| "all".into());
         format!("GPU offload {layers} layers")
     } else {
