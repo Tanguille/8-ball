@@ -10,7 +10,7 @@
 ## Quickstart: local
 
 ```sh
-cargo install --path .
+cargo install --path cli
 mkdir -p ~/.config/8ball
 ```
 
