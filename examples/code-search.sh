@@ -4,8 +4,11 @@
 set -euo pipefail
 question=$1 pattern=$2 path=${3:-.}
 
+# rg exits 1 when nothing matches: that is an empty result, not an error.
+matches=$(rg -n --json -C 12 "$pattern" "$path") || [ $? -eq 1 ]
+
 # Join each match and its 12 context lines into one block per file region.
-blocks=$(rg -n --json -C 12 "$pattern" "$path" | jq -s -c '
+blocks=$(jq -s -c '
   [ .[] | select(.type == "match" or .type == "context") | .data
     | {file: .path.text, line: .line_number, text: .lines.text} ]
   | group_by(.file)
@@ -13,9 +16,13 @@ blocks=$(rg -n --json -C 12 "$pattern" "$path" | jq -s -c '
       if length > 0 and $l.line <= .[-1].end + 1
       then .[-1].end = $l.line | .[-1].code += $l.text
       else . + [{file: $l.file, start: $l.line, end: $l.line, code: $l.text}] end))
-  | flatten')
+  | flatten' <<<"$matches")
 
 count=$(jq length <<<"$blocks")
+if ((count == 0)); then
+  echo "No code matches $pattern in $path." >&2
+  exit 0
+fi
 if ((count > 64)); then
   echo "$count blocks; triage takes at most 64. Use narrower keywords or a path." >&2
   exit 1

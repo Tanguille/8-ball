@@ -4,7 +4,7 @@
 //! then `cargo run --release -p bench -- [--per-side 200] [--split dev]`.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
     fs,
     io::Write as _,
@@ -159,6 +159,20 @@ fn eightball() -> Result<Command> {
     Ok(command)
 }
 
+/// The `8ball doctor` report. Exit code 4 (the default endpoint failed) still prints the report.
+fn doctor() -> Result<Value> {
+    let output = eightball()?
+        .args(["doctor", "--timeout-ms", "120000"])
+        .output()?;
+    ensure!(
+        matches!(output.status.code(), Some(0 | 4)),
+        "8ball doctor failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    serde_json::from_slice(&output.stdout).context("8ball doctor printed no JSON report")
+}
+
 async fn wait_for_server() -> Result<()> {
     for _ in 0..50 {
         if reqwest::get(format!("{URL}/healthz")).await.is_ok() {
@@ -171,7 +185,7 @@ async fn wait_for_server() -> Result<()> {
 
 async fn run(args: &Args) -> Result<(Vec<Runs>, Value)> {
     wait_for_server().await?;
-    let doctor = serde_json::from_slice(&eightball()?.arg("doctor").output()?.stdout)?;
+    let doctor = doctor()?;
 
     let mut runs: Vec<Runs> = vec![Vec::new(); ENDPOINTS];
     for task in &TASKS {
@@ -201,11 +215,19 @@ async fn run(args: &Args) -> Result<(Vec<Runs>, Value)> {
 }
 
 async fn cases(task: &Task, per_side: usize, split: Split, cache: &Path) -> Result<Vec<Value>> {
-    // SMS spam repeats some messages, so keep one case per trimmed text. The last row wins.
+    // SMS spam repeats some messages, so keep one case per trimmed text. Among rows with the same label, the
+    // last one wins, which the pinned revision fixes. A text with both labels has no right answer: it is dropped.
     let mut rows: HashMap<String, (String, bool)> = HashMap::new();
+    let mut conflicts = HashSet::new();
     for path in task.paths {
-        read_rows(task, &download(task, path, cache).await?, &mut rows)?;
+        read_rows(
+            task,
+            &download(task, path, cache).await?,
+            &mut rows,
+            &mut conflicts,
+        )?;
     }
+    rows.retain(|text, _| !conflicts.contains(text));
     // The id hashes the raw text; sorting by it gives a fixed sample that no one picked by hand.
     let mut all: Vec<_> = rows
         .into_iter()
@@ -250,7 +272,12 @@ async fn download(task: &Task, path: &str, cache: &Path) -> Result<PathBuf> {
     Ok(file)
 }
 
-fn read_rows(task: &Task, file: &Path, rows: &mut HashMap<String, (String, bool)>) -> Result<()> {
+fn read_rows(
+    task: &Task,
+    file: &Path,
+    rows: &mut HashMap<String, (String, bool)>,
+    conflicts: &mut HashSet<String>,
+) -> Result<()> {
     for row in SerializedFileReader::new(fs::File::open(file)?)?.get_row_iter(None)? {
         let (mut text, mut label) = (None, None);
         for (name, value) in row?.get_column_iter() {
@@ -263,7 +290,12 @@ fn read_rows(task: &Task, file: &Path, rows: &mut HashMap<String, (String, bool)
         let (Some(text), Some(label)) = (text, label) else {
             bail!("{}: row without {} or label", task.repo, task.field);
         };
-        rows.insert(text.trim().to_owned(), (text, task.yes.contains(&label)));
+        let keep = task.yes.contains(&label);
+        let key = text.trim().to_owned();
+        if rows.get(&key).is_some_and(|(_, seen)| *seen != keep) {
+            conflicts.insert(key.clone());
+        }
+        rows.insert(key, (text, keep));
     }
 
     Ok(())
