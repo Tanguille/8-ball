@@ -51,7 +51,9 @@ jobs:
           path: ~/.cache/8ball-models
           key: models-${{ hashFiles('dev/compose.yaml') }}
       - run: dev/models.sh up
-      - run: cargo nextest run --test live --run-ignored only
+      # One test at a time: on the runner's 4 CPUs, parallel tests queue on the same model servers past the
+      # 20 s decision timeout.
+      - run: cargo nextest run --test live --run-ignored only -j 1 --no-fail-fast
       - run: cargo build --release -p cli -p bench
       # Fails when a task gets worse than bench/baseline.json by more than 1% of its cases. A PR that changes
       # verdicts on purpose updates the baseline from this job's summary.json artifact. Qwen3.5 0.8B only reports:
