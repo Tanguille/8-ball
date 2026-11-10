@@ -5,7 +5,7 @@
 
 **Ask a small model before you pay a big one.**
 
-Agents spend seconds and tokens to read alerts, tickets, and files, often only to decide "not relevant". 8-ball gives that decision to a small local model. On the pinned dev models, an answer takes about 0.08 seconds. A repeated question comes from the cache in less than 0.01 seconds. In our [benchmark](#benchmark) on 580 public cases, the d3 decision model is as accurate as Qwen3.8 27B on the cases that it decides, and it is 15 times faster.
+Agents spend seconds and tokens to read alerts, tickets, and files, often only to decide "not relevant". 8-ball gives that decision to a small local model. On the pinned dev models, an answer takes about 0.08 seconds. A repeated question comes from the cache in less than 0.01 seconds. In our [benchmark](#benchmark) on 1,119 public cases, the d3 decision model is as accurate as Qwen3.8 27B on the cases that it decides, and it is 15 times faster. With the 27B for the cases where d3 is `unsure`, you get more right verdicts than with the 27B alone, 6.5 times faster.
 
 ```sh
 $ 8ball ask --spec storage-risk --state "Backups have failed for the last 4 nights" | jq -c '.results[0] | {verdict, confidence}'
@@ -181,23 +181,32 @@ Limits:
 
 We compare every model of the local stack with Qwen3.8 27B, a large local model, on the same questions. All models answer through `8ball evaluate`, with the same spec text and the default bands, without calibration. Each answer is a new model call.
 
-| Method | Decided | Accuracy of decided | Correct of all | Mean time | Speed vs 27B |
-| --- | --- | --- | --- | --- | --- |
-| vllm-d3-nano (systemone) | 89% | 98.3% | 87.9% | 83 ms | 15.0x |
-| bge-reranker-v2-m3 (rerank) | 99% | 52.8% | 52.2% | 24 ms | 52.6x |
-| Qwen3.5 0.8B (logprob) | 23% | 85.3% | 20.0% | 76 ms | 16.5x |
-| Qwen3.8 27B (logprob) | 95% | 97.6% | 92.9% | 1252 ms | 1.0x |
-| d3, then 27B for `unsure` | 98% | 97.4% | 95.7% | 214 ms | 5.9x |
+| Method | Decided | Wrong | Accuracy of decided | Correct of all | Correct vs 27B (95% CI) | Accuracy at 90% coverage | Mean time | Speed vs 27B |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| vllm-d3-nano (systemone) | 91% | 27 | 97.3% | 88.6% | -5.1 (-6.9 to -3.3) | 97.4% | 84 ms | 15.2x |
+| bge-reranker-v2-m3 (rerank) | 0% | 0 | - | 0.0% | -93.7 (-95.1 to -92.1) | 58.2% | 25 ms | 52.1x |
+| Qwen3.5 0.8B (logprob) | 30% | 58 | 83.0% | 25.3% | -68.4 (-71.0 to -65.6) | 51.7% | 74 ms | 17.2x |
+| Qwen3.8 27B (logprob) | 97% | 32 | 97.0% | 93.7% | baseline | 97.8% | 1280 ms | 1.0x |
+| d3, then 27B for `unsure` | 99% | 38 | 96.6% | 95.4% | +1.8 (+0.9 to +2.8) | 97.4% | 198 ms | 6.5x |
 
-On the cases that it decides, d3 is as accurate as the 27B model, and it is 15 times faster. d3 is `unsure` for 11% of the cases. If the 27B answers those cases, 98% of all cases get a verdict, 6 times faster than with the 27B alone.
+The columns:
+
+- **Decided**: the share of cases with a `yes` or `no` verdict. The others are `unsure`.
+- **Wrong**: decided cases with the wrong verdict.
+- **Accuracy of decided**: right verdicts among decided cases. Methods that decide different shares do not compare well on this column, because the cases that a method leaves `unsure` are the hard ones.
+- **Correct of all**: right verdicts among all cases. `unsure` counts as not right.
+- **Correct vs 27B**: the difference in "correct of all" from the 27B, in points, with a 95% interval from a paired bootstrap. If the interval contains 0, the difference is noise.
+- **Accuracy at 90% coverage**: each method decides the 90% of cases that it is most sure of, by its larger probability. This compares the models at the same coverage.
+
+On the cases that it decides, d3 is as accurate as the 27B (97.3% and 97.0%), and it is 15 times faster. d3 is `unsure` for 9% of the cases. If the 27B answers those cases, 1.8 points more of all cases get a right verdict than with the 27B alone (95% interval: 0.9 to 2.8 points), 6.5 times faster.
 
 | Method | spam | positive | lost-card |
 | --- | --- | --- | --- |
-| vllm-d3-nano (systemone) | 100.0% (98%) | 94.4% (80%) | 100.0% (90%) |
-| bge-reranker-v2-m3 (rerank) | 50.0% (100%) | 50.0% (100%) | 59.2% (97%) |
-| Qwen3.5 0.8B (logprob) | 84.6% (6%) | 82.0% (50%) | 100.0% (13%) |
-| Qwen3.8 27B (logprob) | 98.5% (98%) | 98.4% (94%) | 95.8% (93%) |
-| d3, then 27B for `unsure` | 99.5% (100%) | 95.4% (98%) | 97.2% (98%) |
+| vllm-d3-nano (systemone) | 99.2% (98%) | 93.8% (84%) | 99.0% (91%) |
+| bge-reranker-v2-m3 (rerank) | - (0%) | - (0%) | - (0%) |
+| Qwen3.5 0.8B (logprob) | 88.5% (6%) | 77.8% (56%) | 94.4% (28%) |
+| Qwen3.8 27B (logprob) | 97.7% (98%) | 96.3% (95%) | 97.1% (97%) |
+| d3, then 27B for `unsure` | 98.2% (99%) | 93.4% (98%) | 98.4% (99%) |
 
 Each cell is the accuracy of decided cases, with the decided share in brackets.
 
@@ -205,25 +214,26 @@ The cases:
 
 | Spec | Question | Dataset | Cases (yes / no) |
 | --- | --- | --- | --- |
-| `spam` | Is this text message spam? | [SMS Spam Collection](https://huggingface.co/datasets/ucirvine/sms_spam), train | 100 / 100 |
-| `positive` | Is this movie review positive? | [SST-2](https://huggingface.co/datasets/stanfordnlp/sst2), validation | 100 / 100 |
-| `lost-card` | Does the customer report a lost, stolen, or compromised card? | [Banking77](https://huggingface.co/datasets/PolyAI/banking77), test, classes 22 and 41 | 80 / 100 |
+| `spam` | Is this text message spam? | [SMS Spam Collection](https://huggingface.co/datasets/ucirvine/sms_spam), train | 200 / 200 |
+| `positive` | Is this movie review positive? | [SST-2](https://huggingface.co/datasets/stanfordnlp/sst2), validation | 200 / 200 |
+| `lost-card` | Is the customer asking about a lost, stolen, or compromised card, including fraud or someone else using their card? | [Banking77](https://huggingface.co/datasets/PolyAI/banking77), train and test, classes 22 and 41 | 119 / 200 |
 
 How we keep it fair:
 
 - The labels come from public datasets. We did not write or label the cases.
-- The benchmark pins each dataset revision. It takes the first cases per label in order of the SHA-256 of the text, so no person picks them.
+- The benchmark pins each dataset revision. The SHA-256 of each text puts the case in the `test` or the `dev` split, and orders the cases. So no person picks them.
+- We change questions only from results on `dev`, and we report only `test`. On `dev`, the first `lost-card` question ("Does the customer report a lost, stolen, or compromised card?") missed fraud cases, which Banking77 labels `compromised_card`. The current question halved the 27B's misses on `dev` (8 to 4 of 200), and kept d3 at 4.
 - Every model gets the same question. No model gets a prompt that is tuned for it.
 - We show all models, also those that do badly.
 
-Accuracy depends only on the model files, the questions, and the cases, so you get almost the same numbers on other hardware. Time depends on your hardware. The speed ratio is more stable, because all models run on the same machine. We measured on an AMD Ryzen AI 9 HX 370 with its Radeon 890M iGPU (Vulkan, all layers on the GPU), on 2026-11-10.
+Accuracy depends only on the model files, the questions, and the cases. On 40 SST-2 cases, d3 on 4 CPU cores gave the same 40 verdicts as on the GPU, and P(yes) changed by at most 0.02. Time depends on your hardware. The speed ratio is more stable, because all models run on the same machine. We measured on an AMD Ryzen AI 9 HX 370 with its Radeon 890M iGPU (Vulkan, all layers on the GPU), on 2026-11-10.
 
 Limits:
 
-- The reranker answers `no` to almost every case. A reranker scores how well a text matches the topic of the question. It does not judge if the answer is yes. Use it only with [calibration](#calibration), or for search-like questions.
-- Qwen3.5 0.8B is `unsure` for 77% of the cases with the default bands. Calibration can change this.
+- The reranker answers `unsure` without calibration, because its score shows topic match, not the answer. Its row shows what it would answer at 90% coverage.
+- Qwen3.5 0.8B is `unsure` for most cases with the default bands. Calibration can change this.
 - The cases are short texts, and there are 3 tasks. Long states and other questions can give other results.
-- The numbers come from 1 run.
+- The numbers come from 1 run. The 95% intervals show what is noise: about 1 to 2 points at this size.
 
 To run it yourself (the 27B model is a 19 GB download):
 
@@ -231,10 +241,11 @@ To run it yourself (the 27B model is a 19 GB download):
 dev/models.sh up
 dev/models.sh bench
 cargo build --release -p cli -p bench
-cargo run --release -p bench
+cargo run --release -p bench                 # test split, 200 cases per answer and task
+cargo run --release -p bench -- --split dev  # to try a question change
 ```
 
-The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build, and saves each answer to `target/bench/observations.json`.
+The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build. It saves each answer, with its text, to `target/bench/observations.json`.
 
 ## Commands
 
@@ -342,7 +353,7 @@ recalibrate_after = 20          # refit a question's bands at every multiple of 
 ad_hoc = true                   # also learn ad-hoc questions, by their exact text
 ```
 
-`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. Auto-detection reads `/props` and `/v1/models`. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
+`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. A reranker scores how well the state matches the topic of the question, not if the answer is yes. So its answers stay `unsure` until you [calibrate](#calibration) the question. Auto-detection reads `/props` and `/v1/models`. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
 
 ## Environment variables
 
@@ -362,10 +373,14 @@ A flag overrides its variable.
 
 Bands select the decisive verdicts at the requested precision. The other verdicts are `unsure`.
 
+For each side, calibration picks the loosest threshold whose labeled answers still reach the target precision (`--precision`, default 0.95). So calibration makes a question decide more cases at that precision. It does not make verdicts safer than the default bands. If the defaults are already more precise than the target, calibration gives lower precision for more coverage. To keep high precision, ask for a high target.
+
+A reranker answers `unsure` until you calibrate the question, because its score shows topic match, not the answer.
+
 To calibrate a spec:
 
 1. Save the question as a reviewed spec in the configuration.
-2. Label at least 20 real decisions per side. `8ball decisions --spec <spec> --unlabelled` lists them, and `8ball label <id> <value>` saves a label. An agent can do the same with `decision_review` and `decision_label`. Label only from evidence, such as the outcome of the work.
+2. Label real decisions on each side. A side needs at least 1 / (1 − precision) decided labels: 20 for 0.95, 50 for 0.98, and 100 for 0.99. With fewer, a first calibration stops that side from deciding, and a refit keeps its previous threshold. `8ball decisions --spec <spec> --unlabelled` lists them, and `8ball label <id> <value>` saves a label. An agent can do the same with `decision_review` and `decision_label`. Label only from evidence, such as the outcome of the work.
 3. Run `8ball calibrate <spec>`.
 
 Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model file invalidates its calibration identity. A new llama.cpp build of the same file does not. 8-ball checks the model again every minute. Ad-hoc questions learn by their exact text when `learning.ad_hoc` is on. They get their own calibration, apart from specs.

@@ -15,4 +15,6 @@ instructions = "Is this movie review positive?"
 
 [specs.lost-card]
 type = "noul"
-instructions = "Does the customer report a lost, stolen, or compromised card?"
+# Banking77's compromised_card class covers card fraud. The first wording, "Does the customer report a lost,
+# stolen, or compromised card?", missed those; this one halved the 27B's misses on the dev split.
+instructions = "Is the customer asking about a lost, stolen, or compromised card, including fraud or someone else using their card?"
