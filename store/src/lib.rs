@@ -103,6 +103,7 @@ impl Store {
         let migrator = sqlx::migrate::Migrator::with_migrations(vec![
             migration(1, "storage", SCHEMA),
             migration(2, "questions", QUESTIONS),
+            migration(3, "question index", QUESTION_INDEX),
         ]);
         migrator
             .run(&mut *transaction)
@@ -386,3 +387,4 @@ impl Store {
 
 const SCHEMA: &str = include_str!("../migrations/0001_storage.sql");
 const QUESTIONS: &str = include_str!("../migrations/0002_questions.sql");
+const QUESTION_INDEX: &str = include_str!("../migrations/0003_question_index.sql");

@@ -1,4 +1,4 @@
-use std::os::unix::fs::PermissionsExt;
+use std::{fmt::Write as _, os::unix::fs::PermissionsExt};
 
 use sqlx::{Connection, SqliteConnection};
 use tempfile::TempDir;
@@ -418,4 +418,42 @@ async fn metadata_returns_spec_question_and_endpoint() {
         store.metadata(id).await.unwrap(),
         Some((Some("greeting".into()), "question".into(), "d3".into()))
     );
+}
+
+/// sqlx refuses to open a database whose applied migration text changed, so a shipped migration must stay
+/// byte-identical. Add a new numbered migration instead.
+#[test]
+fn shipped_migrations_keep_their_checksums() {
+    for (version, sql, shipped) in [
+        (
+            1,
+            include_str!("../migrations/0001_storage.sql"),
+            "7e65d034202713c733154edf263c45e77a17d8c5624ed8a0f34a17252c4bb1e0bf2d0b520e517556a49704d0792a6223",
+        ),
+        (
+            2,
+            include_str!("../migrations/0002_questions.sql"),
+            "15c8c29ba14d413817497585c856c2e43dd46fb5ae52b476774e28f2dd8c7aaba5f5535413325b879b6e52c38ff0f5ea",
+        ),
+    ] {
+        let migration = sqlx::migrate::Migration::new(
+            version,
+            "shipped".into(),
+            sqlx::migrate::MigrationType::Simple,
+            sqlx::SqlSafeStr::into_sql_str(sql),
+            false,
+        );
+        let checksum = migration
+            .checksum
+            .iter()
+            .fold(String::new(), |mut hex, byte| {
+                write!(hex, "{byte:02x}").expect("writing to String");
+
+                hex
+            });
+        assert_eq!(
+            checksum, shipped,
+            "migration {version} changed after it shipped"
+        );
+    }
 }
