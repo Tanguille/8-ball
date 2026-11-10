@@ -264,7 +264,13 @@ async fn labels_refit_at_every_multiple_of_recalibrate_after() {
     assert!(!spec(&app, "maybe-1").await.calibrated);
 
     let id = spec(&app, "yes-25").await.id;
+    let before = requests(&app.mock).await.len();
     app.service.label(id, "yes".into()).await.unwrap();
+    assert_eq!(
+        requests(&app.mock).await.len(),
+        before,
+        "a refit uses cached answers only"
+    );
     let (bands, report) = app
         .store
         .calibration(&calibration_id, Some("greeting"))
