@@ -3,9 +3,24 @@
 > [!WARNING]
 > 8-ball is in early development. Commands, APIs, configuration, and the database format can change without notice. Use it at your own risk.
 
-8-ball gets cheap typed judgments from small decision models. A question is `noul` (yes or no), `choice` (pick one option), or `score` (pick a level). The verdict is the answer to a question. 8-ball offers REST, HTTP MCP, stdio MCP, and a CLI, with a SQLite answer cache and optional labeled calibration. Use a clear verdict to gate or triage work. If the verdict is `unsure` or an error occurs, do the normal work.
+**Ask a small model before you pay a big one.**
 
-8-ball is a Swiss Army knife that lets agents get the most out of decision models in a simple way. It is a Rust server and CLI. It uses System One decision models and rerankers on llama.cpp servers, and chat models through logprobs on any OpenAI-compatible server that returns them, such as vLLM. AI agents in Claude Code, Codex, Cursor, qwen-code, and OpenCode can connect to it as an MCP server. A decision model then answers simple classification questions before the agent does the expensive work.
+Agents spend seconds and tokens to read alerts, tickets, and files, often only to decide "not relevant". 8-ball gives that decision to a small local model. On the pinned dev models, an answer takes about 0.08 seconds. A repeated question comes from the cache in less than 0.01 seconds. In our [benchmark](#benchmark) on 580 public cases, the d3 decision model is as accurate as Qwen3.8 27B on the cases that it decides, and it is 15 times faster.
+
+```sh
+$ 8ball ask --spec storage-risk --state "Backups have failed for the last 4 nights" | jq -c '.results[0] | {verdict, confidence}'
+{"verdict":"yes","confidence":0.9856957837867129}
+```
+
+- **Typed answers.** A question is `noul` (yes or no), `choice` (pick one option), or `score` (pick a level). The verdict is the answer.
+- **It knows when it does not know.** A low confidence gives `unsure`. Then you do the normal work, so a wrong guess does not skip work that matters.
+- **It learns from your labels.** Label the outcome of the work, and 8-ball fits its thresholds to the precision that you ask for.
+- **Local first.** The models run on your machine, with no fee for each call. Each answer goes into a SQLite cache.
+- **It works with your agent.** Claude Code, Codex, Cursor, qwen-code, and OpenCode connect over MCP. Scripts use the CLI or REST.
+
+8-ball is a Rust server and CLI. It uses System One decision models and rerankers on llama.cpp servers. It also uses chat models through logprobs on any OpenAI-compatible server that returns them, such as vLLM.
+
+The times come from `dev/models.sh up` with GPU offload, `8ball serve --config dev/config.toml`, and `/usr/bin/time` around `8ball ask`. Other models and hardware give other numbers.
 
 ## Quickstart: local
 
@@ -138,6 +153,88 @@ Gate a shell script with `--exit-code`:
 ```
 
 Agents get the same verdicts through the MCP tools `decision_ask` and `decision_triage`.
+
+### Search code by behavior
+
+[`examples/code-search.sh`](examples/code-search.sh) finds code by what it does. ripgrep finds blocks that match a few keywords. 8-ball then reads each block and keeps those that do the behavior. You need no index, so uncommitted edits are included.
+
+```sh
+examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|401' service/src
+```
+
+```json
+{"verdict":"match","file":"service/src/http.rs","lines":"4-58","confidence":0.96}
+{"verdict":"match","file":"service/src/http.rs","lines":"160-184","confidence":0.99}
+{"verdict":"check","file":"service/src/http.rs","lines":"128-152","confidence":0.06}
+{"verdict":"check","file":"service/src/lib.rs","lines":"273-305","confidence":0.42}
+```
+
+Lines 160 to 184 hold the bearer key check. `check` means `unsure`, so read those blocks yourself. This run took 0.9 seconds with an empty database.
+
+Limits:
+
+- 8-ball judges only the blocks that ripgrep finds. If the keywords miss the code, 8-ball misses it too. For "remove the middle of a state that is too long", `max_state_chars|trim` in `backend/src/lib.rs` found only the caller, as `check` (0.67). The `fit` function cuts the state, but has neither keyword. With `'fn fit'`, it is a `match` (0.97).
+- `triage` takes at most 64 blocks. If ripgrep finds more, the script stops with an error, so use narrow keywords or a path.
+- A block is the match with 12 lines before and after it, not a full function. The model can see only part of a long function.
+
+## Benchmark
+
+We compare every model of the local stack with Qwen3.8 27B, a large local model, on the same questions. All models answer through `8ball evaluate`, with the same spec text and the default bands, without calibration. Each answer is a new model call.
+
+| Method | Decided | Accuracy of decided | Correct of all | Mean time | Speed vs 27B |
+| --- | --- | --- | --- | --- | --- |
+| vllm-d3-nano (systemone) | 89% | 98.3% | 87.9% | 83 ms | 14.9x |
+| bge-reranker-v2-m3 (rerank) | 99% | 52.8% | 52.2% | 23 ms | 53.0x |
+| Qwen3.5 0.8B (logprob) | 23% | 85.3% | 20.0% | 85 ms | 14.5x |
+| Qwen3.8 27B (logprob) | 95% | 97.6% | 92.9% | 1229 ms | 1.0x |
+| d3, then 27B for `unsure` | 98% | 97.4% | 95.7% | 210 ms | 5.9x |
+
+On the cases that it decides, d3 is as accurate as the 27B model, and it is 15 times faster. d3 is `unsure` for 11% of the cases. If the 27B answers those cases, 98% of all cases get a verdict, 6 times faster than with the 27B alone.
+
+| Method | spam | positive | lost-card |
+| --- | --- | --- | --- |
+| vllm-d3-nano (systemone) | 100.0% (98%) | 94.4% (80%) | 100.0% (90%) |
+| bge-reranker-v2-m3 (rerank) | 50.0% (100%) | 50.0% (100%) | 59.2% (97%) |
+| Qwen3.5 0.8B (logprob) | 84.6% (6%) | 82.0% (50%) | 100.0% (13%) |
+| Qwen3.8 27B (logprob) | 98.5% (98%) | 98.4% (94%) | 95.8% (93%) |
+| d3, then 27B for `unsure` | 99.5% (100%) | 95.4% (98%) | 97.2% (98%) |
+
+Each cell is the accuracy of decided cases, with the decided share in brackets.
+
+The cases:
+
+| Spec | Question | Dataset | Cases (yes / no) |
+| --- | --- | --- | --- |
+| `spam` | Is this text message spam? | [SMS Spam Collection](https://huggingface.co/datasets/ucirvine/sms_spam), train | 100 / 100 |
+| `positive` | Is this movie review positive? | [SST-2](https://huggingface.co/datasets/stanfordnlp/sst2), validation | 100 / 100 |
+| `lost-card` | Does the customer report a lost, stolen, or compromised card? | [Banking77](https://huggingface.co/datasets/PolyAI/banking77), test, classes 22 and 41 | 80 / 100 |
+
+How we keep it fair:
+
+- The labels come from public datasets. We did not write or label the cases.
+- The script pins each dataset revision. It takes the first cases per label in order of the SHA-256 of the text, so no person picks them.
+- Every model gets the same question. No model gets a prompt that is tuned for it.
+- We show all models, also those that do badly.
+
+Accuracy depends only on the model files, the questions, and the cases, so you get almost the same numbers on other hardware. Time depends on your hardware. The speed ratio is more stable, because all models run on the same machine. We measured on an AMD Ryzen AI 9 HX 370 with its Radeon 890M iGPU (Vulkan, all layers on the GPU), on 2026-11-10.
+
+Limits:
+
+- The reranker answers `no` to almost every case. A reranker scores how well a text matches the topic of the question. It does not judge if the answer is yes. Use it only with [calibration](#calibration), or for search-like questions.
+- Qwen3.5 0.8B is `unsure` for 77% of the cases with the default bands. Calibration can change this.
+- The cases are short texts, and there are 3 tasks. Long states and other questions can give other results.
+- The numbers come from 1 run.
+
+To run it yourself (the 27B model is a 19 GB download):
+
+```sh
+dev/models.sh up
+dev/models.sh bench
+cargo install --path cli
+uv run dev/bench.py
+```
+
+The script prints these tables, with your hardware and the model files. It saves each answer to `target/bench/observations.json`.
 
 ## Commands
 
@@ -451,7 +548,7 @@ claude plugin validate plugin --strict
 
 This repository claims no public marketplace submission. A hosted privacy-policy URL for directory publication is deferred.
 
-The live tests need `dev/models.sh up`. This script takes `up`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. They use the same pinned llama.cpp image and models as the deployment. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
+The live tests need `dev/models.sh up`. This script takes `up`, `bench`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. `bench` also starts the [benchmark](#benchmark) baseline `big` on port 9935. They use the same pinned llama.cpp image and models as the deployment. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
 
 ## Container image
 
