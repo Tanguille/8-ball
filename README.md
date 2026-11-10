@@ -278,7 +278,7 @@ Reports are in-sample, so evaluate a separate holdout (labeled cases that calibr
 ### Learning upgrade notes
 
 - With the defaults, about `explore` (5%) of skipped answers come back as `unsure`. This is extra work by design. `report = false` also stops exploration.
-- Metrics count explored answers as `unsure`, and remembered answers as `cached`.
+- Metrics count explored answers as `unsure`, and remembered answers as `cached`. The `questions` and `decisions` listings show the stored model verdict, so an explored answer keeps its model verdict there.
 - A label becomes the answer for that exact question and state. Anyone with the API key can set it. To fix a wrong label, label the same id again.
 - To turn learning off, set `report = false`, `remember = false`, `explore = 0.0`, `recalibrate_after = 0`, and `ad_hoc = false`.
 
