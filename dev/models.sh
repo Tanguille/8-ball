@@ -11,7 +11,7 @@ if [ "$(docker info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" = true 
 fi
 export EIGHTBALL_DEV_UID EIGHTBALL_DEV_GID
 # Without a GPU, the Vulkan image runs on its CPU backend. CI runners have a /dev/dri for a virtual display, but
-# no GPU behind it: there Vulkan falls back to a software renderer that is 3 times slower than the CPU backend.
+# no GPU behind it, so lspci decides.
 gpu='vga|3d controller|display'
 virtual='hyper-v|virtual|virtio|qxl|vmware|bochs|cirrus'
 if [ ! -e /dev/dri ] || { command -v lspci >/dev/null && ! lspci | grep -iE "$gpu" | grep -qviE "$virtual"; }; then
