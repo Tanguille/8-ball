@@ -48,8 +48,7 @@ jobs:
     timeout-minutes: 330
     env:
       LOGFARE_API_KEY: ${{ secrets.LOGFARE_API_KEY }}
-      # TEMPORARY: this commit's branch push runs the matrix; revert before merge.
-      MODE: ${{ (github.ref == 'refs/heads/ci/bench' || github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
+      MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
       ACCEPT: ${{ inputs.accept == true }}
     steps:
       - name: Check the key
