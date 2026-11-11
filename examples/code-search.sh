@@ -29,9 +29,9 @@ if ((count > 64)); then
 fi
 
 # triage returns indices into its input, so map them back to the blocks.
-echo "$blocks" | jq -c 'map(.code)' \
-  | 8ball triage "Does this code $question?" \
-  | jq -c --argjson b "$blocks" '
+echo "$blocks" | jq -c 'map(.code)' |
+  8ball triage "Does this code $question?" |
+  jq -c --argjson b "$blocks" '
       ((.kept[] | {verdict: "match", index, c: .decision.confidence}),
        (.unsure[] | {verdict: "check", index, c: .decision.confidence}))
       | {verdict, file: $b[.index].file, lines: "\($b[.index].start)-\($b[.index].end)", confidence: (.c * 100 | round / 100)}'
