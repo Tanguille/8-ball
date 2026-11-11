@@ -12,16 +12,25 @@ fi
 export EIGHTBALL_DEV_UID EIGHTBALL_DEV_GID
 # Without a GPU, the Vulkan image runs on its CPU backend. CI runners have a /dev/dri for a virtual display, but
 # no GPU behind it: there Vulkan falls back to a software renderer that is 3 times slower than the CPU backend.
-if [ ! -e /dev/dri ] || { command -v lspci > /dev/null && ! lspci | grep -qiE 'vga|3d controller|display'; }; then
+if [ ! -e /dev/dri ] || { command -v lspci >/dev/null && ! lspci | grep -qiE 'vga|3d controller|display'; }; then
   export COMPOSE_FILE=compose.yaml:compose.cpu.yaml EIGHTBALL_DEV_NGL="${EIGHTBALL_DEV_NGL:-0}"
 fi
 mkdir -p "$HOME/.cache/8ball-models"
 case "${1:-status}" in
-  up)     docker compose up -d --wait ;;
-  bench)  docker compose --profile bench up -d --wait big ;;
-  down)   docker compose --profile bench down ;;
-  status) docker compose ps
-          for p in 9931 9932 9933 9934; do printf '%s ' "$p"; curl -fsS "http://127.0.0.1:$p/health" || printf 'DOWN'; echo; done ;;
-  logs)   docker compose logs --tail=100 ${2:+"$2"} ;;
-  *)      echo "usage: $0 up|bench|down|status|logs [service]" >&2; exit 2 ;;
+  up) docker compose up -d --wait ;;
+  bench) docker compose --profile bench up -d --wait big ;;
+  down) docker compose --profile bench down ;;
+  status)
+    docker compose ps
+    for p in 9931 9932 9933 9934; do
+      printf '%s ' "$p"
+      curl -fsS "http://127.0.0.1:$p/health" || printf 'DOWN'
+      echo
+    done
+    ;;
+  logs) docker compose logs --tail=100 ${2:+"$2"} ;;
+  *)
+    echo "usage: $0 up|bench|down|status|logs [service]" >&2
+    exit 2
+    ;;
 esac
