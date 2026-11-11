@@ -84,6 +84,17 @@ jobs:
           endpoints=$(sed -n 's/^\[endpoints\.\(.*\)\]$/\1/p' logfare.toml | paste -sd,)
           echo "ENDPOINTS=d3,$endpoints" >> "$GITHUB_ENV"
           echo "Logfare endpoints: $endpoints"
+      # TEMPORARY: what gemma-4-26b answers first; revert with the PR trigger.
+      - name: TEMP gemma-4-26b first tokens
+        if: github.event_name == 'pull_request'
+        run: |
+          for max in 1 8; do
+            curl -fsS https://logfare.ai/v1/chat/completions -H "Authorization: Bearer $LOGFARE_API_KEY" \
+              -H 'Content-Type: application/json' -d '{"model":"gemma-4-26b","max_tokens":'"$max"',"temperature":0,
+              "logprobs":true,"top_logprobs":20,"messages":[{"role":"system","content":"You answer with exactly one label and nothing else."},
+              {"role":"user","content":"Question: Is this message a greeting?\nAnswer yes or no.\n\nMessage: hi there, how are you?"}]}' |
+              jq -c '{content: .choices[0].message.content, top: [.choices[0].logprobs.content[0].top_logprobs[]? | {token, logprob}][:8]}' || true
+          done
       # The last saved run of this mode is the baseline.
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
