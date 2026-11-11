@@ -8,8 +8,7 @@ name: Benchmark (Logfare)
 # Pull requests never run this: secrets do not reach fork PRs, and the PR gate is in ci.yaml.
 on:
   push:
-    # TEMPORARY: full runs from the PR branch before merging; revert before merge.
-    branches: [main, ci/bench]
+    branches: [main]
     paths:
       # Quoted: a leading * starts a YAML alias.
       - "*/src/**"
