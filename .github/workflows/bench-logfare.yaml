@@ -114,8 +114,8 @@ jobs:
           elif [ "$status" != 0 ]; then
             exit "$status"
           fi
-      # Only a passing (or accepted) run becomes the next baseline, so a regression stays red until it is
-      # fixed or accepted.
+      # The saved run of this mode is the next baseline. A failing 27b run skips this save, so a regression
+      # stays red until it is fixed or accepted; the matrix run only warns, so it always advances its baseline.
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: baseline

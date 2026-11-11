@@ -766,7 +766,13 @@ fn hardware() -> String {
         .lines()
         .filter(|line| {
             let line = line.to_lowercase();
+            // A virtual display adapter (CI runners) has no GPU behind it, as in dev/models.sh.
             ["vga", "display", "3d controller"]
+                .iter()
+                .any(|kind| line.contains(kind))
+                && ![
+                    "hyper-v", "virtual", "virtio", "qxl", "vmware", "bochs", "cirrus",
+                ]
                 .iter()
                 .any(|kind| line.contains(kind))
         })

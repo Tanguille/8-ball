@@ -103,6 +103,7 @@ impl Endpoint {
         if let Some(model) = &self.config.model {
             body["model"] = model.as_str().into();
         }
+        let mut retried = false;
         let (status, text) = loop {
             self.pace().await;
             let permit = info
@@ -123,10 +124,24 @@ impl Endpoint {
                 .map_or(Duration::from_secs(1), Duration::from_secs);
             let text = response.text().await?;
             drop(permit);
-            if status != reqwest::StatusCode::TOO_MANY_REQUESTS || retry_after > MAX_RETRY_AFTER {
-                break (status, text);
+            // One retry: a short 429 after its wait (at least 1 s, so `Retry-After: 0` cannot spin), and a 502 or
+            // 503, which a hosted gateway may answer from another upstream the next time.
+            let wait = match status {
+                reqwest::StatusCode::TOO_MANY_REQUESTS if retry_after <= MAX_RETRY_AFTER => {
+                    Some(retry_after.max(Duration::from_secs(1)))
+                }
+                reqwest::StatusCode::BAD_GATEWAY | reqwest::StatusCode::SERVICE_UNAVAILABLE => {
+                    Some(Duration::from_secs(1))
+                }
+                _ => None,
+            };
+            match wait {
+                Some(wait) if !retried => {
+                    retried = true;
+                    tokio::time::sleep(wait).await;
+                }
+                _ => break (status, text),
             }
-            tokio::time::sleep(retry_after).await;
         };
         if !status.is_success() {
             let text: String = text.chars().take(500).collect();

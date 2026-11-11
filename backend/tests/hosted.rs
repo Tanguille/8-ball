@@ -142,3 +142,47 @@ async fn requests_per_minute_spaces_requests() {
     }
     assert!(start.elapsed() >= Duration::from_millis(200));
 }
+
+#[tokio::test]
+async fn a_second_429_is_not_retried_and_retry_after_0_waits_a_second() {
+    let server = MockServer::start().await;
+    decisions(
+        &server,
+        ResponseTemplate::new(429).insert_header("Retry-After", "0"),
+    )
+    .await;
+    let endpoint = Endpoint::new(
+        "logfare",
+        &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
+        None,
+    );
+    let start = Instant::now();
+    let error = endpoint
+        .ask("hi", &[question()])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("429"), "{error}");
+    assert!(start.elapsed() >= Duration::from_secs(1));
+    assert_eq!(posts(&server).await.len(), 2);
+}
+
+#[tokio::test]
+async fn a_502_is_retried_once() {
+    let server = MockServer::start().await;
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/decisions"))
+        .respond_with(ResponseTemplate::new(502))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    decisions(&server, answer()).await;
+    let endpoint = Endpoint::new(
+        "logfare",
+        &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
+        None,
+    );
+    endpoint.ask("hi", &[question()]).await.unwrap();
+    assert_eq!(posts(&server).await.len(), 2);
+}
