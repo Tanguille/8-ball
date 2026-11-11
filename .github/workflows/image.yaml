@@ -15,7 +15,7 @@ on:
       - Dockerfile
       - .dockerignore
       - charts/**
-      - .github/workflows/image.yaml
+  # Edits to this file do not release: an action bump would ship the same image. Run it by hand after a pipeline fix.
   workflow_dispatch:
 
 permissions:

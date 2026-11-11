@@ -571,7 +571,7 @@ The [container workflow](.github/workflows/image.yaml) builds the image, runs a 
 
 A push to `main` that changes code, the Docker build inputs, or the chart is a release. It moves `latest`, and gives the image, the chart and the Git tag the next patch version: `v0.1.0` first, then `v0.1.1`. The image is `ghcr.io/tanguille/8-ball:<version>`. The chart is `oci://ghcr.io/tanguille/charts/eightball`, with the version without the `v`. The GitHub release has generated notes.
 
-A push that changes only docs is not a release. For a minor or major version, push the tag `vX.Y.0` on the last commit of `main`, then run `gh workflow run image.yaml --ref main`. That run releases the tag, and the next release continues from it. The same command finishes a release that failed halfway. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build publishes only the `sha-` image.
+A push that changes only docs or this workflow is not a release. For a minor or major version, push the tag `vX.Y.0` on the last commit of `main`, then run `gh workflow run image.yaml --ref main`. That run releases the tag, and the next release continues from it. The same command finishes a release that failed halfway. To build another branch, run `gh workflow run image.yaml --ref <branch>`. That build publishes only the `sha-` image.
 
 The image and chart packages are public, so that deployments and Renovate can read them without credentials. Keep that visibility.
 

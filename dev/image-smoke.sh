@@ -19,4 +19,4 @@ test "$(curl --max-time 5 -s -o /dev/null -w '%{http_code}' "http://$address/v1/
 response=$(curl --max-time 5 -fsS "http://$address/v1/triage" \
   -H 'Authorization: Bearer smoke-test' -H 'Content-Type: application/json' \
   -d '{"spec":"gitops-investigate","items":[]}')
-jq -e '.kept == [] and .unsure == [] and .rejected == [] and .prefiltered == [] and .dropped == 0' <<< "$response"
+jq -e '.kept == [] and .unsure == [] and .rejected == [] and .prefiltered == [] and .dropped == 0' <<<"$response"
