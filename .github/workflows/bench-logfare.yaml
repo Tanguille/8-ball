@@ -7,6 +7,8 @@ name: Benchmark (Logfare)
 # - matrix: every Logfare model that can answer a decision question, weekly. It reports and never fails.
 # Pull requests never run this: secrets do not reach fork PRs, and the PR gate is in ci.yaml.
 on:
+  # TEMPORARY: validate on PR #24, revert before merging.
+  pull_request:
   push:
     branches: [main]
     paths:
@@ -47,7 +49,8 @@ jobs:
     timeout-minutes: 330
     env:
       LOGFARE_API_KEY: ${{ secrets.LOGFARE_API_KEY }}
-      MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
+      MODE: ${{ (github.event_name == 'pull_request' || github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
+      EVENT: ${{ github.event_name }}
       ACCEPT: ${{ inputs.accept == true }}
     steps:
       - name: Check the key
@@ -73,6 +76,7 @@ jobs:
           if [ "$MODE" = matrix ]; then
             dev/logfare.sh 16 > logfare.toml
             echo "PER_SIDE=50" >> "$GITHUB_ENV"
+            if [ "$EVENT" = pull_request ]; then echo "PER_SIDE=2" >> "$GITHUB_ENV"; fi
           else
             dev/logfare.sh 30 qwen-3.8-27b > logfare.toml
             echo "PER_SIDE=100" >> "$GITHUB_ENV"
