@@ -2,7 +2,7 @@
 FROM rust:1-alpine AS build
 WORKDIR /src
 COPY . .
-RUN cargo build --release --locked && cp target/release/8ball /8ball
+RUN cargo build --release --locked -p cli && cp target/release/8ball /8ball
 
 FROM gcr.io/distroless/static:nonroot
 LABEL org.opencontainers.image.source=https://github.com/Tanguille/8-ball

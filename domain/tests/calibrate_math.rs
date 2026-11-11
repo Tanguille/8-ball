@@ -19,7 +19,8 @@ fn separable_noul() {
         .map(|i| example(0.80 + 0.19 * f64::from(i) / 23.0, "yes"))
         .chain((0_u32..24).map(|i| example(0.01 + 0.19 * f64::from(i) / 23.0, "no")))
         .collect();
-    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95, None).unwrap();
+    let (bands, report) =
+        verdict::calibrate(&noul(), BackendKind::Systemone, &examples, 0.95, None).unwrap();
     let Bands::Noul { yes_at, no_at } = bands else {
         panic!("noul bands")
     };
@@ -35,7 +36,8 @@ fn too_few_examples() {
         .map(|_| example(0.9, "yes"))
         .chain((0..5).map(|_| example(0.1, "no")))
         .collect();
-    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95, None).unwrap();
+    let (bands, report) =
+        verdict::calibrate(&noul(), BackendKind::Systemone, &examples, 0.95, None).unwrap();
     let Bands::Noul { yes_at, no_at } = bands else {
         panic!("noul bands")
     };
@@ -47,7 +49,7 @@ fn too_few_examples() {
 #[test]
 fn bad_target() {
     for target in [0.4, 1.0] {
-        assert!(verdict::calibrate(&noul(), &[], target, None).is_err());
+        assert!(verdict::calibrate(&noul(), BackendKind::Systemone, &[], target, None).is_err());
     }
 }
 #[test]
@@ -73,7 +75,8 @@ fn choice_threshold() {
         .map(|_| example(0.9, "a"))
         .chain((0..10).map(|_| example(0.55, "b")))
         .collect();
-    let (bands, report) = verdict::calibrate(&kind, &examples, 0.95, None).unwrap();
+    let (bands, report) =
+        verdict::calibrate(&kind, BackendKind::Systemone, &examples, 0.95, None).unwrap();
     let Bands::Level { min_confidence } = bands else {
         panic!("level bands")
     };
@@ -129,7 +132,14 @@ fn merge_keeps_previous_side_without_evidence() {
         yes_at: 0.85,
         no_at: 0.15,
     };
-    let (bands, report) = verdict::calibrate(&noul(), &examples, 0.95, Some(previous)).unwrap();
+    let (bands, report) = verdict::calibrate(
+        &noul(),
+        BackendKind::Systemone,
+        &examples,
+        0.95,
+        Some(previous),
+    )
+    .unwrap();
     let Bands::Noul { yes_at, no_at } = bands else {
         panic!("noul bands")
     };
@@ -143,8 +153,9 @@ fn merge_falls_back_to_defaults() {
         yes_at: 1.01,
         no_at: -0.01,
     };
-    let (bands, _) = verdict::calibrate(&noul(), &[], 0.95, Some(previous)).unwrap();
-    assert_eq!(bands, Bands::default_for(&noul()));
+    let (bands, _) =
+        verdict::calibrate(&noul(), BackendKind::Systemone, &[], 0.95, Some(previous)).unwrap();
+    assert_eq!(bands, Bands::default_for(&noul(), BackendKind::Systemone));
 }
 #[test]
 fn merge_crossing_returns_previous() {
@@ -154,7 +165,14 @@ fn merge_crossing_returns_previous() {
         yes_at: 0.85,
         no_at: 0.15,
     };
-    let (bands, _) = verdict::calibrate(&noul(), &examples, 0.95, Some(previous)).unwrap();
+    let (bands, _) = verdict::calibrate(
+        &noul(),
+        BackendKind::Systemone,
+        &examples,
+        0.95,
+        Some(previous),
+    )
+    .unwrap();
     assert_eq!(bands, previous);
 }
 #[test]
@@ -165,6 +183,26 @@ fn merge_level_keeps_previous() {
     let previous = Bands::Level {
         min_confidence: 0.7,
     };
-    let (bands, _) = verdict::calibrate(&kind, &[], 0.95, Some(previous)).unwrap();
+    let (bands, _) =
+        verdict::calibrate(&kind, BackendKind::Systemone, &[], 0.95, Some(previous)).unwrap();
     assert_eq!(bands, previous);
+}
+#[test]
+fn rerank_side_without_evidence_stays_undecided() {
+    let examples: Vec<_> = (0..25).map(|_| example(0.97, "yes")).collect();
+    let previous = Bands::default_for(&noul(), BackendKind::Rerank);
+    let (bands, _) = verdict::calibrate(
+        &noul(),
+        BackendKind::Rerank,
+        &examples,
+        0.95,
+        Some(previous),
+    )
+    .unwrap();
+    let Bands::Noul { yes_at, no_at } = bands else {
+        panic!("noul bands")
+    };
+    assert!((yes_at - 0.97).abs() < 1e-9);
+    // Falling back to the generic 0.15 would let raw topic scores answer `no` again.
+    assert!(no_at < 0.0);
 }

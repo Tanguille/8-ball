@@ -1,0 +1,20 @@
+# Added to dev/config.toml by the bench crate (8ball-bench). Every endpoint answers the same spec text.
+
+[endpoints.big]
+url = "http://127.0.0.1:9935"
+model = "qwen3.8-27b"
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[specs.spam]
+type = "noul"
+instructions = "Is this text message spam?"
+
+[specs.positive]
+type = "noul"
+instructions = "Is this movie review positive?"
+
+[specs.lost-card]
+type = "noul"
+# Banking77's compromised_card class covers card fraud. The first wording, "Does the customer report a lost,
+# stolen, or compromised card?", missed those; this one halved the 27B's misses on the dev split.
+instructions = "Is the customer asking about a lost, stolen, or compromised card, including fraud or someone else using their card?"

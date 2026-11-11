@@ -3,9 +3,24 @@
 > [!WARNING]
 > 8-ball is in early development. Commands, APIs, configuration, and the database format can change without notice. Use it at your own risk.
 
-8-ball gets cheap typed judgments from small decision models. A question is `noul` (yes or no), `choice` (pick one option), or `score` (pick a level). The verdict is the answer to a question. 8-ball offers REST, HTTP MCP, stdio MCP, and a CLI, with a SQLite answer cache and optional labeled calibration. Use a clear verdict to gate or triage work. If the verdict is `unsure` or an error occurs, do the normal work.
+**Ask a small model before you pay a big one.**
 
-8-ball is a Swiss Army knife that lets agents get the most out of decision models in a simple way. It is a Rust server and CLI. It uses System One decision models and rerankers on llama.cpp servers, and chat models through logprobs on any OpenAI-compatible server that returns them, such as vLLM. AI agents in Claude Code, Codex, Cursor, qwen-code, and OpenCode can connect to it as an MCP server. A decision model then answers simple classification questions before the agent does the expensive work.
+Agents spend seconds and tokens to read alerts, tickets, and files, often only to decide "not relevant". 8-ball gives that decision to a small local model. On the pinned dev models, an answer takes about 0.08 seconds. A repeated question comes from the cache in less than 0.01 seconds. In our [benchmark](#benchmark) on 1,119 public cases, the d3 decision model is as accurate as Qwen3.8 27B on the cases that it decides, and it is 15 times faster. With the 27B for the cases where d3 is `unsure`, you get more right verdicts than with the 27B alone, 6.5 times faster.
+
+```sh
+$ 8ball ask --spec storage-risk --state "Backups have failed for the last 4 nights" | jq -c '.results[0] | {verdict, confidence}'
+{"verdict":"yes","confidence":0.9856957837867129}
+```
+
+- **Typed answers.** A question is `noul` (yes or no), `choice` (pick one option), or `score` (pick a level). The verdict is the answer.
+- **It knows when it does not know.** A low confidence gives `unsure`. Then you do the normal work, so a wrong guess does not skip work that matters.
+- **It learns from your labels.** Label the outcome of the work, and 8-ball fits its thresholds to the precision that you ask for.
+- **Local first.** The models run on your machine, with no fee for each call. Each answer goes into a SQLite cache.
+- **It works with your agent.** Claude Code, Codex, Cursor, qwen-code, and OpenCode connect over MCP. Scripts use the CLI or REST.
+
+8-ball is a Rust server and CLI. It uses System One decision models and rerankers on llama.cpp servers. It also uses chat models through logprobs on any OpenAI-compatible server that returns them, such as vLLM.
+
+The times come from `dev/models.sh up` with GPU offload, `8ball serve --config dev/config.toml`, and `/usr/bin/time` around `8ball ask`. Other models and hardware give other numbers.
 
 ## Quickstart: local
 
@@ -139,6 +154,99 @@ Gate a shell script with `--exit-code`:
 
 Agents get the same verdicts through the MCP tools `decision_ask` and `decision_triage`.
 
+### Search code by behavior
+
+[`examples/code-search.sh`](examples/code-search.sh) finds code by what it does. ripgrep finds blocks that match a few keywords. 8-ball then reads each block and keeps those that do the behavior. You need no index, so uncommitted edits are included.
+
+```sh
+examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|401' service/src
+```
+
+```json
+{"verdict":"match","file":"service/src/http.rs","lines":"4-58","confidence":0.96}
+{"verdict":"match","file":"service/src/http.rs","lines":"160-184","confidence":0.99}
+{"verdict":"check","file":"service/src/http.rs","lines":"128-152","confidence":0.06}
+{"verdict":"check","file":"service/src/lib.rs","lines":"273-305","confidence":0.42}
+```
+
+Lines 160 to 184 hold the bearer key check. `check` means `unsure`, so read those blocks yourself. This run took 0.9 seconds with an empty database.
+
+Limits:
+
+- 8-ball judges only the blocks that ripgrep finds. If the keywords miss the code, 8-ball misses it too. For "remove the middle of a state that is too long", `max_state_chars|trim` in `backend/src/lib.rs` found only the caller, as `check` (0.67). The `fit` function cuts the state, but has neither keyword. With `'fn fit'`, it is a `match` (0.97).
+- `triage` takes at most 64 blocks. If ripgrep finds more, the script stops with an error, so use narrow keywords or a path.
+- A block is the match with 12 lines before and after it, not a full function. The model can see only part of a long function.
+
+## Benchmark
+
+We compare every model of the local stack with Qwen3.8 27B, a large local model, on the same questions. All models answer through `8ball evaluate`, with the same spec text and the default bands, without calibration. Each answer is a new model call.
+
+| Method | Decided | Wrong | Accuracy of decided | Correct of all | Correct vs 27B (95% CI) | Accuracy at 90% coverage | Mean time | Speed vs 27B |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| vllm-d3-nano (systemone) | 91% | 27 | 97.3% | 88.6% | -5.1 (-6.9 to -3.3) | 97.4% | 84 ms | 15.2x |
+| bge-reranker-v2-m3 (rerank) | 0% | 0 | - | 0.0% | -93.7 (-95.1 to -92.1) | 58.2% | 25 ms | 52.1x |
+| Qwen3.5 0.8B (logprob) | 30% | 58 | 83.0% | 25.3% | -68.4 (-71.0 to -65.6) | 51.7% | 74 ms | 17.2x |
+| Qwen3.8 27B (logprob) | 97% | 32 | 97.0% | 93.7% | baseline | 97.8% | 1280 ms | 1.0x |
+| d3, then 27B for `unsure` | 99% | 38 | 96.6% | 95.4% | +1.8 (+0.9 to +2.8) | 97.4% | 198 ms | 6.5x |
+
+The columns:
+
+- **Decided**: the share of cases with a `yes` or `no` verdict. The others are `unsure`.
+- **Wrong**: decided cases with the wrong verdict.
+- **Accuracy of decided**: right verdicts among decided cases. Methods that decide different shares do not compare well on this column, because the cases that a method leaves `unsure` are the hard ones.
+- **Correct of all**: right verdicts among all cases. `unsure` counts as not right.
+- **Correct vs 27B**: the difference in "correct of all" from the 27B, in points, with a 95% interval from a paired bootstrap. If the interval contains 0, the difference is noise.
+- **Accuracy at 90% coverage**: each method decides the 90% of cases that it is most sure of, by its larger probability. This compares the models at the same coverage.
+
+On the cases that it decides, d3 is as accurate as the 27B (97.3% and 97.0%), and it is 15 times faster. d3 is `unsure` for 9% of the cases. If the 27B answers those cases, 1.8 points more of all cases get a right verdict than with the 27B alone (95% interval: 0.9 to 2.8 points), 6.5 times faster.
+
+| Method | spam | positive | lost-card |
+| --- | --- | --- | --- |
+| vllm-d3-nano (systemone) | 99.2% (98%) | 93.8% (84%) | 99.0% (91%) |
+| bge-reranker-v2-m3 (rerank) | - (0%) | - (0%) | - (0%) |
+| Qwen3.5 0.8B (logprob) | 88.5% (6%) | 77.8% (56%) | 94.4% (28%) |
+| Qwen3.8 27B (logprob) | 97.7% (98%) | 96.3% (95%) | 97.1% (97%) |
+| d3, then 27B for `unsure` | 98.2% (99%) | 93.4% (98%) | 98.4% (99%) |
+
+Each cell is the accuracy of decided cases, with the decided share in brackets.
+
+The cases:
+
+| Spec | Question | Dataset | Cases (yes / no) |
+| --- | --- | --- | --- |
+| `spam` | Is this text message spam? | [SMS Spam Collection](https://huggingface.co/datasets/ucirvine/sms_spam), train | 200 / 200 |
+| `positive` | Is this movie review positive? | [SST-2](https://huggingface.co/datasets/stanfordnlp/sst2), validation | 200 / 200 |
+| `lost-card` | Is the customer asking about a lost, stolen, or compromised card, including fraud or someone else using their card? | [Banking77](https://huggingface.co/datasets/PolyAI/banking77), train and test, classes 22 and 41 | 119 / 200 |
+
+How we keep it fair:
+
+- The labels come from public datasets. We did not write or label the cases.
+- The benchmark pins each dataset revision. The SHA-256 of each text puts the case in the `test` or the `dev` split, and orders the cases. So no person picks them.
+- We change questions only from results on `dev`, and we report only `test`. On `dev`, the first `lost-card` question ("Does the customer report a lost, stolen, or compromised card?") missed fraud cases, which Banking77 labels `compromised_card`. The current question halved the 27B's misses on `dev` (8 to 4 of 200), and kept d3 at 4.
+- Every model gets the same question. No model gets a prompt that is tuned for it.
+- We show all models, also those that do badly.
+
+Accuracy depends only on the model files, the questions, and the cases. On 40 SST-2 cases, d3 on 4 CPU cores gave the same 40 verdicts as on the GPU, and P(yes) changed by at most 0.02. Time depends on your hardware. The speed ratio is more stable, because all models run on the same machine. We measured on an AMD Ryzen AI 9 HX 370 with its Radeon 890M iGPU (Vulkan, all layers on the GPU), on 2026-11-10.
+
+Limits:
+
+- The reranker answers `unsure` without calibration, because its score shows topic match, not the answer. Its row shows what it would answer at 90% coverage.
+- Qwen3.5 0.8B is `unsure` for most cases with the default bands. Calibration can change this.
+- The cases are short texts, and there are 3 tasks. Long states and other questions can give other results.
+- The numbers come from 1 run. The 95% intervals show what is noise: about 1 to 2 points at this size.
+
+To run it yourself (the 27B model is a 19 GB download):
+
+```sh
+dev/models.sh up
+dev/models.sh bench
+cargo build --release -p cli -p bench
+cargo run --release -p bench                 # test split, 200 cases per answer and task
+cargo run --release -p bench -- --split dev  # to try a question change
+```
+
+The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build. It saves each answer, with its text, to `target/bench/observations.json`.
+
 ## Commands
 
 A spec is a named question in the configuration. The state is the text to judge. An endpoint is a configured model server. Its `kind` is the backend, which sets how 8-ball talks to that server. All commands except `serve`, `mcp`, and `config check` call a running server and refuse HTTP redirects.
@@ -245,7 +353,7 @@ recalibrate_after = 20          # refit a question's bands at every multiple of 
 ad_hoc = true                   # also learn ad-hoc questions, by their exact text
 ```
 
-`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. Auto-detection reads `/props` and `/v1/models`. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
+`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. A reranker scores how well the state matches the topic of the question, not if the answer is yes. So its answers stay `unsure` until you [calibrate](#calibration) the question. Auto-detection reads `/props` and `/v1/models`. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
 
 ## Environment variables
 
@@ -265,10 +373,14 @@ A flag overrides its variable.
 
 Bands select the decisive verdicts at the requested precision. The other verdicts are `unsure`.
 
+For each side, calibration picks the loosest threshold whose labeled answers still reach the target precision (`--precision`, default 0.95). So calibration makes a question decide more cases at that precision. It does not make verdicts safer than the default bands. If the defaults are already more precise than the target, calibration gives lower precision for more coverage. To keep high precision, ask for a high target.
+
+A reranker answers `unsure` until you calibrate the question, because its score shows topic match, not the answer.
+
 To calibrate a spec:
 
 1. Save the question as a reviewed spec in the configuration.
-2. Label at least 20 real decisions per side. `8ball decisions --spec <spec> --unlabelled` lists them, and `8ball label <id> <value>` saves a label. An agent can do the same with `decision_review` and `decision_label`. Label only from evidence, such as the outcome of the work.
+2. Label real decisions on each side. A side needs at least 1 / (1 − precision) decided labels: 20 for 0.95, 50 for 0.98, and 100 for 0.99. With fewer, a first calibration stops that side from deciding, and a refit keeps its previous threshold. `8ball decisions --spec <spec> --unlabelled` lists them, and `8ball label <id> <value>` saves a label. An agent can do the same with `decision_review` and `decision_label`. Label only from evidence, such as the outcome of the work.
 3. Run `8ball calibrate <spec>`.
 
 Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model file invalidates its calibration identity. A new llama.cpp build of the same file does not. 8-ball checks the model again every minute. Ad-hoc questions learn by their exact text when `learning.ad_hoc` is on. They get their own calibration, apart from specs.
@@ -451,7 +563,7 @@ claude plugin validate plugin --strict
 
 This repository claims no public marketplace submission. A hosted privacy-policy URL for directory publication is deferred.
 
-The live tests need `dev/models.sh up`. This script takes `up`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. They use the same pinned llama.cpp image and models as the deployment. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
+The live tests need `dev/models.sh up`. This script takes `up`, `bench`, `down`, `status` (the default), or `logs [service]`. It runs `d3`, `embed`, `rerank`, and `chat` from `dev/compose.yaml` on ports 9931 to 9934. `bench` also starts the [benchmark](#benchmark) baseline `big` on port 9935. They use the same pinned llama.cpp image and models as the deployment. `dev/config.toml` is the matching configuration. `dev/image-smoke.sh <image>` tests the version, startup, SQLite initialization, authentication, and triage with a read-only root filesystem.
 
 ## Container image
 
