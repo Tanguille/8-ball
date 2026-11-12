@@ -84,7 +84,7 @@ umask 077
 
 Save the configuration and the `doctor` output with the experiment to identify model, spec, and calibration changes. The report does not repeat raw fixture text. Keep the original dataset beside the report.
 
-[Commands](../README.md#commands) lists the `evaluate` flags.
+[Commands](cli.md) lists the `evaluate` flags.
 
 Exit 0 means that all cases produced valid responses. It does not mean that the model is accurate. Exit 4 with a JSON report means that one or more cases failed. An invalid dataset exits 4 before inference, with a stderr diagnostic.
 
