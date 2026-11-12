@@ -187,7 +187,7 @@ impl Endpoint {
                 ))
             })?;
             let data = models["data"].as_array();
-            // A hosted catalog (Logfare) lists the endpoints that each model serves.
+            // A hosted catalog lists the endpoints that each model serves.
             let served = |endpoint: &str| {
                 data.into_iter().flatten().any(|model| {
                     Some(model["id"].as_str()) == Some(self.config.model.as_deref())

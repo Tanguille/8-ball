@@ -63,7 +63,7 @@ pub struct EndpointConfig {
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
     Systemone,
-    /// System One questions on a hosted `/v1/decisions` API (Logfare), with a `model` and a `result` envelope.
+    /// System One questions on a hosted `/v1/decisions` API, with a `model` and a `result` envelope.
     Decisions,
     Logprob,
     Rerank,

@@ -1,4 +1,4 @@
-//! Hosted providers (Logfare): the decisions envelope, catalog detection, rate limits.
+//! Hosted providers: the decisions envelope, catalog detection, rate limits.
 
 use std::time::{Duration, Instant};
 
@@ -40,7 +40,7 @@ async fn decisions_sends_the_model_and_reads_the_result_envelope() {
     let server = MockServer::start().await;
     decisions(&server, answer()).await;
     let endpoint = Endpoint::new(
-        "logfare",
+        "hosted",
         &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
         None,
     );
@@ -91,7 +91,7 @@ async fn a_short_429_is_retried_after_its_retry_after() {
         .await;
     decisions(&server, answer()).await;
     let endpoint = Endpoint::new(
-        "logfare",
+        "hosted",
         &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
         None,
     );
@@ -110,7 +110,7 @@ async fn a_long_429_fails_at_once() {
     )
     .await;
     let endpoint = Endpoint::new(
-        "logfare",
+        "hosted",
         &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
         None,
     );
@@ -129,7 +129,7 @@ async fn requests_per_minute_spaces_requests() {
     decisions(&server, answer()).await;
     // 600 per minute is one request per 100 ms.
     let endpoint = Endpoint::new(
-        "logfare",
+        "hosted",
         &config(
             &server.uri(),
             "kind='decisions'\nmodel='clef'\nrequests_per_minute=600",
@@ -152,7 +152,7 @@ async fn a_second_429_is_not_retried_and_retry_after_0_waits_a_second() {
     )
     .await;
     let endpoint = Endpoint::new(
-        "logfare",
+        "hosted",
         &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
         None,
     );
@@ -179,7 +179,7 @@ async fn a_502_is_retried_once() {
         .await;
     decisions(&server, answer()).await;
     let endpoint = Endpoint::new(
-        "logfare",
+        "hosted",
         &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
         None,
     );
