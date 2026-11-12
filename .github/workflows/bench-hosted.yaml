@@ -90,6 +90,8 @@ jobs:
           restore-keys: hosted-${{ env.MODE }}-
       - name: Benchmark
         run: |
+          # The default shell has no pipefail: without it, the status of the last tee would hide a bench failure.
+          set -o pipefail
           args=(--endpoints "$ENDPOINTS" --cascade "d3,hosted-qwen-3-8-27b" --per-side "$PER_SIDE" --config hosted.toml)
           # The matrix compares with d3, which always runs; a model that cannot answer this week is skipped.
           if [ "$MODE" = matrix ]; then
