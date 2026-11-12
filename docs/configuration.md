@@ -8,12 +8,13 @@ retention_days = 90       # optional (default 90): unlabelled decisions older th
 
 [endpoints.d3]
 url = "http://127.0.0.1:9931"   # required: server root. A trailing "/v1" or "/" is removed.
-kind = "systemone"              # optional: "systemone" | "logprob" | "rerank". Omitted = auto-detect.
+kind = "systemone"              # optional: "systemone" | "decisions" | "logprob" | "rerank". Omitted = auto-detect.
 concurrency = 1                 # optional: max parallel requests. Omitted = /props total_slots, else 2.
 model = "qwen-3.8-fast"         # optional: sent as "model". Required for kind logprob.
 api_key_env = "TYPESAFE_KEY"    # optional: NAME of an env var whose value is sent as "Authorization: Bearer <value>"
-max_state_chars = 2000          # optional: default 2000 for systemone and rerank, no limit for logprob
+max_state_chars = 2000          # optional: default 2000 for systemone, decisions and rerank, no limit for logprob
 extra_body = { reasoning_effort = "none" }   # optional: merged into logprob request JSON
+requests_per_minute = 30        # optional: space requests evenly, for a hosted provider's rate limit
 
 [embedder]                      # optional table
 url = "http://127.0.0.1:9932"
@@ -35,7 +36,7 @@ recalibrate_after = 20          # refit a question's bands at every multiple of 
 ad_hoc = true                   # also learn ad-hoc questions, by their exact text
 ```
 
-`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. A reranker scores how well the state matches the topic of the question, not if the answer is yes. So its answers stay `unsure` until you [calibrate](calibration.md) the question. Auto-detection reads `/props` and `/v1/models`. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
+`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. A reranker scores how well the state matches the topic of the question, not if the answer is yes. So its answers stay `unsure` until you [calibrate](calibration.md) the question. `decisions` sends System One questions, with `model`, to a hosted `/v1/decisions` API. Auto-detection reads `/props` and `/v1/models`. A hosted catalog that lists each model's `endpoints` selects `decisions` or `logprob` for the configured `model`. 8-ball tries a request once more after a 429 response with a `Retry-After` of 10 seconds or less (it waits at least 1 second), or after a 502 or 503 response. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
 
 ## Environment variables
 

@@ -55,12 +55,16 @@ pub struct EndpointConfig {
     pub api_key_env: Option<String>,
     pub max_state_chars: Option<usize>,
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Spaces requests evenly to stay under a hosted provider's rate limit.
+    pub requests_per_minute: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
     Systemone,
+    /// System One questions on a hosted `/v1/decisions` API, with a `model` and a `result` envelope.
+    Decisions,
     Logprob,
     Rerank,
 }

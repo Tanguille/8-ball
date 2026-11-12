@@ -116,7 +116,7 @@ For a shared server, set `EIGHTBALL_URL` and `EIGHTBALL_API_KEY`, then run `8bal
 | Page | What it covers |
 | --- | --- |
 | [Examples](docs/examples.md) | JSON output, choice and score questions, triage, exit codes, code search |
-| [Benchmark](docs/benchmark.md) | Accuracy and speed against a 27B model, and how to repeat it |
+| [Benchmark](docs/benchmark.md) | Accuracy and speed against a 27B model, how to repeat it, and the CI benchmark runs |
 | [CLI](docs/cli.md) | Commands, flags, exit codes |
 | [HTTP and MCP API](docs/http-api.md) | Routes, authentication, MCP tools |
 | [Configuration](docs/configuration.md) | TOML file, environment variables, thinking chat models |

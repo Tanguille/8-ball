@@ -1,0 +1,57 @@
+{
+  "per_side": 100,
+  "split": "test",
+  "methods": {
+    "d3": {
+      "spam": {
+        "cases": 200,
+        "decided": 196,
+        "wrong": 0
+      },
+      "positive": {
+        "cases": 200,
+        "decided": 162,
+        "wrong": 10
+      },
+      "lost-card": {
+        "cases": 200,
+        "decided": 185,
+        "wrong": 0
+      }
+    },
+    "rerank": {
+      "spam": {
+        "cases": 200,
+        "decided": 0,
+        "wrong": 0
+      },
+      "positive": {
+        "cases": 200,
+        "decided": 0,
+        "wrong": 0
+      },
+      "lost-card": {
+        "cases": 200,
+        "decided": 0,
+        "wrong": 0
+      }
+    },
+    "chat": {
+      "spam": {
+        "cases": 200,
+        "decided": 18,
+        "wrong": 1
+      },
+      "positive": {
+        "cases": 200,
+        "decided": 116,
+        "wrong": 29
+      },
+      "lost-card": {
+        "cases": 200,
+        "decided": 81,
+        "wrong": 2
+      }
+    }
+  }
+}

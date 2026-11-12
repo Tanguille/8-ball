@@ -238,7 +238,8 @@ async fn live_logprob_noul() {
         ("hi there, how are you?", true),
         ("Good morning everyone!", true),
         ("The disk on node control-2 is 98% full.", false),
-        ("Invoice #4411 is attached.", false),
+        // Not "Invoice #4411 is attached.": Qwen3.5 0.8B gives it P(yes) 0.486 on the GPU and 0.510 on the CPU.
+        ("The build failed with exit code 2.", false),
     ] {
         let probabilities = endpoint.ask(state, &test_questions[..1]).await.unwrap();
         eprintln!("chat {state:?}: {probabilities:?}");

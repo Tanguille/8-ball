@@ -1,0 +1,8 @@
+# Added by models.sh when the host has no /dev/dri (CI runners, CPU-only machines): the Vulkan image then runs
+# on its CPU backend, and the missing device must not be passed through.
+services:
+  d3: { devices: !reset [] }
+  embed: { devices: !reset [] }
+  rerank: { devices: !reset [] }
+  chat: { devices: !reset [] }
+  big: { devices: !reset [] }

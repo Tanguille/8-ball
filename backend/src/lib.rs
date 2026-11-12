@@ -21,12 +21,18 @@ pub struct Endpoint {
     client: Client,
     /// The last detected info and when it was detected.
     info: Mutex<Option<(Instant, Arc<Info>)>>,
+    /// The earliest time for the next request under `requests_per_minute`.
+    next_request: Mutex<Instant>,
 }
 
 // Decision models answer in under 1 s; 20 s only absorbs a cold model load.
 const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
 // A new model behind the same URL gets its own fingerprint, and so its own cache and calibration, within this time.
 const INFO_TTL: Duration = Duration::from_secs(60);
+// A 429 that asks for a longer wait fails at once: the request would hit DECISION_TIMEOUT anyway.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
+// The shortest wait before a retry, so that `Retry-After: 0` cannot spin.
+const MIN_RETRY: Duration = Duration::from_secs(1);
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -47,6 +53,7 @@ impl Endpoint {
             api_key,
             client: Client::new(),
             info: Mutex::new(None),
+            next_request: Mutex::new(Instant::now()),
         }
     }
 
@@ -98,19 +105,46 @@ impl Endpoint {
         if let Some(model) = &self.config.model {
             body["model"] = model.as_str().into();
         }
-        let permit = info
-            .permits
-            .acquire()
-            .await
-            .map_err(|e| BackendError(e.to_string()))?;
-        let request = self
-            .client
-            .post(format!("{}{path}", self.config.url))
-            .json(&body);
-        let response = authed(request, self.api_key.as_deref()).send().await?;
-        let status = response.status();
-        let text = response.text().await?;
-        drop(permit);
+        let mut retried = false;
+        let (status, text) = loop {
+            self.pace().await;
+            let permit = info
+                .permits
+                .acquire()
+                .await
+                .map_err(|e| BackendError(e.to_string()))?;
+            let request = self
+                .client
+                .post(format!("{}{path}", self.config.url))
+                .json(&body);
+            let response = authed(request, self.api_key.as_deref()).send().await?;
+            let status = response.status();
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()?.trim().parse::<u64>().ok())
+                .map_or(MIN_RETRY, Duration::from_secs)
+                .max(MIN_RETRY);
+            let text = response.text().await?;
+            drop(permit);
+            // One retry: a short 429 after its wait, and a 502 or 503, which a hosted gateway may answer from another upstream the next time.
+            let wait = match status {
+                reqwest::StatusCode::TOO_MANY_REQUESTS if retry_after <= MAX_RETRY_AFTER => {
+                    Some(retry_after)
+                }
+                reqwest::StatusCode::BAD_GATEWAY | reqwest::StatusCode::SERVICE_UNAVAILABLE => {
+                    Some(MIN_RETRY)
+                }
+                _ => None,
+            };
+            match wait {
+                Some(wait) if !retried => {
+                    retried = true;
+                    tokio::time::sleep(wait).await;
+                }
+                _ => break (status, text),
+            }
+        };
         if !status.is_success() {
             let text: String = text.chars().take(500).collect();
             let hint = if status == reqwest::StatusCode::NOT_IMPLEMENTED {
@@ -123,6 +157,18 @@ impl Endpoint {
         }
 
         serde_json::from_str(&text).map_err(|e| BackendError(e.to_string()))
+    }
+
+    /// Waits for this request's turn under `requests_per_minute`.
+    async fn pace(&self) {
+        let Some(per_minute) = self.config.requests_per_minute.filter(|n| *n > 0) else {
+            return;
+        };
+        let mut next = self.next_request.lock().await;
+        let start = (*next).max(Instant::now());
+        *next = start + Duration::from_secs(60) / per_minute;
+        drop(next);
+        tokio::time::sleep_until(start).await;
     }
 
     async fn detect(&self, refresh: bool) -> Result<Info, BackendError> {
@@ -143,7 +189,20 @@ impl Endpoint {
                 ))
             })?;
             let data = models["data"].as_array();
-            if data.is_some_and(|data| {
+            // A hosted catalog lists the endpoints that each model serves.
+            let served = |endpoint: &str| {
+                data.into_iter().flatten().any(|model| {
+                    Some(model["id"].as_str()) == Some(self.config.model.as_deref())
+                        && model["endpoints"]
+                            .as_array()
+                            .is_some_and(|endpoints| endpoints.iter().any(|e| e == endpoint))
+                })
+            };
+            if served("decisions") {
+                BackendKind::Decisions
+            } else if served("chat/completions") {
+                BackendKind::Logprob
+            } else if data.is_some_and(|data| {
                 data.iter().any(|model| {
                     model["architecture"]["output_modalities"]
                         .as_array()
@@ -192,7 +251,7 @@ impl Endpoint {
     #[must_use]
     pub fn fitted(&self, info: &Info, state: &str) -> String {
         let maximum = self.config.max_state_chars.or(match info.kind {
-            BackendKind::Systemone | BackendKind::Rerank => Some(2000),
+            BackendKind::Systemone | BackendKind::Decisions | BackendKind::Rerank => Some(2000),
             BackendKind::Logprob => None,
         });
 
@@ -209,7 +268,9 @@ impl Endpoint {
             let info = self.info().await?;
 
             match info.kind {
-                BackendKind::Systemone => systemone::ask(self, &info, state, questions).await,
+                BackendKind::Systemone | BackendKind::Decisions => {
+                    systemone::ask(self, &info, state, questions).await
+                }
                 BackendKind::Logprob => logprob::ask(self, &info, state, questions).await,
                 BackendKind::Rerank => rerank::ask(self, &info, state, questions).await,
             }

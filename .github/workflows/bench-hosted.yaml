@@ -1,0 +1,123 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Benchmark (hosted)
+
+# Large and hosted models through a hosted provider, next to d3 on the runner's CPU. Needs the HOSTED_API_KEY secret and the HOSTED_URL variable.
+# - 27b: d3, Qwen3.8 27B and the d3-then-27B cascade, on main pushes and nightly. It fails when a task gets
+#   worse than the last passing run by more than 1% of its cases.
+# - matrix: every hosted model that can answer a decision question, weekly. It reports and never fails.
+# Pull requests never run this: secrets do not reach fork PRs, and the PR gate is in ci.yaml.
+on:
+  push:
+    branches: [main]
+    paths:
+      # Quoted: a leading * starts a YAML alias.
+      - "*/src/**"
+      - "*/Cargo.toml"
+      - Cargo.lock
+      - dev/**
+      - .github/workflows/bench-hosted.yaml
+  schedule:
+    - cron: "23 3 * * 1-6" # 27b, every night but Sunday
+    - cron: "23 3 * * 0" # matrix, Sunday
+  workflow_dispatch:
+    inputs:
+      run:
+        type: choice
+        options: [27b, matrix]
+        default: 27b
+      accept:
+        description: Save this run as the new baseline, also when it got worse (after an intended change)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Both runs share one hosted rate limit, so they queue instead of overlapping.
+concurrency:
+  group: hosted
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bench:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 330
+    env:
+      HOSTED_API_KEY: ${{ secrets.HOSTED_API_KEY }}
+      HOSTED_URL: ${{ vars.HOSTED_URL }}
+      HOSTED_SKIP: ${{ vars.HOSTED_SKIP }}
+      MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
+      ACCEPT: ${{ inputs.accept == true }}
+    steps:
+      - name: Check the key
+        run: |
+          if [ -z "$HOSTED_API_KEY" ] || [ -z "$HOSTED_URL" ]; then
+            echo "::error::Add the HOSTED_API_KEY secret and the HOSTED_URL variable (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/8ball-models
+          key: models-${{ hashFiles('dev/compose.yaml') }}
+      - run: cargo build --release -p cli -p bench
+      - run: dev/models.sh up
+      # A provider's free tier can allow 1,000 requests an hour: the 27b run takes about 560 at 30 a minute, the matrix
+      # about 280 per model at 16 a minute.
+      - name: Hosted endpoints
+        run: |
+          if [ "$MODE" = matrix ]; then
+            dev/hosted.sh 16 > hosted.toml
+            echo "PER_SIDE=50" >> "$GITHUB_ENV"
+          else
+            dev/hosted.sh 30 qwen-3.8-27b > hosted.toml
+            echo "PER_SIDE=100" >> "$GITHUB_ENV"
+          fi
+          endpoints=$(sed -n 's/^\[endpoints\.\(.*\)\]$/\1/p' hosted.toml | paste -sd,)
+          echo "ENDPOINTS=d3,$endpoints" >> "$GITHUB_ENV"
+          echo "Hosted endpoints: $endpoints"
+      # The last saved run of this mode is the baseline.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: baseline
+          key: hosted-${{ env.MODE }}-${{ github.run_id }}
+          restore-keys: hosted-${{ env.MODE }}-
+      - name: Benchmark
+        run: |
+          # The default shell has no pipefail: without it, the status of the last tee would hide a bench failure.
+          set -o pipefail
+          args=(--endpoints "$ENDPOINTS" --cascade "d3,hosted-qwen-3-8-27b" --per-side "$PER_SIDE" --config hosted.toml)
+          # The matrix compares with d3, which always runs; a model that cannot answer this week is skipped.
+          if [ "$MODE" = matrix ]; then
+            args+=(--skip-unavailable --reference d3)
+          else
+            args+=(--reference hosted-qwen-3-8-27b)
+          fi
+          if [ -f baseline/summary.json ] && [ "$ACCEPT" != true ]; then
+            args+=(--baseline baseline/summary.json)
+          fi
+          status=0
+          cargo run --release -p bench -- "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+          mkdir -p baseline && cp target/bench/summary.json baseline/
+          if [ "$status" != 0 ] && [ "$MODE" = matrix ]; then
+            echo "::warning::A hosted model got worse than last week; see the job summary."
+          elif [ "$status" != 0 ]; then
+            exit "$status"
+          fi
+      # The saved run of this mode is the next baseline. A failing 27b run skips this save, so a regression
+      # stays red until it is fixed or accepted; the matrix run only warns, so it always advances its baseline.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: baseline
+          key: hosted-${{ env.MODE }}-${{ github.run_id }}
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-${{ env.MODE }}
+          path: target/bench/*.json
