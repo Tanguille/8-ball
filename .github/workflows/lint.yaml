@@ -32,8 +32,8 @@ jobs:
       matrix:
         include:
           - name: shell
-            tool: aqua:koalaman/shellcheck aqua:mvdan/sh
-            run: git ls-files -z '*.sh' | xargs -0 shellcheck && git ls-files -z '*.sh' | xargs -0 shfmt -d
+            tool: aqua:ewhauser/shuck aqua:mvdan/sh
+            run: git ls-files -z '*.sh' | xargs -0 shuck check && git ls-files -z '*.sh' | xargs -0 shfmt -d
           - name: hadolint
             tool: aqua:hadolint/hadolint
             run: hadolint Dockerfile
