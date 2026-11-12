@@ -1,27 +1,34 @@
 {
-  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
-    "abandonments:recommended",
-    "github>home-operations/renovate-presets#11.0.0",
+    'abandonments:recommended',
+    'github>home-operations/renovate-presets#11.0.0',
   ],
-  labels: ["dependencies"],
-  // The Renovate operator watches this checkbox to trigger a repository run.
-  dependencyDashboardFooter: "- [ ] <!-- manual job -->Check this box to trigger a request for Renovate to run again on this repository",
+  labels: [
+    'dependencies',
+  ],
+  dependencyDashboard: {
+    footer: '- [ ] <!-- manual job -->Check this box to trigger a request for Renovate to run again on this repository',
+  },
   packageRules: [
     {
-      // Override inherited automerge rules until this repository has required CI checks.
-      matchPackageNames: ["*"],
+      matchPackageNames: [
+        '*',
+      ],
       automerge: false,
-      semanticCommitType: "chore",
-      commitMessagePrefix: "{{semanticCommitType}}({{semanticCommitScope}}):",
+      semanticCommitType: 'chore',
+      commitMessagePrefix: '{{semanticCommitType}}({{semanticCommitScope}}):',
     },
     {
-      matchManagers: ["github-actions"],
-      semanticCommitType: "ci",
+      matchManagers: [
+        'github-actions',
+      ],
+      semanticCommitType: 'ci',
     },
     {
-      // Local live tests and the deployment must use the same llama.cpp image.
-      matchFileNames: ["dev/compose.yaml"],
+      matchFileNames: [
+        'dev/compose.yaml',
+      ],
       dependencyDashboardApproval: true,
     },
   ],
