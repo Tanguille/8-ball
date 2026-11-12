@@ -1,6 +1,6 @@
 # Lint tools for CI and local runs; Rust comes from rust-toolchain.toml.
 [tools]
-"aqua:ewhauser/shuck" = "0.2.7"
+"aqua:ewhauser/shuck" = "0.2.9"
 "aqua:mvdan/sh" = "3.14.1"
 "aqua:hadolint/hadolint" = "2.15.1"
 "aqua:zizmorcore/zizmor" = "1.32.0"
