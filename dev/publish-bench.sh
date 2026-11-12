@@ -7,8 +7,9 @@ set -euo pipefail
 artifact=$1 page=$2 where=$3
 dir=$(mktemp -d)
 gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "$dir"
-# A rate-limited or half-failed run must not replace good numbers: skip a page with more than 1% errors.
-if ! jq -e '[.methods[][] | .errors * 100 <= .cases] | all' "$dir/summary.json" >/dev/null; then
+# A rate-limited or half-failed run must not replace good numbers: skip a page when a model has errors on more than 1%
+# of its cases in total.
+if ! jq -e '[.methods[] | ([.[] | .errors] | add) * 100 <= ([.[] | .cases] | add)] | all' "$dir/summary.json" >/dev/null; then
   echo "::warning::$page not updated: a model had errors on more than 1% of its cases."
   exit 0
 fi
