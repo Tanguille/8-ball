@@ -11,7 +11,7 @@ Our [benchmark](docs/benchmark.md) has 1,119 public cases. On the cases that it 
 
 ## What you can do with it
 
-The examples use the specs in [`dev/config.toml`](dev/config.toml). Start the server with `8ball serve --config dev/config.toml` before you run them.
+The examples use the specs in [`dev/config.toml`](dev/config.toml). Start the model stack with `dev/models.sh up` (about 4.5 GB on the first run), then `8ball serve --config dev/config.toml`.
 
 ### Skip the alerts that do not matter
 
@@ -67,7 +67,7 @@ Why it pays: the agent reads the matching blocks, not every file that has a keyw
 if 8ball ask --spec storage-risk --state "$ALERT" --exit-code > /dev/null; then page_oncall; fi
 ```
 
-Exit code 0 is `yes`, 1 is `no`, and 3 is `unsure`. See the [CLI](docs/cli.md).
+Exit code 0 is `yes`, 1 is `no`, and 3 is `unsure`. Any error, such as a spec that is not configured or a server that is down, exits 4, which this `if` treats as `no`, so an alert is not paged. Test for 4 if a missed page costs more than a false one. See the [CLI](docs/cli.md).
 
 ### Get better with use
 
