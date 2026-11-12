@@ -24,4 +24,3 @@ Service, authentication, and host errors are JSON with an `error` field. Rejecte
 | `decision_questions` | List the stored questions with their decision, `unsure`, and label counts. |
 | `decision_review` | List the unlabeled decisions of a `spec` with their ids and states. It leaves out the model's answer, so a label stays independent. |
 | `decision_label` | Label a decision `id` with a `value`, as `label` does. Agents call it for each decision with `report: true`, after the work. |
-

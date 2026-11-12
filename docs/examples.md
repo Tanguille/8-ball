@@ -104,4 +104,3 @@ Limits:
 - 8-ball judges only the blocks that ripgrep finds. If the keywords miss the code, 8-ball misses it too. For "remove the middle of a state that is too long", `max_state_chars|trim` in `backend/src/lib.rs` found only the caller, as `check` (0.67). The `fit` function cuts the state, but has neither keyword. With `'fn fit'`, it is a `match` (0.97).
 - `triage` takes at most 64 blocks. If ripgrep finds more, the script stops with an error, so use narrow keywords or a path.
 - A block is the match with 12 lines before and after it, not a full function. The model can see only part of a long function.
-

@@ -67,4 +67,3 @@ cargo run --release -p bench -- --split dev  # to try a question change
 ```
 
 The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build. It saves each answer, with its text, to `target/bench/observations.json`.
-

@@ -131,4 +131,3 @@ opencode run "Use 8-ball to decide whether 'disk 98% full on /var' is urgent."
 Make sure that a decision tool call occurs and that the metric increases. If Code Mode cannot call the tool, record the failure first. Then try `"codemode": false` in that server entry.
 
 To uninstall, remove only `mcp.servers.8ball` from the configuration and the skill symlink that you created.
-

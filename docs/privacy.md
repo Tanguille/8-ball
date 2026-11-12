@@ -5,4 +5,3 @@ Storage uses SQLx with bundled SQLite, so you need no database server or SQLx CL
 The database stores the raw text of every successful decision and of its question, with file mode 0600. `retention_days` never deletes labeled rows. It deletes a question's text when no decision uses that question any more. The [Helm chart](deploy.md#helm-chart) is in this repository. Backups are outside it. Model requests go to your configured endpoints. Prompts in an MCP client also go to the model provider of that client.
 
 Before you send private data to a shared server, read the policy of its operator.
-

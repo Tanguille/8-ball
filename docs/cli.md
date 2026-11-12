@@ -39,4 +39,3 @@ A spec is a named question in the configuration. The state is the text to judge.
 `results[].id` is the saved row id for `label`. `results[].question` is the question id of the caller. `results[].type` is the question type. An identical request within a spec reuses a row. Ad-hoc questions and different specs have separate rows. Invalid backend probabilities return a backend error.
 
 A result can also have `report`, `explored`, and `remembered`. `report: true` asks the caller to do the work, then label the id with what the work showed. `explored: true` means that the model skipped the item (noul `no`, triage `rejected`), but 8-ball returns `unsure` so that the caller checks it. `remembered: true` means that the verdict is a label reported earlier for the same question and state. `/v1/ask` and `/v1/triage` take `"learn": false` (default `true`) to turn all 3 off for one request.
-
