@@ -159,12 +159,8 @@ async fn require_bearer(
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "));
-    let authorized = given.is_some_and(|token| {
-        bool::from(subtle::ConstantTimeEq::ct_eq(
-            token.as_bytes(),
-            key.as_bytes(),
-        ))
-    });
+    let authorized = given
+        .is_some_and(|token| constant_time_eq::constant_time_eq(token.as_bytes(), key.as_bytes()));
 
     if authorized {
         next.run(request).await

@@ -29,6 +29,7 @@ store = { path = "store" }
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 clap = "4.6.7"
+constant_time_eq = "0.6.1"
 futures = "0.3.34"
 indexmap = { version = "2.14.2", features = ["serde"] }
 # Only the record reader, for the benchmark datasets: Snappy-compressed parquet files.
@@ -43,7 +44,6 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 sha2 = "0.11.1"
 sqlx = { version = "0.9.0", default-features = false }
-subtle = "2.6.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = "1.54.1"
