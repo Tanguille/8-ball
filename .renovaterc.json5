@@ -26,10 +26,13 @@
       semanticCommitType: 'ci',
     },
     {
+      // Merge the llama.cpp image bump without approval once the PR checks pass.
+      // The preset uses branch automerge, which skips the PR and so skips the PR-only lint workflow.
       matchFileNames: [
         'dev/compose.yaml',
       ],
-      dependencyDashboardApproval: true,
+      automerge: true,
+      automergeType: 'pr',
     },
   ],
 }
