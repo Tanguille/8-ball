@@ -84,17 +84,3 @@ async fn bearer_allows_non_loopback_host_header() {
         .unwrap();
     assert!(response.status().is_success(), "{}", response.status());
 }
-#[tokio::test]
-async fn bearer_rejects_a_missing_or_wrong_token() {
-    let mock = MockServer::start().await;
-    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
-    let (url, ..) = serve(&mock, &directory.path().join("db.sqlite")).await;
-    let client = reqwest::Client::new();
-    let missing = client.get(format!("{url}/v1/doctor"));
-    // The key is `k`: one wrong token has the same length, the other a different one.
-    let same_length = client.get(format!("{url}/v1/doctor")).bearer_auth("x");
-    let longer = client.get(format!("{url}/v1/doctor")).bearer_auth("kk");
-    for request in [missing, same_length, longer] {
-        assert_eq!(request.send().await.unwrap().status(), 401);
-    }
-}

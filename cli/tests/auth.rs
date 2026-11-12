@@ -30,7 +30,8 @@ fn ask() -> Value {
 #[tokio::test]
 async fn bearer_required_for_rest_and_mcp() {
     let (url, _mock, _dir) = app(Some("k")).await;
-    for key in [None, Some("wrong"), Some("k")] {
+    // "x" has the key's length, so only the byte comparison rejects it; "wrong" is stopped by its length.
+    for key in [None, Some("wrong"), Some("x"), Some("k")] {
         let mut request = Client::new().post(format!("{url}/v1/ask")).json(&ask());
         if let Some(key) = key {
             request = request.bearer_auth(key);
