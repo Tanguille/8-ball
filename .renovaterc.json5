@@ -6,9 +6,7 @@
   ],
   labels: ["dependencies"],
   // The Renovate operator watches this checkbox to trigger a repository run.
-  dependencyDashboard: {
-    footer: "- [ ] <!-- manual job -->Check this box to trigger a request for Renovate to run again on this repository",
-  },
+  dependencyDashboardFooter: "- [ ] <!-- manual job -->Check this box to trigger a request for Renovate to run again on this repository",
   packageRules: [
     {
       // Override inherited automerge rules until this repository has required CI checks.
