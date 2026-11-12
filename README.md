@@ -7,15 +7,15 @@
 
 Agents spend seconds and tokens to read alerts, tickets, and files, often only to decide "not relevant". 8-ball gives that decision to a small local model. On the pinned dev models, an answer takes about 0.08 seconds. A repeated question comes from the cache in less than 0.01 seconds. If the model is not sure, it says `unsure`, and you do the normal work.
 
-In our [benchmark](docs/benchmark.md) on 1,119 public cases, the d3 decision model is as accurate as Qwen3.8 27B on the cases that it decides, and it is 15 times faster. With the 27B for the cases where d3 is `unsure`, you get more right verdicts than with the 27B alone, 6.5 times faster.
+Our [benchmark](docs/benchmark.md) has 1,119 public cases. On the cases that it decides, the d3 decision model is as accurate as Qwen3.8 27B, and it is 15 times faster. If the 27B answers the cases where d3 is `unsure`, you get more right verdicts than with the 27B alone, 6.5 times faster.
 
 ## What you can do with it
 
-The examples use the specs in [`dev/config.toml`](dev/config.toml). Run them with `8ball serve --config dev/config.toml`.
+The examples use the specs in [`dev/config.toml`](dev/config.toml). Start the server with `8ball serve --config dev/config.toml` before you run them.
 
 ### Skip the alerts that do not matter
 
-Your agent reads a digest of 50 alerts. Judge them first, and read only the ones that are kept:
+Judge the alerts first. Your agent then reads only the alerts that 8-ball keeps:
 
 ```sh
 echo '["Primary database is down, all writes fail", "Weekly report is ready", "Backups have failed for the last 4 nights", "New comment on your blog post"]' \
@@ -27,7 +27,7 @@ echo '["Primary database is down, all writes fail", "Weekly report is ready", "B
 {"kept":[0,2],"rejected":[1,3],"unsure":[]}
 ```
 
-Why it pays: the big model reads 2 items, not 4. Rejected items cost almost nothing, and repeated items come from the cache.
+Why it pays: the big model reads 2 alerts, not 4.
 
 ### Route tickets without a big model
 
@@ -44,11 +44,11 @@ Why it pays: the big model reads 2 items, not 4. Rejected items cost almost noth
 {"verdict":"billing","confidence":0.99}
 ```
 
-Why it pays: a 0.08 second local call replaces a paid call for each ticket. See the [benchmark](docs/benchmark.md) for the accuracy.
+Why it pays: a local call replaces a paid call for each ticket.
 
 ### Search code by behavior
 
-[`examples/code-search.sh`](examples/code-search.sh) finds code by what it does. ripgrep finds blocks that match a few keywords. 8-ball keeps those that do the behavior.
+In [`examples/code-search.sh`](examples/code-search.sh), ripgrep finds the blocks that match a few keywords. 8-ball keeps the blocks that do the behavior.
 
 ```sh
 examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|401' service/src
@@ -59,7 +59,7 @@ examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|
 {"verdict":"check","file":"service/src/lib.rs","lines":"273-305","confidence":0.42}
 ```
 
-Why it pays: the agent opens 1 file, not 20. You need no index. [More about the limits](docs/examples.md#search-code-by-behavior).
+Why it pays: the agent reads the matching blocks, not every file that has a keyword. You need no index. [More about the limits](docs/examples.md#search-code-by-behavior).
 
 ### Gate a script
 
@@ -71,7 +71,7 @@ Exit code 0 is `yes`, 1 is `no`, and 3 is `unsure`. See the [CLI](docs/cli.md).
 
 ### Get better with use
 
-Label the outcome of the work, and 8-ball fits its thresholds to the precision that you ask for. It also remembers your labels for the same question and state. See [calibration and learning](docs/calibration.md).
+Label the outcome of the work. 8-ball then fits its thresholds to the precision that you ask for. It also remembers your labels for the same question and state. See [calibration and learning](docs/calibration.md).
 
 ## How it works
 
