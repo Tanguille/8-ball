@@ -1,9 +1,6 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: [
-    "abandonments:recommended",
-    "github>home-operations/renovate-presets#11.0.0",
-  ],
+  extends: ["abandonments:recommended", "github>home-operations/renovate-presets#11.0.0"],
   labels: ["dependencies"],
   // The Renovate operator watches this checkbox to trigger a repository run.
   dependencyDashboard: {
