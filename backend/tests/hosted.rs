@@ -14,6 +14,13 @@ fn config(url: &str, extra: &str) -> domain::config::EndpointConfig {
 fn question() -> Question {
     serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Is this spam?"})).unwrap()
 }
+fn decisions_endpoint(server: &MockServer, extra: &str) -> Endpoint {
+    let config = config(
+        &server.uri(),
+        &format!("kind='decisions'\nmodel='clef'\n{extra}"),
+    );
+    Endpoint::new("hosted", &config, None)
+}
 async fn decisions(server: &MockServer, template: ResponseTemplate) {
     Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/decisions"))
@@ -39,11 +46,7 @@ fn answer() -> ResponseTemplate {
 async fn decisions_sends_the_model_and_reads_the_result_envelope() {
     let server = MockServer::start().await;
     decisions(&server, answer()).await;
-    let endpoint = Endpoint::new(
-        "hosted",
-        &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
-        None,
-    );
+    let endpoint = decisions_endpoint(&server, "");
     let probabilities = endpoint
         .ask("win a prize now", &[question()])
         .await
@@ -90,11 +93,7 @@ async fn a_short_429_is_retried_after_its_retry_after() {
         .mount(&server)
         .await;
     decisions(&server, answer()).await;
-    let endpoint = Endpoint::new(
-        "hosted",
-        &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
-        None,
-    );
+    let endpoint = decisions_endpoint(&server, "");
     let start = Instant::now();
     endpoint.ask("hi", &[question()]).await.unwrap();
     assert!(start.elapsed() >= Duration::from_secs(1));
@@ -109,11 +108,7 @@ async fn a_long_429_fails_at_once() {
         ResponseTemplate::new(429).insert_header("Retry-After", "3600"),
     )
     .await;
-    let endpoint = Endpoint::new(
-        "hosted",
-        &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
-        None,
-    );
+    let endpoint = decisions_endpoint(&server, "");
     let error = endpoint
         .ask("hi", &[question()])
         .await
@@ -128,14 +123,7 @@ async fn requests_per_minute_spaces_requests() {
     let server = MockServer::start().await;
     decisions(&server, answer()).await;
     // 600 per minute is one request per 100 ms.
-    let endpoint = Endpoint::new(
-        "hosted",
-        &config(
-            &server.uri(),
-            "kind='decisions'\nmodel='clef'\nrequests_per_minute=600",
-        ),
-        None,
-    );
+    let endpoint = decisions_endpoint(&server, "requests_per_minute=600");
     let start = Instant::now();
     for _ in 0..3 {
         endpoint.ask("hi", &[question()]).await.unwrap();
@@ -151,11 +139,7 @@ async fn a_second_429_is_not_retried_and_retry_after_0_waits_a_second() {
         ResponseTemplate::new(429).insert_header("Retry-After", "0"),
     )
     .await;
-    let endpoint = Endpoint::new(
-        "hosted",
-        &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
-        None,
-    );
+    let endpoint = decisions_endpoint(&server, "");
     let start = Instant::now();
     let error = endpoint
         .ask("hi", &[question()])
@@ -178,11 +162,7 @@ async fn a_502_is_retried_once() {
         .mount(&server)
         .await;
     decisions(&server, answer()).await;
-    let endpoint = Endpoint::new(
-        "hosted",
-        &config(&server.uri(), "kind='decisions'\nmodel='clef'"),
-        None,
-    );
+    let endpoint = decisions_endpoint(&server, "");
     endpoint.ask("hi", &[question()]).await.unwrap();
     assert_eq!(posts(&server).await.len(), 2);
 }

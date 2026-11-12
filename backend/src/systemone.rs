@@ -4,15 +4,18 @@ use domain::question::Kind;
 
 use crate::BackendError;
 
-/// `path` and `answers` (a JSON pointer) differ between a System One server and a hosted decisions API.
+/// A System One server and a hosted decisions API differ in the route and in where the answers are.
 pub async fn ask(
     endpoint: &crate::Endpoint,
     info: &crate::Info,
     state: &str,
     requested_questions: &[domain::question::Question],
-    path: &str,
-    answers: &str,
 ) -> Result<Vec<domain::Probs>, BackendError> {
+    let (path, answers) = if info.kind == crate::BackendKind::Decisions {
+        ("/v1/decisions", "/result/answers")
+    } else {
+        ("/v1/systemone", "/answers")
+    };
     let mut questions = serde_json::Map::new();
     for question in requested_questions {
         let mut wire = json!(question.kind);

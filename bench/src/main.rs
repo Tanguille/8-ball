@@ -114,7 +114,6 @@ struct Methods {
     names: Vec<String>,
     /// The model file or id behind each endpoint, from `8ball doctor`.
     models: Vec<String>,
-    endpoints: usize,
     reference: usize,
     /// Indices of the cascade's two endpoints.
     cascade: Option<(usize, usize)>,
@@ -292,7 +291,6 @@ fn methods(args: &Args, doctor: &Value) -> Result<Methods> {
     Ok(Methods {
         names,
         models,
-        endpoints: args.endpoints.len(),
         reference,
         cascade,
     })
@@ -667,7 +665,10 @@ fn report(methods: &Methods, runs: &[Runs]) {
         })
         .collect();
     // The cascade reuses endpoint observations, so its errors are already counted.
-    let errors: u32 = totals[..methods.endpoints].iter().map(|s| s.errors).sum();
+    let errors: u32 = totals[..methods.models.len()]
+        .iter()
+        .map(|s| s.errors)
+        .sum();
     println!(
         "\n{} cases per method (yes/no: {}), {errors} errors. Hardware: {}.",
         totals[0].total,
@@ -729,9 +730,10 @@ fn compare(summary: &Value, baseline: &Value, report_only: &[String]) -> Result<
             let margin = (count(now, "cases") + 99) / 100;
             let decided = count(now, "decided") - count(before, "decided");
             let wrong = count(now, "wrong") - count(before, "wrong");
-            let result = if (wrong > margin || -decided > margin) && report_only.contains(name) {
+            let worse = wrong > margin || -decided > margin;
+            let result = if worse && report_only.contains(name) {
                 "worse (report only)"
-            } else if wrong > margin || -decided > margin {
+            } else if worse {
                 ok = false;
                 "**regressed**"
             } else if wrong < -margin || decided > margin {

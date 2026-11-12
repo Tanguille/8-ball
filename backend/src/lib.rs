@@ -31,6 +31,8 @@ const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
 const INFO_TTL: Duration = Duration::from_secs(60);
 // A 429 that asks for a longer wait fails at once: the request would hit DECISION_TIMEOUT anyway.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
+// The shortest wait before a retry, so that `Retry-After: 0` cannot spin.
+const MIN_RETRY: Duration = Duration::from_secs(1);
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -121,17 +123,17 @@ impl Endpoint {
                 .headers()
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok()?.trim().parse::<u64>().ok())
-                .map_or(Duration::from_secs(1), Duration::from_secs);
+                .map_or(MIN_RETRY, Duration::from_secs)
+                .max(MIN_RETRY);
             let text = response.text().await?;
             drop(permit);
-            // One retry: a short 429 after its wait (at least 1 s, so `Retry-After: 0` cannot spin), and a 502 or
-            // 503, which a hosted gateway may answer from another upstream the next time.
+            // One retry: a short 429 after its wait, and a 502 or 503, which a hosted gateway may answer from another upstream the next time.
             let wait = match status {
                 reqwest::StatusCode::TOO_MANY_REQUESTS if retry_after <= MAX_RETRY_AFTER => {
-                    Some(retry_after.max(Duration::from_secs(1)))
+                    Some(retry_after)
                 }
                 reqwest::StatusCode::BAD_GATEWAY | reqwest::StatusCode::SERVICE_UNAVAILABLE => {
-                    Some(Duration::from_secs(1))
+                    Some(MIN_RETRY)
                 }
                 _ => None,
             };
@@ -266,12 +268,8 @@ impl Endpoint {
             let info = self.info().await?;
 
             match info.kind {
-                BackendKind::Systemone => {
-                    systemone::ask(self, &info, state, questions, "/v1/systemone", "/answers").await
-                }
-                BackendKind::Decisions => {
-                    let path = "/v1/decisions";
-                    systemone::ask(self, &info, state, questions, path, "/result/answers").await
+                BackendKind::Systemone | BackendKind::Decisions => {
+                    systemone::ask(self, &info, state, questions).await
                 }
                 BackendKind::Logprob => logprob::ask(self, &info, state, questions).await,
                 BackendKind::Rerank => rerank::ask(self, &info, state, questions).await,

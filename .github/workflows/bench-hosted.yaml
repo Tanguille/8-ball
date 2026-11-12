@@ -66,8 +66,8 @@ jobs:
         with:
           path: ~/.cache/8ball-models
           key: models-${{ hashFiles('dev/compose.yaml') }}
-      - run: dev/models.sh up
       - run: cargo build --release -p cli -p bench
+      - run: dev/models.sh up
       # A provider's free tier can allow 1,000 requests an hour: the 27b run takes about 560 at 30 a minute, the matrix
       # about 280 per model at 16 a minute.
       - name: Hosted endpoints
@@ -89,7 +89,6 @@ jobs:
           key: hosted-${{ env.MODE }}-${{ github.run_id }}
           restore-keys: hosted-${{ env.MODE }}-
       - name: Benchmark
-        id: bench
         run: |
           args=(--endpoints "$ENDPOINTS" --cascade "d3,hosted-qwen-3-8-27b" --per-side "$PER_SIDE" --config hosted.toml)
           # The matrix compares with d3, which always runs; a model that cannot answer this week is skipped.
@@ -101,12 +100,9 @@ jobs:
           if [ -f baseline/summary.json ] && [ "$ACCEPT" != true ]; then
             args+=(--baseline baseline/summary.json)
           fi
-          set +e
-          cargo run --release -p bench -- "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
-          status=${PIPESTATUS[0]}
-          set -e
+          status=0
+          cargo run --release -p bench -- "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
           mkdir -p baseline && cp target/bench/summary.json baseline/
-          echo "status=$status" >> "$GITHUB_OUTPUT"
           if [ "$status" != 0 ] && [ "$MODE" = matrix ]; then
             echo "::warning::A hosted model got worse than last week; see the job summary."
           elif [ "$status" != 0 ]; then
