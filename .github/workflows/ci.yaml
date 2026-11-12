@@ -61,10 +61,30 @@ jobs:
       - name: Benchmark
         run: |
           set -o pipefail
+          mkdir -p target/bench
           cargo run --release -p bench -- --endpoints d3,rerank,chat --reference d3 --per-side 100 --report-only chat \
-            --baseline bench/baseline.json | tee -a "$GITHUB_STEP_SUMMARY"
+            --baseline bench/baseline.json | tee target/bench/report.md | tee -a "$GITHUB_STEP_SUMMARY"
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench
-          path: target/bench/*.json
+          path: |
+            target/bench/*.json
+            target/bench/report.md
+
+  # Saves the tables of a main push on the bench-results branch (see docs/benchmark.md). The job has no secret and
+  # never runs for a pull request.
+  publish:
+    needs: models
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: dev/publish-bench.sh bench cpu.md "All models ran on the CPU of the GitHub runner."
