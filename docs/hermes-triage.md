@@ -59,7 +59,7 @@ If `context.input_error` is present, `context.snapshot` is absent. The same hold
 
 Report the outcomes so that 8-ball learns. The decision ids and `report` flags are in the `result` of the observation file. After Hermes investigates, label each candidate that has `report: true` with `decision_label` or `8ball label`. The label is `yes` if investigating was worthwhile, else `no`.
 
-Hermes supports pre-check scripts through its [native cron `script` interface](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron/#skipping-the-agent-entirely-wakeagent). A future approved installation can use a wrapper that collects a fresh snapshot, chooses a unique output path, and then invokes `8ball observe`. The two-line `examples/hermes/gitops-observe.sh` launcher executes the CLI. It contains no HTTP or decision logic. Hermes accepts a script file as the `script` value, not a shell command.
+Hermes supports pre-check scripts through its [native cron `script` interface](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron/#skipping-the-agent-entirely-wakeagent). A future approved installation can use a wrapper that collects a fresh snapshot, chooses a unique output path, and then invokes `8ball observe`. The short `examples/hermes/gitops-observe.sh` launcher executes the CLI. It contains no HTTP or decision logic. Hermes accepts a script file as the `script` value, not a shell command.
 
 ## Replay a separate labeled holdout
 

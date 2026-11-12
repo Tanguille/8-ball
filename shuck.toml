@@ -1,0 +1,3 @@
+# Style rules are off by default; they include the quoting checks ShellCheck ran.
+[lint]
+extend-select = ["S"]
