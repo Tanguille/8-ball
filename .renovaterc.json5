@@ -37,6 +37,9 @@
     {
       // shuck pushes a git tag before (or without) its GitHub release, and mise installs only released versions.
       // Look versions up in releases so Renovate never proposes a tag-only version like 0.2.9.
+      matchManagers: [
+        'mise',
+      ],
       matchPackageNames: [
         'ewhauser/shuck',
       ],
