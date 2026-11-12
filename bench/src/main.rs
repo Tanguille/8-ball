@@ -1,4 +1,4 @@
-//! Benchmark every model of the local stack on fixed public cases. See README "Benchmark".
+//! Benchmark every model of the local stack on fixed public cases. See docs/benchmark.md.
 //!
 //! Usage: `dev/models.sh up && dev/models.sh bench && cargo build --release -p cli -p bench`,
 //! then `cargo run --release -p bench -- [--per-side 200] [--split dev]`.
