@@ -1,0 +1,8 @@
+# All style rules are on, not only the quoting checks ShellCheck ran: S078 to S085 also police
+# shebangs, header comments and function docs. Style rules are off in shuck by default.
+[lint]
+extend-select = ["S"]
+
+# Scripts may use bash or POSIX sh.
+[lint.rule-options.s078]
+allowed-shells = ["bash", "sh"]

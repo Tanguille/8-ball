@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Smoke-test a built image against the HTTP contract. Usage: dev/image-smoke.sh IMAGE
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 image="${1:?usage: image-smoke.sh IMAGE}"
