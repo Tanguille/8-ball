@@ -245,7 +245,7 @@ fn available(args: &Args, doctor: &Value) -> Result<Vec<String>> {
             .find(|error| !error.is_null());
         match error {
             None => kept.push(name.clone()),
-            Some(error) if args.skip_unavailable => println!("Skipped {name}: {error}\n"),
+            Some(_) if args.skip_unavailable => println!("Skipped {name}.\n"),
             Some(error) => bail!("endpoint {name} failed its doctor probe: {error}"),
         }
     }
@@ -689,7 +689,7 @@ fn summary(methods: &Methods, runs: &[Runs], args: &Args) -> Value {
                 .zip(by_task)
                 .map(|(task, obs)| {
                     let s = Score::of(obs);
-                    (task.spec.to_owned(), json!({"cases": s.total, "decided": s.decided, "wrong": s.decided - s.correct}))
+                    (task.spec.to_owned(), json!({"cases": s.total, "decided": s.decided, "wrong": s.decided - s.correct, "errors": s.errors}))
                 })
                 .collect();
             (name.clone(), Value::Object(tasks))

@@ -103,7 +103,8 @@ jobs:
             args+=(--baseline baseline/summary.json)
           fi
           status=0
-          cargo run --release -p bench -- "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+          mkdir -p target/bench
+          cargo run --release -p bench -- "${args[@]}" | tee target/bench/report.md | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
           mkdir -p baseline && cp target/bench/summary.json baseline/
           if [ "$status" != 0 ] && [ "$MODE" = matrix ]; then
             echo "::warning::A hosted model got worse than last week; see the job summary."
@@ -120,4 +121,26 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-${{ env.MODE }}
-          path: target/bench/*.json
+          path: |
+            target/bench/*.json
+            target/bench/report.md
+
+  # Saves the tables on the bench-results branch (see docs/benchmark.md). The job has no secret. A failing 27b run
+  # skips it, so a regression never replaces the page.
+  publish:
+    needs: bench
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          dev/publish-bench.sh "bench-$MODE" "$MODE.md" \
+            "d3 ran on the CPU of the GitHub runner. The other models ran at a hosted provider, so their times include the network and the rate limit. Compare accuracy between rows, not time."
