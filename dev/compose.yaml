@@ -1,7 +1,7 @@
 # Local llama.cpp servers for the live tests. Use the same image digest and pinned models as the
 # deployed model servers, and bump them together.
 x-llama: &llama
-  image: ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:4bce66a7831e1d396f49d433eb738b9ef1edc20002f5a0d5099b15282d01d13f
+  image: ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:e3fa0455f7674b00ddc38a2ecb2f4f323ba4dbbcad9b0a886edfe977ddbc7b0c
   user: "${EIGHTBALL_DEV_UID}:${EIGHTBALL_DEV_GID}"
   devices:
     - /dev/dri:/dev/dri
