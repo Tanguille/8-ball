@@ -451,19 +451,15 @@ impl Service {
         }
         // A label serves every endpoint that answered this state, so refit the escalation pair, not only the row's
         // endpoint.
-        let mut endpoints = vec![endpoint];
+        let mut endpoints = vec![endpoint.as_str()];
         if let Some(escalation) = &self.config.escalation {
-            let primary = spec
-                .as_deref()
-                .and_then(|name| self.config.specs.get(name)?.endpoint.clone())
-                .unwrap_or_else(|| self.config.default.clone());
-            for name in [primary, escalation.endpoint.clone()] {
+            for name in [self.spec_endpoint(spec.as_deref()), &escalation.endpoint] {
                 if !endpoints.contains(&name) {
                     endpoints.push(name);
                 }
             }
         }
-        for name in &endpoints {
+        for name in endpoints {
             if let Err(e) = self
                 .maybe_recalibrate(spec.as_deref(), &question, name)
                 .await
@@ -768,7 +764,7 @@ impl Service {
                 continue;
             } else {
                 // Never remember here: a fit must use the model's answers, not the labels themselves.
-                let judgments = self
+                let (judgments, _) = self
                     .judge(&first.state, spec, slice::from_ref(question), name, false)
                     .await?;
 
@@ -1041,8 +1037,8 @@ impl Service {
                 },
             )
             .await;
-            let mut judgments = match judged {
-                Ok(judgments) => judgments,
+            let (mut judgments, state) = match judged {
+                Ok(judged) => judged,
                 Err(error) => return (index, Err(error)),
             };
             // Only the escalation is bounded here, so a deadline during it keeps the finished primary answer.
@@ -1180,7 +1176,7 @@ impl Service {
             self.resolve_questions(spec, &request.questions, request.endpoint.as_deref())?;
         let remember = request.learn && self.config.learning.remember;
         let deadline = tokio::time::Instant::now() + ASK_DEADLINE;
-        let mut judgments = within(
+        let (mut judgments, state) = within(
             deadline,
             self.judge(&request.state, spec, &questions, &endpoint, remember),
             ServiceError::Backend {
@@ -1191,7 +1187,7 @@ impl Service {
         .await?;
         if self.escalates(spec, request.escalate) {
             let escalated = self.escalate(
-                &request.state,
+                &state,
                 spec,
                 &questions,
                 &endpoint,
@@ -1226,7 +1222,7 @@ impl Service {
         questions: &[Question],
         endpoint: Option<&str>,
     ) -> Result<(Vec<Question>, String), ServiceError> {
-        let (questions, spec_endpoint) = if let Some(name) = spec {
+        let questions = if let Some(name) = spec {
             if !questions.is_empty() {
                 return Err(ServiceError::BadRequest(
                     "use spec or questions, not both".into(),
@@ -1237,20 +1233,17 @@ impl Service {
                 .specs
                 .get(name)
                 .ok_or_else(|| ServiceError::BadRequest(format!("unknown spec {name}")))?;
-            (
-                vec![Question {
-                    id: name.into(),
-                    instructions: spec.instructions.clone(),
-                    kind: spec.kind.clone(),
-                }],
-                spec.endpoint.as_deref(),
-            )
+            vec![Question {
+                id: name.into(),
+                instructions: spec.instructions.clone(),
+                kind: spec.kind.clone(),
+            }]
         } else {
-            (questions.to_vec(), None)
+            questions.to_vec()
         };
         domain::question::validate_all(&questions)
             .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-        let name = endpoint.or(spec_endpoint).unwrap_or(&self.config.default);
+        let name = endpoint.unwrap_or_else(|| self.spec_endpoint(spec));
         if !self.endpoints.contains_key(name) {
             return Err(ServiceError::BadRequest(format!("unknown endpoint {name}")));
         }
@@ -1258,8 +1251,15 @@ impl Service {
         Ok((questions, name.into()))
     }
 
+    /// The endpoint of `spec`, else the default.
+    fn spec_endpoint(&self, spec: Option<&str>) -> &str {
+        spec.and_then(|name| self.config.specs.get(name)?.endpoint.as_deref())
+            .unwrap_or(&self.config.default)
+    }
+
     /// Judges resolved questions; `resolve_questions` must have validated them and `name`.
     /// With `remember`, a label reported for the same question and state is the verdict.
+    /// Also returns the state as fitted to the endpoint, which `escalate` re-asks about.
     async fn judge(
         &self,
         state: &str,
@@ -1267,7 +1267,7 @@ impl Service {
         questions: &[Question],
         name: &str,
         remember: bool,
-    ) -> Result<Vec<Judgment>, ServiceError> {
+    ) -> Result<(Vec<Judgment>, String), ServiceError> {
         let endpoint = &self.endpoints[name];
         let backend_error = |e| self.backend_error(name, e);
         let info = endpoint.info().await.map_err(backend_error)?;
@@ -1359,7 +1359,7 @@ impl Service {
             });
         }
 
-        Ok(judgments)
+        Ok((judgments, state))
     }
 
     /// Whether `unsure` answers of this request go to the escalation endpoint.
@@ -1370,7 +1370,7 @@ impl Service {
                 .unwrap_or(true)
     }
 
-    /// Re-asks `unsure` answers on the escalation endpoint, about the state that the primary endpoint saw, so both
+    /// Re-asks `unsure` answers on the escalation endpoint, about `state` as the primary endpoint saw it, so both
     /// stored rows share a state hash and one label serves both. Fails open: an error or a spent budget keeps the
     /// primary answer. It changes `judgments` only after its last await, so a deadline can cancel it safely.
     async fn escalate(
@@ -1415,18 +1415,12 @@ impl Service {
         if unsure.is_empty() {
             return;
         }
-        let endpoint = &self.endpoints[primary];
-        // `judge` just read this info, so it comes from the cache.
-        let Ok(info) = endpoint.info().await else {
-            return;
-        };
-        let state = endpoint.fitted(&info, state);
         let asked: Vec<Question> = unsure
             .iter()
             .map(|&index| questions[index].clone())
             .collect();
-        let escalated = match self.judge(&state, spec, &asked, name, remember).await {
-            Ok(escalated) => escalated,
+        let escalated = match self.judge(state, spec, &asked, name, remember).await {
+            Ok((escalated, _)) => escalated,
             Err(error) => {
                 tracing::warn!(%error, "escalation failed; keeping the unsure answer");
                 self.metrics.record_escalation(name, "error", unsure.len());
