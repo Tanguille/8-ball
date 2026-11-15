@@ -420,6 +420,40 @@ async fn metadata_returns_spec_question_and_endpoint() {
     );
 }
 
+#[tokio::test]
+async fn unlabelled_lists_one_row_per_state() {
+    let (_directory, _, store) = opened().await;
+    let primary = insert(&store, decision("a")).await;
+    let escalated = insert(
+        &store,
+        NewDecision {
+            endpoint: "big".into(),
+            ..decision("a")
+        },
+    )
+    .await;
+    let other = insert(&store, decision("b")).await;
+    let listed = |unlabelled| {
+        let store = store.clone();
+        async move {
+            store
+                .decisions(Some("greeting"), "question", unlabelled, 10)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| (row.id, row.endpoint))
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(
+        listed(true).await,
+        [(other, "d3".to_owned()), (escalated, "big".to_owned())]
+    );
+    store.set_label(primary, "yes").await.unwrap();
+    assert_eq!(listed(true).await, [(other, "d3".to_owned())]);
+    assert_eq!(listed(false).await.len(), 3);
+}
+
 /// sqlx refuses to open a database whose applied migration text changed, so a shipped migration must stay
 /// byte-identical. Add a new numbered migration instead.
 #[test]

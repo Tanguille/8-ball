@@ -331,3 +331,16 @@ async fn labelling_escalated_decisions_refits_both_endpoints() {
         );
     }
 }
+
+#[tokio::test]
+async fn review_shows_an_escalated_case_once() {
+    let app = fixture(30, "").await;
+    let decision = greeting(&app, "maybe-yes-1").await;
+    let review = app
+        .service
+        .review(serde_json::from_value(json!({"spec":"greeting"})).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(review.decisions.len(), 1);
+    assert_eq!(review.decisions[0].id, decision.id);
+}

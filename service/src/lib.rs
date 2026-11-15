@@ -195,6 +195,8 @@ pub struct StoredDecision {
     pub probabilities: Value,
     pub state: String,
     pub label: Option<String>,
+    /// The endpoint that answered.
+    pub endpoint: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -598,6 +600,7 @@ impl Service {
                 },
                 state: row.state,
                 label: row.label,
+                endpoint: row.endpoint,
             })
             .collect();
 
