@@ -1,7 +1,7 @@
 # 8-ball escalation and server-side triage batching
 
 **Created:** 2026-11-12
-**Status:** In progress: owner decisions recorded 2026-11-12; Chunk 0 with the owner, Chunks 1 and 2 complete, Chunk 3 next
+**Status:** In progress: owner decisions recorded 2026-11-12; Chunk 0 with the owner, Chunks 1, 2 and 3 complete, Chunk 4 next
 **Complexity:** Medium
 **Estimated Chunks:** 7 (Chunk 0 is a gate without code, Chunk 7 is in the cluster repo)
 **Repo:** `/home/tanguille/Documents/PriveProjecten/8-ball`
@@ -234,7 +234,7 @@ struct Judgment {
 - [x] Chunk 2: triage fails open per item, request deadline (depends on 1)
 
 #### Wave 2 (sequential): Part A, escalation
-- [ ] Chunk 3: `[escalation]` config and spec `escalate` (depends on 2)
+- [x] Chunk 3: `[escalation]` config and spec `escalate` (depends on 2)
 - [ ] Chunk 4: escalation in `ask` and `triage`, budget, metric (depends on 3)
 - [ ] Chunk 5: labels and review stay coherent with two rows per case (depends on 4)
 - [ ] Chunk 6: MCP instructions, docs, live tests (depends on 5)
@@ -552,7 +552,7 @@ needs a 90 s wait with the const deadline, and the embedder's own 10 s batch tim
 ---
 
 ### Chunk 3: `[escalation]` config and spec `escalate`
-**Wave:** 2 · **Complexity:** Low
+**Wave:** 2 · **Complexity:** Low · **Status:** Complete (2026-11-15, `0dc3be1`). Matches the owner decisions (default on once `[escalation]` exists). `docs/configuration.md` documents the new keys in Chunk 6.
 
 #### Step 1: Config (tests first)
 1. In `domain/tests/config.rs` add:
