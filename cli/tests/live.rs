@@ -423,6 +423,72 @@ async fn live_cache_skips_model() {
     assert!(elapsed < std::time::Duration::from_millis(50));
 }
 
+/// Rerank's noul bands never decide, so its every answer escalates; chat must answer it.
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_unsure_answer_escalates_to_chat() {
+    require(9933).await;
+    require(9934).await;
+    let mut config = dev_config();
+    config.escalation = Some(toml::from_str("endpoint = 'chat'").unwrap());
+    let (service, _directory) = calibration_service(config).await;
+    let request: service::AskRequest = serde_json::from_value(json!({
+        "endpoint": "rerank",
+        "state": "hi there, how are you?",
+        "questions": [{"id":"greeting","type":"noul","instructions":"Is this message a greeting?"}]
+    }))
+    .unwrap();
+    let decision = service.ask(request).await.unwrap().results.remove(0);
+    eprintln!("escalated: {decision:?}");
+    assert!(decision.escalated);
+    assert!(decision.probabilities["yes"] > 0.5, "{decision:?}");
+}
+
+/// 64 contextual items on d3's two slots: none times out, none fails.
+#[tokio::test]
+#[ignore = "needs dev/models.sh up"]
+async fn live_triage_of_64_items_answers_every_item() {
+    require(9931).await;
+    let (service, _directory) = calibration_service(dev_config()).await;
+    let items: Vec<String> = (0..64)
+        .map(|i| {
+            if i % 2 == 0 {
+                format!("message {i}: hello")
+            } else {
+                format!("disk {i} is 98% full")
+            }
+        })
+        .collect();
+    let request: service::TriageRequest = serde_json::from_value(json!({
+        "items": items,
+        "question": {"id":"q","type":"noul","instructions":"Is this message a greeting?"},
+        "learn": false
+    }))
+    .unwrap();
+    let start = std::time::Instant::now();
+    let result = service.triage(request).await.unwrap();
+    let elapsed = start.elapsed();
+    eprintln!(
+        "64-item triage: {} kept, {} unsure, {} rejected, warning {:?}, elapsed {elapsed:?}",
+        result.kept.len(),
+        result.unsure.len(),
+        result.rejected.len(),
+        result.warning
+    );
+    let items = || {
+        result
+            .kept
+            .iter()
+            .chain(&result.unsure)
+            .chain(&result.rejected)
+    };
+    assert!(
+        items().all(|item| item.decision.error.is_none()),
+        "{result:?}"
+    );
+    assert_eq!(items().count(), 64);
+}
+
 async fn calibration_service(config: Config) -> (Service, tempfile::TempDir) {
     let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
     let store = Store::open(&directory.path().join("db.sqlite"))
