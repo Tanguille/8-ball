@@ -25,7 +25,7 @@ pub struct Endpoint {
     next_request: Mutex<Instant>,
 }
 
-// Decision models answer in under 1 s; 20 s only absorbs a cold model load. It counts from when the call has a slot, so a long triage queue does not time out calls that never started.
+// Decision models answer in under 1 s; 20 s only absorbs a cold model load. See `EndpointConfig::timeout_secs`.
 const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
 // A new model behind the same URL gets its own fingerprint, and so its own cache and calibration, within this time.
 const INFO_TTL: Duration = Duration::from_secs(60);

@@ -258,7 +258,7 @@ async fn slow_call_times_out_after_timeout_secs() {
     assert_eq!(error.0, "timed out after 1s");
 }
 
-/// Four calls on one slot take 4 x 0.6 s. Each call is within its 1 s, so none times out.
+/// Two calls on one slot take 2 x 0.6 s. Each call is within its 1 s, so none times out.
 #[tokio::test]
 async fn queued_calls_do_not_count_the_queue_wait() {
     let server = MockServer::start().await;

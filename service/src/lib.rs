@@ -131,8 +131,7 @@ pub struct TriageRequest {
     /// False turns off remembered labels, exploration and reports for this request.
     #[serde(default = "learn_default")]
     pub learn: bool,
-    /// True re-asks `unsure` answers on the server's escalation endpoint, false keeps them. Default: the spec's
-    /// `escalate`, else on when the server has [escalation].
+    /// As in `decision_ask`.
     #[serde(default)]
     pub escalate: Option<bool>,
 }

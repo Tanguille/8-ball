@@ -52,7 +52,7 @@ escalate = false                # optional: keep this spec's `unsure` answers
 
 When `[escalation]` exists, 8-ball re-asks every `unsure` answer on the escalation endpoint before it returns. A request's `escalate` field wins, then the spec's `escalate`, else escalation is on. Without `[escalation]`, it is always off. A remembered answer does not escalate. The escalation endpoint judges the same trimmed state that the default endpoint saw.
 
-An escalation that fails, times out, or goes over `per_minute` keeps the `unsure` answer and logs a warning. A single `ask` has a 20 second deadline, escalation included. A triage has a 90 second deadline, prefilter and escalation included. Items that miss it come back `unsure` with an `error`.
+An escalation that fails, times out, or goes over `per_minute` keeps the `unsure` answer and logs a warning. The request deadlines also bound it; see [Decisions](http-api.md#decisions).
 
 The escalation endpoint is usually a chat model with `kind = "logprob"` and thinking off, for example the 27B Qwen with `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. Do not use a router that can turn thinking on: the first token is then `<think>`, and the logprob answer breaks.
 
