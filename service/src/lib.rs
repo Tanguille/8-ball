@@ -426,11 +426,27 @@ impl Service {
         if !self.store.set_label(id, &value).await? {
             return Err(ServiceError::BadRequest(format!("no decision {id}")));
         }
-        if let Err(e) = self
-            .maybe_recalibrate(spec.as_deref(), &question, &endpoint)
-            .await
-        {
-            tracing::warn!(error = %e, "automatic recalibration failed");
+        // A label serves every endpoint that answered this state, so refit the escalation pair, not only the row's
+        // endpoint.
+        let mut endpoints = vec![endpoint];
+        if let Some(escalation) = &self.config.escalation {
+            let primary = spec
+                .as_deref()
+                .and_then(|name| self.config.specs.get(name)?.endpoint.clone())
+                .unwrap_or_else(|| self.config.default.clone());
+            for name in [primary, escalation.endpoint.clone()] {
+                if !endpoints.contains(&name) {
+                    endpoints.push(name);
+                }
+            }
+        }
+        for name in &endpoints {
+            if let Err(e) = self
+                .maybe_recalibrate(spec.as_deref(), &question, name)
+                .await
+            {
+                tracing::warn!(error = %e, endpoint = %name, "automatic recalibration failed");
+            }
         }
 
         Ok(LabelResponse { id, label: value })

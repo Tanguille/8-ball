@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use sqlx::Connection;
 use wiremock::{MockServer, matchers};
 
+use domain::{config::BackendKind, verdict};
 use service::{Decision, TriageResponse};
 
 #[expect(
@@ -14,6 +15,7 @@ mod common;
 
 struct App {
     service: std::sync::Arc<service::Service>,
+    store: store::Store,
     d3: MockServer,
     big: MockServer,
     directory: tempfile::TempDir,
@@ -95,10 +97,11 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
         big = big.uri(),
     ))
     .unwrap();
-    let (service, _store, directory) = common::service(config).await;
+    let (service, store, directory) = common::service(config).await;
 
     App {
         service,
+        store,
         d3,
         big,
         directory,
@@ -296,4 +299,35 @@ async fn ask_deadline_keeps_the_primary_unsure() {
     assert!(started.elapsed() < Duration::from_secs(25));
     assert_eq!(decision.verdict, "unsure");
     assert!(!decision.escalated && decision.report);
+}
+
+#[tokio::test]
+async fn labelling_escalated_decisions_refits_both_endpoints() {
+    let app = fixture(30, "recalibrate_after = 25").await;
+    // 24 labels straight in the store skip the refit; the 25th, through the service, runs it.
+    for i in 1..=25 {
+        let decision = greeting(&app, &format!("maybe-yes-{i}")).await;
+        assert!(decision.escalated);
+        if i < 25 {
+            app.store.set_label(decision.id, "yes").await.unwrap();
+        } else {
+            app.service.label(decision.id, "yes".into()).await.unwrap();
+        }
+    }
+    let question: domain::question::Question =
+        serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
+            .unwrap();
+    let qhash = verdict::question_hash(&question);
+    for calibration_id in [
+        verdict::calibration_id(&qhash, BackendKind::Systemone, &app.d3.uri()),
+        verdict::calibration_id(&qhash, BackendKind::Logprob, "big"),
+    ] {
+        assert!(
+            app.store
+                .calibration(&calibration_id, Some("greeting"))
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
 }
