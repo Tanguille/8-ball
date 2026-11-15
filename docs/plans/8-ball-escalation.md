@@ -1001,3 +1001,16 @@ Outside Chunk 6's write set; applied after it, except where noted.
 - [x] In triage, a deadline during escalation drops a finished primary answer; wrapping only `escalate` in `timeout_at`, as `ask` does, would keep it (behaviour change).
 - [ ] Skipped: `label` runs `labelled_count`/`labelled` once per endpoint; lift the shared reads out of the loop. `labelled` runs only inside a refit that happens, so lifting it reads every labelled row on each label. Lifting `labelled_count` turns its store error from a warning into a failed label and adds a query when `recalibrate_after = 0`. At most 2 extra counts per label.
 - [x] `escalate` calls the primary's `info()` again per item to refit the state; `judge` could hand back the fitted state.
+
+## Simplify pass on PR #50 (2026-11-15)
+
+- [x] A: `ask` and `triage` build one `Pass` (spec, endpoint, remember, escalation, deadline and its messages) and share `judge_escalating`; `escalates()` and the `too_many_arguments` expectation are gone. Supersedes the Chunk 6 skip above.
+- [x] B: `label` refits exactly the endpoints that answered the labelled state (`Store::endpoints`; `metadata` returns `state_hash`), not the ones derived from config.
+- [x] C: `maybe_recalibrate` counts the labelled states cached under the endpoint's own calibration (`Store::labelled_states`, replaces `labelled_count`), so the escalation endpoint no longer refits on nearly every label.
+- [x] D: escalation gives back the budget of answers that came from its cache.
+- [x] E: `Judgment.endpoint` drives the decision metrics; `persist` lost its endpoint parameter.
+- [x] F: a missed ask or triage deadline is counted in `eightball_backend_errors_total`.
+- [x] G: the systemone mock, `requests`, `indices`, the store and the raw connection helpers live in `service/tests/common.rs` (cli gets `sqlx` as a dev-dependency, since it includes that file).
+- [x] H: escalation budget in `usize`, `truncate`/`splice` in `escalate`, `Endpoint::timeout()` inlined, `#[serde(default)]` dropped on `SpecConfig.escalate`. Kept it on the two request structs: dropping it removes `"default": null` from their tool schema, unlike their sibling fields.
+- [x] I: deadlines described once in http-api.md "Decisions", `timeout_secs` once in `EndpointConfig` and configuration.md, the request `escalate` doc on `AskRequest`, the queue-wait test comment fixed.
+- Skipped by the owner: moving the budget into `Endpoint` pacing; restructuring persist's earlier/fresh rows; trimming the 64-item test; the empty-queue cost of the review query.
