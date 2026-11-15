@@ -22,7 +22,8 @@ struct App {
 }
 
 /// `d3` answers noul by state (`yes-*` 0.97, `no-*` 0.03, else 0.5) and choices with `a`. `big` reads the prompt:
-/// `maybe-yes` yes 0.95, `maybe-no` no 0.95, `maybe-fail` a 500, `maybe-slow` yes after 100 s, past the triage deadline, else 0.5.
+/// `maybe-yes` yes 0.95, `maybe-no` no 0.95, `maybe-fail` a 500, `maybe-slow` yes after 5 s, past both
+/// deadlines, which the fixture shortens to 1 s, else 0.5.
 async fn fixture(per_minute: u32, learning: &str) -> App {
     let d3 = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
@@ -78,7 +79,7 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
                 ]}]}}]}),
             );
             if prompt.contains("maybe-slow") {
-                response.set_delay(Duration::from_secs(100))
+                response.set_delay(Duration::from_secs(5))
             } else {
                 response
             }
@@ -98,6 +99,11 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
     ))
     .unwrap();
     let (service, store, directory) = common::service(config).await;
+    let service = std::sync::Arc::new(
+        std::sync::Arc::into_inner(service)
+            .unwrap()
+            .with_deadlines(Duration::from_secs(1), Duration::from_secs(1)),
+    );
 
     App {
         service,
@@ -296,7 +302,7 @@ async fn ask_deadline_keeps_the_primary_unsure() {
     let app = fixture(30, "").await;
     let started = Instant::now();
     let decision = greeting(&app, "maybe-slow-1").await;
-    assert!(started.elapsed() < Duration::from_secs(25));
+    assert!(started.elapsed() < Duration::from_secs(3));
     assert_eq!(decision.verdict, "unsure");
     assert!(!decision.escalated && decision.report);
 }

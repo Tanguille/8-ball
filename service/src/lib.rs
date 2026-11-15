@@ -292,10 +292,6 @@ const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
 // The primary answer fails the request when it misses it; an escalation that misses it keeps the primary `unsure`.
 const ASK_DEADLINE: Duration = Duration::from_secs(20);
 
-fn deadline_passed() -> String {
-    format!("triage deadline of {TRIAGE_DEADLINE:?} passed")
-}
-
 /// The result of `future`, or `passed` once `deadline` is reached.
 async fn within<T, E>(
     deadline: tokio::time::Instant,
@@ -356,6 +352,8 @@ pub struct Service {
     /// The escalation budget window: its start and the escalations granted in it. A std mutex, held for a few
     /// instructions and never across an await.
     escalations: std::sync::Mutex<(Instant, u32)>,
+    triage_deadline: Duration,
+    ask_deadline: Duration,
 }
 
 impl Service {
@@ -385,7 +383,22 @@ impl Service {
             metrics: Metrics::default(),
             refit: Mutex::new(()),
             escalations: std::sync::Mutex::new((Instant::now(), 0)),
+            triage_deadline: TRIAGE_DEADLINE,
+            ask_deadline: ASK_DEADLINE,
         }
+    }
+
+    /// Replaces the triage and ask deadlines, so tests need not wait 90 s and 20 s.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_deadlines(mut self, triage: Duration, ask: Duration) -> Self {
+        self.triage_deadline = triage;
+        self.ask_deadline = ask;
+        self
+    }
+
+    fn deadline_passed(&self) -> String {
+        format!("triage deadline of {:?} passed", self.triage_deadline)
     }
 
     pub(crate) const fn learning(&self) -> &domain::config::Learning {
@@ -938,7 +951,7 @@ impl Service {
             .triage_items(&endpoint, request.items, request.context.as_deref())
             .await?;
         let unique_count = items.len();
-        let deadline = tokio::time::Instant::now() + TRIAGE_DEADLINE;
+        let deadline = tokio::time::Instant::now() + self.triage_deadline;
         let (prefiltered, warning) = if let Some(top_k) = request.top_k {
             self.prefilter(&question, &mut items, top_k, deadline)
                 .await?
@@ -1033,7 +1046,7 @@ impl Service {
                 self.judge(&state, spec, questions, endpoint, remember),
                 ServiceError::Backend {
                     endpoint: endpoint.into(),
-                    message: deadline_passed(),
+                    message: self.deadline_passed(),
                 },
             )
             .await;
@@ -1134,7 +1147,7 @@ impl Service {
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
             .collect::<Vec<_>>();
-        let passed = backend::BackendError(deadline_passed());
+        let passed = backend::BackendError(self.deadline_passed());
         let vectors = match within(deadline, embedder.embed(&texts), passed).await {
             Ok(vectors) => vectors,
             Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
@@ -1175,13 +1188,13 @@ impl Service {
         let (questions, endpoint) =
             self.resolve_questions(spec, &request.questions, request.endpoint.as_deref())?;
         let remember = request.learn && self.config.learning.remember;
-        let deadline = tokio::time::Instant::now() + ASK_DEADLINE;
+        let deadline = tokio::time::Instant::now() + self.ask_deadline;
         let (mut judgments, state) = within(
             deadline,
             self.judge(&request.state, spec, &questions, &endpoint, remember),
             ServiceError::Backend {
                 endpoint: endpoint.clone(),
-                message: format!("ask deadline of {ASK_DEADLINE:?} passed"),
+                message: format!("ask deadline of {:?} passed", self.ask_deadline),
             },
         )
         .await?;
