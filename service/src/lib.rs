@@ -1011,27 +1011,33 @@ impl Service {
     ) -> Result<(Vec<(usize, Judgment)>, Option<String>), ServiceError> {
         let questions = slice::from_ref(question);
         let results = future::join_all(items.into_iter().map(|(index, state)| async move {
-            // A deadline that passes during escalation drops the primary answer too; both end as `unsure`.
-            let judged = tokio::time::timeout_at(deadline, async {
-                let mut judgments = self
-                    .judge(&state, spec, questions, endpoint, remember)
-                    .await?;
-                if escalate {
-                    self.escalate(&state, spec, questions, endpoint, &mut judgments, remember)
-                        .await;
-                }
-                Ok::<_, ServiceError>(judgments)
-            })
+            let judged = tokio::time::timeout_at(
+                deadline,
+                self.judge(&state, spec, questions, endpoint, remember),
+            )
             .await
             .unwrap_or_else(|_| {
                 Err(ServiceError::Backend {
                     endpoint: endpoint.into(),
                     message: deadline_passed(),
                 })
-            })
-            .map(|mut judgments| judgments.remove(0));
+            });
+            let mut judgments = match judged {
+                Ok(judgments) => judgments,
+                Err(error) => return (index, Err(error)),
+            };
+            // Only the escalation is bounded here, so a deadline during it keeps the finished primary answer.
+            if escalate {
+                let escalated =
+                    self.escalate(&state, spec, questions, endpoint, &mut judgments, remember);
+                if tokio::time::timeout_at(deadline, escalated).await.is_err() {
+                    tracing::warn!(
+                        "escalation missed the triage deadline; keeping the unsure answer"
+                    );
+                }
+            }
 
-            (index, judged)
+            (index, Ok(judgments.remove(0)))
         }))
         .await;
         let total = results.len();

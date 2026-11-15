@@ -22,7 +22,7 @@ struct App {
 }
 
 /// `d3` answers noul by state (`yes-*` 0.97, `no-*` 0.03, else 0.5) and choices with `a`. `big` reads the prompt:
-/// `maybe-yes` yes 0.95, `maybe-no` no 0.95, `maybe-fail` a 500, `maybe-slow` yes after 30 s, else 0.5.
+/// `maybe-yes` yes 0.95, `maybe-no` no 0.95, `maybe-fail` a 500, `maybe-slow` yes after 100 s, past the triage deadline, else 0.5.
 async fn fixture(per_minute: u32, learning: &str) -> App {
     let d3 = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
@@ -78,17 +78,17 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
                 ]}]}}]}),
             );
             if prompt.contains("maybe-slow") {
-                response.set_delay(Duration::from_secs(30))
+                response.set_delay(Duration::from_secs(100))
             } else {
                 response
             }
         })
         .mount(&big)
         .await;
-    // `big` may take 60 s per call, so only the ask deadline bounds the slow escalation.
+    // `big` may take 120 s per call, so only the ask or triage deadline bounds the slow escalation.
     let config = toml::from_str(&format!(
         "default='d3'\n[endpoints.d3]\nurl='{d3}'\nkind='systemone'\n\
-         [endpoints.big]\nurl='{big}'\nkind='logprob'\nmodel='big'\ntimeout_secs=60\n\
+         [endpoints.big]\nurl='{big}'\nkind='logprob'\nmodel='big'\ntimeout_secs=120\n\
          [escalation]\nendpoint='big'\nper_minute={per_minute}\n\
          [specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n\
          [specs.quiet]\ntype='noul'\ninstructions='Quiet?'\nescalate=false\n\
@@ -299,6 +299,21 @@ async fn ask_deadline_keeps_the_primary_unsure() {
     assert!(started.elapsed() < Duration::from_secs(25));
     assert_eq!(decision.verdict, "unsure");
     assert!(!decision.escalated && decision.report);
+}
+
+#[tokio::test]
+async fn triage_deadline_keeps_the_primary_unsure() {
+    let app = fixture(30, "").await;
+    let response = triage(
+        &app,
+        json!({"spec":"greeting","items":["yes-1","maybe-slow-1"]}),
+    )
+    .await;
+    assert_eq!(indices(&response.kept), [0]);
+    assert_eq!(indices(&response.unsure), [1]);
+    let decision = &response.unsure[0].decision;
+    assert!(decision.error.is_none() && !decision.escalated && decision.report);
+    assert!(response.warning.is_none(), "{:?}", response.warning);
 }
 
 #[tokio::test]
