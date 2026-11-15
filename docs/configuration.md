@@ -13,7 +13,7 @@ concurrency = 1                 # optional: max parallel requests. Omitted = /pr
 model = "qwen-3.8-fast"         # optional: sent as "model". Required for kind logprob.
 api_key_env = "TYPESAFE_KEY"    # optional: NAME of an env var whose value is sent as "Authorization: Bearer <value>"
 max_state_chars = 2000          # optional: default 2000 for systemone, decisions and rerank, no limit for logprob
-timeout_secs = 20               # optional: seconds per model call once it has a slot; waiting for a slot is not counted
+timeout_secs = 20               # optional: seconds per HTTP attempt once it has a slot (a retry gets its own); waiting for a slot is not counted
 extra_body = { reasoning_effort = "none" }   # optional: merged into logprob request JSON
 requests_per_minute = 30        # optional: space requests evenly, for a hosted provider's rate limit
 

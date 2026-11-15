@@ -968,3 +968,10 @@ Only after Chunk 6 is merged and released (the image and chart workflows in `.gi
 - **Budget:** `per_minute = 30`; over budget the answer stays `unsure`.
 - **Default:** escalation on for every question once `[escalation]` exists; opt out per spec or request with `escalate = false`. `gitops-investigate` escalates.
 - **Still open:** checkpoint name in the fingerprint (Q4), and the vMCP tool-call timeout versus the 90 s triage deadline (Q6). Check both in Chunk 0.
+
+## Follow-ups from the Chunk 1 /simplify review (2026-11-15)
+
+Out of Chunk 1's write set, so recorded here instead of fixed:
+- **Chunk 2:** start `TRIAGE_DEADLINE` before `prefilter`. The embedder (`backend/src/embed.rs`) runs serial 10 s batches outside the deadline, up to ~90 s for 64 items.
+- **Chunk 4:** single `ask` has no request-level deadline. `timeout_secs` is now per attempt, so a call, a retry and an escalation can outlast the CLI's 25 s default (`cli/src/main.rs`) and the plugin skill's `timeout=25`. Add an `ASK_DEADLINE` or raise those client defaults.
+- **Later:** `Endpoint::info()` is no longer bounded by the old outer timeout. A never-detected backend with a hung `/props` costs 5-10 s per call, serialized on the info lock. Consider a short negative cache.

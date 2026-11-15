@@ -57,7 +57,7 @@ pub struct EndpointConfig {
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
     /// Spaces requests evenly to stay under a hosted provider's rate limit.
     pub requests_per_minute: Option<u32>,
-    /// Seconds one model call may take once it has a slot; default 20. Time spent waiting for a slot is not counted.
+    /// Seconds one HTTP attempt may take once it has a slot; default 20. Waiting for a slot is not counted, and a retry gets its own budget.
     pub timeout_secs: Option<u64>,
 }
 

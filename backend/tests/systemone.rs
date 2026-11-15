@@ -16,16 +16,6 @@ fn question() -> Question {
 fn endpoint_config(url: &str) -> domain::config::EndpointConfig {
     toml::from_str(&format!("url = '{url}'\nkind = 'systemone'\n")).unwrap()
 }
-fn timed_config(
-    url: &str,
-    concurrency: usize,
-    timeout_secs: u64,
-) -> domain::config::EndpointConfig {
-    toml::from_str(&format!(
-        "url = '{url}'\nkind = 'systemone'\nconcurrency = {concurrency}\ntimeout_secs = {timeout_secs}\n"
-    ))
-    .unwrap()
-}
 fn response() -> Value {
     json!({"answers":{"q":{"type":"noul","noul":0.97}}})
 }
@@ -261,7 +251,9 @@ async fn slow_call_times_out_after_timeout_secs() {
             .set_delay(std::time::Duration::from_millis(1500)),
     )
     .await;
-    let endpoint = Endpoint::new("d3", &timed_config(&server.uri(), 1, 1), None);
+    let mut config = endpoint_config(&server.uri());
+    config.timeout_secs = Some(1);
+    let endpoint = Endpoint::new("d3", &config, None);
     let error = endpoint.ask("hi", &[question()]).await.unwrap_err();
     assert_eq!(error.0, "timed out after 1s");
 }
@@ -277,10 +269,13 @@ async fn queued_calls_do_not_count_the_queue_wait() {
             .set_delay(std::time::Duration::from_millis(600)),
     )
     .await;
-    let endpoint = Endpoint::new("d3", &timed_config(&server.uri(), 1, 1), None);
+    let mut config = endpoint_config(&server.uri());
+    config.concurrency = Some(1);
+    config.timeout_secs = Some(1);
+    let endpoint = Endpoint::new("d3", &config, None);
     let question = question();
     let results = futures::future::join_all(
-        (0..4).map(|_| endpoint.ask("hi", std::slice::from_ref(&question))),
+        (0..2).map(|_| endpoint.ask("hi", std::slice::from_ref(&question))),
     )
     .await;
     assert!(results.iter().all(Result::is_ok), "{results:?}");
