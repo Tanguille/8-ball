@@ -1421,12 +1421,16 @@ impl Service {
             })
             .map(|(index, _)| index)
             .collect();
-        let granted = grant(
-            &mut self.escalations.lock().expect("escalation budget"),
-            Instant::now(),
-            escalation.per_minute,
-            unsure.len(),
-        );
+        let (granted, granted_in) = {
+            let mut window = self.escalations.lock().expect("escalation budget");
+            let granted = grant(
+                &mut window,
+                Instant::now(),
+                escalation.per_minute,
+                unsure.len(),
+            );
+            (granted, window.0)
+        };
         if granted < unsure.len() {
             self.metrics
                 .record_escalation(name, "budget", unsure.len() - granted);
@@ -1455,9 +1459,11 @@ impl Service {
             .iter()
             .filter(|judgment| judgment.decision.cached)
             .count();
-        let mut window = self.escalations.lock().expect("escalation budget");
-        window.1 = window.1.saturating_sub(cached);
-        drop(window);
+        refund(
+            &mut self.escalations.lock().expect("escalation budget"),
+            granted_in,
+            cached,
+        );
         for (&index, mut judgment) in unsure.iter().zip(escalated) {
             let outcome = if judgment.decision.verdict == "unsure" {
                 "unsure"
@@ -1589,6 +1595,13 @@ fn list_limit(limit: Option<usize>) -> Result<u32, ServiceError> {
 /// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
 // ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
 // that ever matters.
+/// Gives `count` back to the window that granted it; a window that has since rolled over keeps its count.
+fn refund(window: &mut (Instant, usize), granted_in: Instant, count: usize) {
+    if window.0 == granted_in {
+        window.1 = window.1.saturating_sub(count);
+    }
+}
+
 fn grant(window: &mut (Instant, usize), now: Instant, per_minute: usize, wanted: usize) -> usize {
     if now.duration_since(window.0) >= Duration::from_secs(60) {
         *window = (now, 0);
@@ -1612,6 +1625,22 @@ fn stored_question(question: &Question) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn refund_only_returns_to_the_window_that_granted() {
+        let start = std::time::Instant::now();
+        let mut window = (start, 0);
+        assert_eq!(super::grant(&mut window, start, 3, 3), 3);
+        super::refund(&mut window, start, 2);
+        assert_eq!(window.1, 1);
+        let later = start + std::time::Duration::from_secs(61);
+        assert_eq!(super::grant(&mut window, later, 3, 3), 3);
+        super::refund(&mut window, start, 3);
+        assert_eq!(
+            window.1, 3,
+            "a refund from an old window must not free the new one"
+        );
+    }
+
     #[test]
     fn grant_spends_then_refills_after_a_minute() {
         let start = std::time::Instant::now();
