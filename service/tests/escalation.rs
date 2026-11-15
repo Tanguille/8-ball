@@ -19,6 +19,7 @@ struct App {
     d3: MockServer,
     big: MockServer,
     directory: tempfile::TempDir,
+    config: String,
 }
 
 /// `d3` answers noul by state (`yes-*` 0.97, `no-*` 0.03, else 0.5) and choices with `a`. `big` reads the prompt:
@@ -87,7 +88,7 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
         .mount(&big)
         .await;
     // `big` may take 120 s per call, so only the ask or triage deadline bounds the slow escalation.
-    let config = toml::from_str(&format!(
+    let config = format!(
         "default='d3'\n[endpoints.d3]\nurl='{d3}'\nkind='systemone'\n\
          [endpoints.big]\nurl='{big}'\nkind='logprob'\nmodel='big'\ntimeout_secs=120\n\
          [escalation]\nendpoint='big'\nper_minute={per_minute}\n\
@@ -96,9 +97,8 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
          [learning]\nexplore=0.0\n{learning}",
         d3 = d3.uri(),
         big = big.uri(),
-    ))
-    .unwrap();
-    let (service, store, directory) = common::service(config).await;
+    );
+    let (service, store, directory) = common::service(toml::from_str(&config).unwrap()).await;
     let service = std::sync::Arc::new(
         std::sync::Arc::into_inner(service)
             .unwrap()
@@ -111,6 +111,7 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
         d3,
         big,
         directory,
+        config,
     }
 }
 
@@ -364,4 +365,43 @@ async fn review_shows_an_escalated_case_once() {
         .unwrap();
     assert_eq!(review.decisions.len(), 1);
     assert_eq!(review.decisions[0].id, decision.id);
+}
+
+#[tokio::test]
+async fn labelling_a_state_never_escalated_leaves_the_escalation_endpoint_alone() {
+    let app = fixture(30, "recalibrate_after = 1").await;
+    let decision = greeting(&app, "yes-1").await;
+    app.service.label(decision.id, "yes".into()).await.unwrap();
+    assert!(app.big.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn labelling_refits_the_endpoints_that_answered_after_escalation_is_turned_off() {
+    let app = fixture(30, "recalibrate_after = 25").await;
+    let mut ids = Vec::new();
+    for i in 1..=25 {
+        ids.push(greeting(&app, &format!("maybe-yes-{i}")).await.id);
+    }
+    for &id in &ids[..24] {
+        app.store.set_label(id, "yes").await.unwrap();
+    }
+    let mut config: toml::Table = toml::from_str(&app.config).unwrap();
+    config.remove("escalation");
+    let service = service::Service::new(config.try_into().unwrap(), app.store.clone());
+    service.label(ids[24], "yes".into()).await.unwrap();
+    let question: domain::question::Question =
+        serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
+            .unwrap();
+    let calibration_id = verdict::calibration_id(
+        &verdict::question_hash(&question),
+        BackendKind::Systemone,
+        &app.d3.uri(),
+    );
+    assert!(
+        app.store
+            .calibration(&calibration_id, Some("greeting"))
+            .await
+            .unwrap()
+            .is_some()
+    );
 }

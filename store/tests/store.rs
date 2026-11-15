@@ -411,12 +411,35 @@ async fn labelled_count_and_rows_are_scoped_by_spec() {
 }
 
 #[tokio::test]
-async fn metadata_returns_spec_question_and_endpoint() {
+async fn metadata_returns_spec_question_and_state() {
     let (_directory, _, store) = opened().await;
     let id = insert(&store, decision("one")).await;
     assert_eq!(
         store.metadata(id).await.unwrap(),
-        Some((Some("greeting".into()), "question".into(), "d3".into()))
+        Some((Some("greeting".into()), "question".into(), "one".into()))
+    );
+}
+
+#[tokio::test]
+async fn endpoints_lists_who_answered_a_state_once() {
+    let (_directory, _, store) = opened().await;
+    for endpoint in ["d3", "big", "d3"] {
+        insert(
+            &store,
+            NewDecision {
+                endpoint: endpoint.into(),
+                ..decision("a")
+            },
+        )
+        .await;
+    }
+    insert(&store, decision("b")).await;
+    assert_eq!(
+        store
+            .endpoints(Some("greeting"), "question", "a")
+            .await
+            .unwrap(),
+        ["d3", "big"]
     );
 }
 

@@ -165,17 +165,34 @@ impl Store {
             .transpose()
     }
 
-    /// Returns `(spec, question_hash, endpoint)`.
+    /// Returns `(spec, question_hash, state_hash)`.
     pub async fn metadata(
         &self,
         id: i64,
     ) -> Result<Option<(Option<String>, String, String)>, StoreError> {
         Ok(
-            sqlx::query_as("SELECT spec,question_hash,endpoint FROM decisions WHERE id=?1")
+            sqlx::query_as("SELECT spec,question_hash,state_hash FROM decisions WHERE id=?1")
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?,
         )
+    }
+
+    /// The endpoints that answered this question about this state, first answer first.
+    pub async fn endpoints(
+        &self,
+        spec: Option<&str>,
+        question_hash: &str,
+        state_hash: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        Ok(sqlx::query_scalar(
+            "SELECT endpoint FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND state_hash=?3 GROUP BY endpoint ORDER BY MIN(id)",
+        )
+        .bind(spec)
+        .bind(question_hash)
+        .bind(state_hash)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     /// Returns false when no row has this id.

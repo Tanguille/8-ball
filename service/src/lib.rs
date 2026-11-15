@@ -439,7 +439,7 @@ impl Service {
     }
 
     pub async fn label(&self, id: i64, value: String) -> Result<LabelResponse, ServiceError> {
-        let (spec, question_hash, endpoint) = self
+        let (spec, question_hash, state_hash) = self
             .store
             .metadata(id)
             .await?
@@ -472,17 +472,12 @@ impl Service {
         if !self.store.set_label(id, &value).await? {
             return Err(ServiceError::BadRequest(format!("no decision {id}")));
         }
-        // A label serves every endpoint that answered this state, so refit the escalation pair, not only the row's
-        // endpoint.
-        let mut endpoints = vec![endpoint.as_str()];
-        if let Some(escalation) = &self.config.escalation {
-            for name in [self.spec_endpoint(spec.as_deref()), &escalation.endpoint] {
-                if !endpoints.contains(&name) {
-                    endpoints.push(name);
-                }
-            }
-        }
-        for name in endpoints {
+        // A label serves every endpoint that answered this state, an escalated one's primary included.
+        let endpoints = self
+            .store
+            .endpoints(spec.as_deref(), &question_hash, &state_hash)
+            .await?;
+        for name in &endpoints {
             if let Err(e) = self
                 .maybe_recalibrate(spec.as_deref(), &question, name)
                 .await
