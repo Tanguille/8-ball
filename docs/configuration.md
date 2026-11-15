@@ -44,7 +44,7 @@ ad_hoc = true                   # also learn ad-hoc questions, by their exact te
 ```toml
 [escalation]                    # optional table
 endpoint = "qwen"               # required: a configured endpoint other than `default`
-per_minute = 30                 # optional (default 30): re-asks per minute, across all requests
+per_minute = 30                 # optional (default 30): model re-asks per minute, across all requests; cached ones are free
 
 [specs.gitops-investigate]
 escalate = false                # optional: keep this spec's `unsure` answers

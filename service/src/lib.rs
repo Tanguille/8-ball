@@ -1452,6 +1452,16 @@ impl Service {
                 return;
             }
         };
+        // A cached answer made no model call, so it gives its grant back.
+        let cached = escalated
+            .iter()
+            .filter(|judgment| judgment.decision.cached)
+            .count();
+        let mut window = self.escalations.lock().expect("escalation budget");
+        window.1 = window
+            .1
+            .saturating_sub(u32::try_from(cached).unwrap_or(u32::MAX));
+        drop(window);
         for (&index, mut judgment) in unsure.iter().zip(escalated) {
             let outcome = if judgment.decision.verdict == "unsure" {
                 "unsure"

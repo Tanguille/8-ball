@@ -443,3 +443,15 @@ async fn escalation_endpoint_refits_at_multiples_of_its_own_labels() {
     }
     assert_eq!(fitted().await, Some(25));
 }
+
+#[tokio::test]
+async fn cached_escalations_do_not_spend_the_budget() {
+    let app = fixture(2, "").await;
+    let items = json!({"spec":"greeting","items":["maybe-yes-1"]});
+    for _ in 0..2 {
+        let response = triage(&app, items.clone()).await;
+        assert!(response.kept[0].decision.escalated);
+    }
+    assert_eq!(requests(&app.big).await.len(), 1);
+    assert!(greeting(&app, "maybe-yes-2").await.escalated);
+}

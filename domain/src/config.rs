@@ -24,7 +24,7 @@ pub struct Config {
 pub struct Escalation {
     /// A configured endpoint other than `default`, usually a chat model with `kind = "logprob"`.
     pub endpoint: String,
-    /// Most re-asks per minute, across all requests. Answers over the budget stay `unsure`.
+    /// Most re-asks per minute that reach the model, across all requests. Answers over the budget stay `unsure`.
     #[serde(default = "default_per_minute")]
     pub per_minute: u32,
 }
