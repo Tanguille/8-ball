@@ -133,3 +133,65 @@ fn zero_timeout_rejected() {
             .contains("timeout_secs must be positive")
     );
 }
+
+const TWO_ENDPOINTS: &str =
+    "default = 'd3'\n[endpoints.d3]\nurl = 'http://h:1'\n[endpoints.big]\nurl = 'http://h:2'\n";
+
+fn escalation_error(escalation: &str) -> String {
+    Config::parse(
+        &format!("{TWO_ENDPOINTS}[escalation]\n{escalation}"),
+        "test",
+    )
+    .unwrap_err()
+    .to_string()
+}
+
+#[test]
+fn escalation_parses_with_default_budget() {
+    let config = Config::parse(
+        &format!("{TWO_ENDPOINTS}[escalation]\nendpoint = 'big'\n"),
+        "test",
+    )
+    .unwrap();
+    let escalation = config.escalation.unwrap();
+    assert_eq!(escalation.endpoint, "big");
+    assert_eq!(escalation.per_minute, 30);
+}
+
+#[test]
+fn escalation_unknown_endpoint_rejected() {
+    assert!(escalation_error("endpoint = 'nope'\n").contains("escalation: unknown endpoint nope"));
+}
+
+#[test]
+fn escalation_to_default_rejected() {
+    assert!(escalation_error("endpoint = 'd3'\n").contains("is the default endpoint"));
+}
+
+#[test]
+fn escalation_zero_budget_rejected() {
+    assert!(
+        escalation_error("endpoint = 'big'\nper_minute = 0\n")
+            .contains("per_minute must be positive")
+    );
+}
+
+#[test]
+fn escalation_unknown_key_rejected() {
+    assert!(escalation_error("endpoint = 'big'\nmargin = 0.2\n").contains("margin"));
+}
+
+#[test]
+fn spec_escalate_parses() {
+    let spec = |extra: &str| {
+        Config::parse(
+            &format!("{MINIMAL}\n[specs.s]\ntype = 'noul'\ninstructions = 'x'\n{extra}"),
+            "test",
+        )
+        .unwrap()
+        .specs["s"]
+            .escalate
+    };
+    assert_eq!(spec("escalate = false\n"), Some(false));
+    assert_eq!(spec(""), None);
+}
