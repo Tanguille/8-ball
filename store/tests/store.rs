@@ -386,7 +386,7 @@ async fn remembered_finds_the_newest_label_under_any_model() {
 }
 
 #[tokio::test]
-async fn labelled_count_and_rows_are_scoped_by_spec() {
+async fn labelled_states_and_rows_are_scoped_by_spec() {
     let (_directory, _, store) = opened().await;
     let first = insert(&store, decision("one")).await;
     let second = insert(&store, decision("two")).await;
@@ -394,17 +394,29 @@ async fn labelled_count_and_rows_are_scoped_by_spec() {
     let mut anonymous = decision("one");
     anonymous.spec = None;
     let ad_hoc = insert(&store, anonymous).await;
-    for id in [first, second, ad_hoc] {
+    let other_model = insert(
+        &store,
+        NewDecision {
+            calibration_id: "other-model".into(),
+            ..decision("four")
+        },
+    )
+    .await;
+    for id in [first, second, ad_hoc, other_model] {
         store.set_label(id, "yes").await.unwrap();
     }
-    assert_eq!(
-        store
-            .labelled_count(Some("greeting"), "question")
-            .await
-            .unwrap(),
-        2
-    );
-    assert_eq!(store.labelled_count(None, "question").await.unwrap(), 1);
+    let count = |spec, calibration_id| {
+        let store = store.clone();
+        async move {
+            store
+                .labelled_states(spec, "question", calibration_id)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(count(Some("greeting"), "model-question").await, 2);
+    assert_eq!(count(None, "model-question").await, 1);
+    assert_eq!(count(Some("greeting"), "other-model").await, 1);
     let rows = store.labelled(None, "question").await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, ad_hoc);

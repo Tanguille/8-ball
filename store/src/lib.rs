@@ -250,16 +250,21 @@ impl Store {
             .transpose()
     }
 
-    pub async fn labelled_count(
+    /// Labelled states of a question that have an answer cached under `calibration_id`: the examples a refit of
+    /// that calibration can use.
+    pub async fn labelled_states(
         &self,
         spec: Option<&str>,
         question_hash: &str,
+        calibration_id: &str,
     ) -> Result<usize, StoreError> {
         let count: u64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL",
+            "SELECT COUNT(DISTINCT state_hash) FROM decisions AS labelled WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL \
+             AND EXISTS (SELECT 1 FROM decisions WHERE calibration_id=?3 AND state_hash=labelled.state_hash AND spec IS ?1)",
         )
         .bind(spec)
         .bind(question_hash)
+        .bind(calibration_id)
         .fetch_one(&self.pool)
         .await?;
 

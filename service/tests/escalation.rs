@@ -405,3 +405,41 @@ async fn labelling_refits_the_endpoints_that_answered_after_escalation_is_turned
             .is_some()
     );
 }
+
+#[tokio::test]
+async fn escalation_endpoint_refits_at_multiples_of_its_own_labels() {
+    let app = fixture(100, "recalibrate_after = 25").await;
+    let question: domain::question::Question =
+        serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
+            .unwrap();
+    let calibration_id = verdict::calibration_id(
+        &verdict::question_hash(&question),
+        BackendKind::Logprob,
+        "big",
+    );
+    let fitted = || async {
+        app.store
+            .calibration(&calibration_id, Some("greeting"))
+            .await
+            .unwrap()
+            .map(|(_, report)| report.examples)
+    };
+    // Five labels the escalation endpoint never saw put the question's label count 5 ahead of its own. Two `no`
+    // labels on states both models find unsure keep d3 from fitting its yes side at 0.5.
+    for i in 1..=5 {
+        let id = greeting(&app, &format!("yes-{i}")).await.id;
+        app.store.set_label(id, "yes").await.unwrap();
+    }
+    let labels = (1..=2)
+        .map(|i| (format!("maybe-{i}"), "no"))
+        .chain((1..=23).map(|i| (format!("maybe-yes-{i}"), "yes")));
+    for (seen, (state, label)) in (1..).zip(labels) {
+        let decision = greeting(&app, &state).await;
+        assert!(decision.escalated, "{state}");
+        app.service.label(decision.id, label.into()).await.unwrap();
+        if seen == 22 {
+            assert_eq!(fitted().await, None, "22 of its own labels refit nothing");
+        }
+    }
+    assert_eq!(fitted().await, Some(25));
+}

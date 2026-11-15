@@ -519,9 +519,13 @@ impl Service {
         if every == 0 {
             return Ok(());
         }
+        let question_hash = verdict::question_hash(question);
+        let (calibration_id, backend) = self.calibration_id(endpoint, &question_hash).await?;
+        // Only the states this endpoint answered, which its fit counts as examples, so an escalation endpoint that
+        // sees a few states refits on its own cadence.
         let count = self
             .store
-            .labelled_count(spec, &verdict::question_hash(question))
+            .labelled_states(spec, &question_hash, &calibration_id)
             .await?;
         if count < every {
             return Ok(());
@@ -529,9 +533,6 @@ impl Service {
         let Ok(_refit) = self.refit.try_lock() else {
             return Ok(());
         };
-        let (calibration_id, backend) = self
-            .calibration_id(endpoint, &verdict::question_hash(question))
-            .await?;
         let stored = self.store.calibration(&calibration_id, spec).await?;
         // Refit once the count has crossed a multiple since the last fit, so a refit that a failed probe or a busy
         // lock skipped runs at the next label instead of the next multiple.
