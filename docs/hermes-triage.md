@@ -32,6 +32,8 @@ Responses keep `kept` and `unsure`, and report the other items in these fields:
 - `prefiltered`: Original indices that embedding similarity excluded, without a model judgment.
 - `dropped`: The sum of the two groups above.
 
+A batch of up to 64 items needs no client-side splitting. Items that fail come back in `unsure` with an `error` field.
+
 Do not interpret a prefiltered item as a confident rejection. Items with identical serialized state collapse to their first index. 8-ball preserves the JSON object key order in contextual and context-free requests, so reordered objects stay distinct model inputs. This pilot never sets `top_k`, because you must judge every candidate to measure missed candidates.
 
 ## Observe without filtering

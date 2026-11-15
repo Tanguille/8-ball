@@ -16,6 +16,8 @@ Reports are in-sample, so evaluate a separate holdout (labeled cases that calibr
 
 8-ball also refits a question by itself at every multiple of `recalibrate_after` labels. This refit uses only cached answers, so it makes no model calls. A side without enough evidence keeps its threshold. Manual `8ball calibrate` still works for specs. Keep `recalibrate_after = 0` during a holdout comparison, so that the calibration stays fixed.
 
+Each endpoint has its own bands and cache. The escalation endpoint is fitted only on the cases it receives, which are the default endpoint's `unsure` answers. A label serves both endpoints, because both judged the same state, so a label refits both. Review lists each case once.
+
 ## Learning upgrade notes
 
 - With the defaults, about `explore` (5%) of skipped answers come back as `unsure`. This is extra work by design. `report = false` also stops exploration.
