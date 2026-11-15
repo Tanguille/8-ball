@@ -1,7 +1,7 @@
 # 8-ball escalation and server-side triage batching
 
 **Created:** 2026-11-12
-**Status:** In progress: owner decisions recorded 2026-11-12; Chunk 0 with the owner, Chunk 1 next
+**Status:** In progress: owner decisions recorded 2026-11-12; Chunk 0 with the owner, Chunk 1 complete, Chunk 2 next
 **Complexity:** Medium
 **Estimated Chunks:** 7 (Chunk 0 is a gate without code, Chunk 7 is in the cluster repo)
 **Repo:** `/home/tanguille/Documents/PriveProjecten/8-ball`
@@ -230,7 +230,7 @@ struct Judgment {
 - [ ] Chunk 0: the production escalation endpoint returns usable `top_logprobs` (owner-run curl)
 
 #### Wave 1 (sequential): Part B, triage batching
-- [ ] Chunk 1: per-call timeout after the slot, `timeout_secs`
+- [x] Chunk 1: per-call timeout after the slot, `timeout_secs`
 - [ ] Chunk 2: triage fails open per item, request deadline (depends on 1)
 
 #### Wave 2 (sequential): Part A, escalation
@@ -286,7 +286,7 @@ Prove that `qwen-3.8-fast` through agentgateway (engine: radiance) returns `choi
 ---
 
 ### Chunk 1: Per-call timeout after the slot
-**Wave:** 1 · **Complexity:** Low
+**Wave:** 1 · **Complexity:** Low · **Status:** Complete
 
 #### Prerequisites
 ```bash
@@ -394,8 +394,8 @@ Do not copy `.claude/worktrees` into itself: if `cp -r .claude` would recurse, c
 6. Commit: `fix(backend): start the decision timeout when the call gets a slot`.
 
 #### Verification
-- [ ] The three new tests and the full suite pass.
-- [ ] `grep -n 'tokio::time::timeout' backend/src/lib.rs` prints nothing.
+- [x] The three new tests and the full suite pass.
+- [x] `grep -n 'tokio::time::timeout' backend/src/lib.rs` prints nothing.
 
 ---
 
