@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 
 use backend::{Endpoint, embed::Embedder};
 use domain::{
-    config::{BackendKind, Config},
+    config::{BackendKind, Config, Escalation},
     question::{Kind, Question},
     verdict::{self, Bands},
 };
@@ -303,6 +303,20 @@ async fn within<T, E>(
         .unwrap_or(Err(passed))
 }
 
+/// One request's judging switches, shared by the primary call and its escalation.
+struct Pass<'a> {
+    spec: Option<&'a str>,
+    endpoint: &'a str,
+    remember: bool,
+    /// Where `unsure` answers go; `None` keeps them.
+    escalation: Option<&'a Escalation>,
+    deadline: tokio::time::Instant,
+    /// `ask` or `triage`, for the deadline messages.
+    request: &'static str,
+    /// The error message once `deadline` passes.
+    passed: String,
+}
+
 struct Judgment {
     decision: Decision,
     /// Rows to store, oldest first. An escalated judgment holds the primary's row, then its own; the last row is
@@ -395,10 +409,6 @@ impl Service {
         self.triage_deadline = triage;
         self.ask_deadline = ask;
         self
-    }
-
-    fn deadline_passed(&self) -> String {
-        format!("triage deadline of {:?} passed", self.triage_deadline)
     }
 
     pub(crate) const fn learning(&self) -> &domain::config::Learning {
@@ -951,21 +961,21 @@ impl Service {
             .triage_items(&endpoint, request.items, request.context.as_deref())
             .await?;
         let unique_count = items.len();
-        let deadline = tokio::time::Instant::now() + self.triage_deadline;
+        let spec = request.spec.as_deref();
+        let pass = self.pass(
+            spec,
+            &endpoint,
+            request.learn,
+            request.escalate,
+            "triage",
+            self.triage_deadline,
+        );
         let (prefiltered, warning) = if let Some(top_k) = request.top_k {
-            self.prefilter(&question, &mut items, top_k, deadline)
-                .await?
+            self.prefilter(&question, &mut items, top_k, &pass).await?
         } else {
             (Vec::new(), None)
         };
-        let (endpoint, spec) = (&endpoint, request.spec.as_deref());
-        let remember = request.learn && self.config.learning.remember;
-        let escalate = self.escalates(spec, request.escalate);
-        let (mut decisions, failures) = self
-            .judge_items(
-                items, spec, &question, endpoint, remember, escalate, deadline,
-            )
-            .await?;
+        let (mut decisions, failures) = self.judge_items(items, &question, &pass).await?;
         let warning = [warning, failures]
             .into_iter()
             .flatten()
@@ -1000,7 +1010,7 @@ impl Service {
         let mut unsure = Vec::new();
         let mut rejected = Vec::new();
         let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
-        let decisions = self.persist(judgments, endpoint, spec).await?;
+        let decisions = self.persist(judgments, &endpoint, spec).await?;
         for (index, decision) in indices.into_iter().zip(decisions) {
             let item = TriageItem { index, decision };
             if item.decision.verdict == "unsure" {
@@ -1022,72 +1032,41 @@ impl Service {
         })
     }
 
-    /// Judges each triage item before `deadline`. A failed item fails open to `unsure`, with a warning that counts
-    /// the failures; if every item failed, the request fails with the first error. With `escalate`, an item's
-    /// `unsure` answer is re-asked under the same deadline.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the per-request switches of triage, passed through once"
-    )]
+    /// Judges each triage item before the deadline. A failed item fails open to `unsure`, with a warning that counts
+    /// the failures; if every item failed, the request fails with the first error.
     async fn judge_items(
         &self,
         items: Vec<(usize, String)>,
-        spec: Option<&str>,
         question: &Question,
-        endpoint: &str,
-        remember: bool,
-        escalate: bool,
-        deadline: tokio::time::Instant,
+        pass: &Pass<'_>,
     ) -> Result<(Vec<(usize, Judgment)>, Option<String>), ServiceError> {
         let questions = slice::from_ref(question);
         let results = future::join_all(items.into_iter().map(|(index, state)| async move {
-            let judged = within(
-                deadline,
-                self.judge(&state, spec, questions, endpoint, remember),
-                ServiceError::Backend {
-                    endpoint: endpoint.into(),
-                    message: self.deadline_passed(),
-                },
-            )
-            .await;
-            let (mut judgments, state) = match judged {
-                Ok(judged) => judged,
-                Err(error) => return (index, Err(error)),
-            };
-            // Only the escalation is bounded here, so a deadline during it keeps the finished primary answer.
-            if escalate {
-                let escalated =
-                    self.escalate(&state, spec, questions, endpoint, &mut judgments, remember);
-                if tokio::time::timeout_at(deadline, escalated).await.is_err() {
-                    tracing::warn!(
-                        "escalation missed the triage deadline; keeping the unsure answer"
-                    );
-                }
-            }
+            let judged = self.judge_escalating(&state, questions, pass).await;
 
-            (index, Ok(judgments.remove(0)))
+            (index, judged.map(|mut judgments| judgments.remove(0)))
         }))
         .await;
         let total = results.len();
-        let mut failed = 0;
-        let mut first_error = None;
-        let mut decisions = Vec::with_capacity(total);
-        for (index, judged) in results {
-            let judgment = judged.unwrap_or_else(|error| {
-                failed += 1;
-                let judgment = Judgment::failed(question, &error);
-                first_error.get_or_insert(error);
-                judgment
-            });
-            decisions.push((index, judgment));
+        let failed = results.iter().filter(|(_, judged)| judged.is_err()).count();
+        if failed > 0 && failed == total {
+            let first = results.into_iter().find_map(|(_, judged)| judged.err());
+
+            return Err(first.expect("a failed item"));
         }
-        let warning = match first_error {
-            Some(error) if failed == total => return Err(error),
-            Some(error) => Some(format!(
-                "{failed} of {total} items failed and are unsure: {error}"
-            )),
-            None => None,
-        };
+        let warning = results
+            .iter()
+            .find_map(|(_, judged)| judged.as_ref().err())
+            .map(|error| format!("{failed} of {total} items failed and are unsure: {error}"));
+        let decisions = results
+            .into_iter()
+            .map(|(index, judged)| {
+                (
+                    index,
+                    judged.unwrap_or_else(|error| Judgment::failed(question, &error)),
+                )
+            })
+            .collect();
 
         Ok((decisions, warning))
     }
@@ -1135,7 +1114,7 @@ impl Service {
         question: &Question,
         items: &mut Vec<(usize, String)>,
         top_k: usize,
-        deadline: tokio::time::Instant,
+        pass: &Pass<'_>,
     ) -> Result<(Vec<usize>, Option<String>), ServiceError> {
         let embedder = self
             .embedder
@@ -1147,8 +1126,8 @@ impl Service {
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
             .collect::<Vec<_>>();
-        let passed = backend::BackendError(self.deadline_passed());
-        let vectors = match within(deadline, embedder.embed(&texts), passed).await {
+        let passed = backend::BackendError(pass.passed.clone());
+        let vectors = match within(pass.deadline, embedder.embed(&texts), passed).await {
             Ok(vectors) => vectors,
             Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
         };
@@ -1187,30 +1166,17 @@ impl Service {
         let spec = request.spec.as_deref();
         let (questions, endpoint) =
             self.resolve_questions(spec, &request.questions, request.endpoint.as_deref())?;
-        let remember = request.learn && self.config.learning.remember;
-        let deadline = tokio::time::Instant::now() + self.ask_deadline;
-        let (mut judgments, state) = within(
-            deadline,
-            self.judge(&request.state, spec, &questions, &endpoint, remember),
-            ServiceError::Backend {
-                endpoint: endpoint.clone(),
-                message: format!("ask deadline of {:?} passed", self.ask_deadline),
-            },
-        )
-        .await?;
-        if self.escalates(spec, request.escalate) {
-            let escalated = self.escalate(
-                &state,
-                spec,
-                &questions,
-                &endpoint,
-                &mut judgments,
-                remember,
-            );
-            if tokio::time::timeout_at(deadline, escalated).await.is_err() {
-                tracing::warn!("escalation missed the ask deadline; keeping the unsure answer");
-            }
-        }
+        let pass = self.pass(
+            spec,
+            &endpoint,
+            request.learn,
+            request.escalate,
+            "ask",
+            self.ask_deadline,
+        );
+        let mut judgments = self
+            .judge_escalating(&request.state, &questions, &pass)
+            .await?;
         if request.learn {
             for (judgment, question) in judgments.iter_mut().zip(&questions) {
                 // A caller works on a noul `yes` and skips a `no`; choices and scores are worked only when unsure.
@@ -1375,12 +1341,66 @@ impl Service {
         Ok((judgments, state))
     }
 
-    /// Whether `unsure` answers of this request go to the escalation endpoint.
-    fn escalates(&self, spec: Option<&str>, requested: Option<bool>) -> bool {
-        self.config.escalation.is_some()
-            && requested
-                .or_else(|| spec.and_then(|name| self.config.specs.get(name)?.escalate))
-                .unwrap_or(true)
+    /// The switches of one request. Its `unsure` answers go to the escalation endpoint unless the request, else the
+    /// spec, turns that off, or the request already runs on that endpoint.
+    fn pass<'a>(
+        &'a self,
+        spec: Option<&'a str>,
+        endpoint: &'a str,
+        learn: bool,
+        escalate: Option<bool>,
+        request: &'static str,
+        limit: Duration,
+    ) -> Pass<'a> {
+        let escalation = self.config.escalation.as_ref().filter(|escalation| {
+            escalation.endpoint != endpoint
+                && escalate
+                    .or_else(|| spec.and_then(|name| self.config.specs.get(name)?.escalate))
+                    .unwrap_or(true)
+        });
+
+        Pass {
+            spec,
+            endpoint,
+            remember: learn && self.config.learning.remember,
+            escalation,
+            deadline: tokio::time::Instant::now() + limit,
+            request,
+            passed: format!("{request} deadline of {limit:?} passed"),
+        }
+    }
+
+    /// Judges before the deadline, then re-asks the `unsure` answers under the same deadline. A primary answer that
+    /// misses it fails; an escalation that misses it keeps the primary `unsure`.
+    async fn judge_escalating(
+        &self,
+        state: &str,
+        questions: &[Question],
+        pass: &Pass<'_>,
+    ) -> Result<Vec<Judgment>, ServiceError> {
+        let (mut judgments, state) = within(
+            pass.deadline,
+            self.judge(state, pass.spec, questions, pass.endpoint, pass.remember),
+            ServiceError::Backend {
+                endpoint: pass.endpoint.into(),
+                message: pass.passed.clone(),
+            },
+        )
+        .await?;
+        if let Some(escalation) = pass.escalation {
+            let escalated = self.escalate(&state, questions, escalation, pass, &mut judgments);
+            if tokio::time::timeout_at(pass.deadline, escalated)
+                .await
+                .is_err()
+            {
+                tracing::warn!(
+                    "escalation missed the {} deadline; keeping the unsure answer",
+                    pass.request
+                );
+            }
+        }
+
+        Ok(judgments)
     }
 
     /// Re-asks `unsure` answers on the escalation endpoint, about `state` as the primary endpoint saw it, so both
@@ -1389,19 +1409,12 @@ impl Service {
     async fn escalate(
         &self,
         state: &str,
-        spec: Option<&str>,
         questions: &[Question],
-        primary: &str,
+        escalation: &Escalation,
+        pass: &Pass<'_>,
         judgments: &mut [Judgment],
-        remember: bool,
     ) {
-        let Some(escalation) = &self.config.escalation else {
-            return;
-        };
         let name = escalation.endpoint.as_str();
-        if name == primary {
-            return;
-        }
         let unsure: Vec<usize> = judgments
             .iter()
             .enumerate()
@@ -1432,7 +1445,10 @@ impl Service {
             .iter()
             .map(|&index| questions[index].clone())
             .collect();
-        let escalated = match self.judge(state, spec, &asked, name, remember).await {
+        let escalated = match self
+            .judge(state, pass.spec, &asked, name, pass.remember)
+            .await
+        {
             Ok((escalated, _)) => escalated,
             Err(error) => {
                 tracing::warn!(%error, "escalation failed; keeping the unsure answer");
