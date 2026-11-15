@@ -52,6 +52,9 @@ pub struct Decision {
     /// The verdict is a label reported earlier for the same question and state.
     #[serde(default)]
     pub remembered: bool,
+    /// The verdict came from the escalation endpoint, after the default model was unsure.
+    #[serde(default)]
+    pub escalated: bool,
     /// Why this triage item has no answer. Its verdict is `unsure`: do the work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -77,6 +80,10 @@ pub struct AskRequest {
     /// False turns off remembered labels, exploration and reports for this request.
     #[serde(default = "learn_default")]
     pub learn: bool,
+    /// True re-asks `unsure` answers on the server's escalation endpoint, false keeps them. Default: the spec's
+    /// `escalate`, else on when the server has [escalation].
+    #[serde(default)]
+    pub escalate: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -102,6 +109,10 @@ pub struct TriageRequest {
     /// False turns off remembered labels, exploration and reports for this request.
     #[serde(default = "learn_default")]
     pub learn: bool,
+    /// True re-asks `unsure` answers on the server's escalation endpoint, false keeps them. Default: the spec's
+    /// `escalate`, else on when the server has [escalation].
+    #[serde(default)]
+    pub escalate: Option<bool>,
 }
 
 const fn learn_default() -> bool {
@@ -253,6 +264,10 @@ pub struct DoctorEndpoint {
 // value.
 const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
 
+// ponytail: one deadline for a single ask, escalation included, below the 25 s that the CLI and the plugin skill wait.
+// The primary answer fails the request when it misses it; an escalation that misses it keeps the primary `unsure`.
+const ASK_DEADLINE: Duration = Duration::from_secs(20);
+
 fn deadline_passed() -> String {
     format!("triage deadline of {TRIAGE_DEADLINE:?} passed")
 }
@@ -285,6 +300,7 @@ impl Judgment {
                 report: false,
                 explored: false,
                 remembered: false,
+                escalated: false,
                 error: Some(error.to_string()),
             },
             fresh: Vec::new(),
@@ -316,7 +332,6 @@ pub struct Service {
     refit: Mutex<()>,
     /// The escalation budget window: its start and the escalations granted in it. A std mutex, held for a few
     /// instructions and never across an await.
-    #[expect(dead_code, reason = "escalation spends it in the next commit")]
     escalations: std::sync::Mutex<(Instant, u32)>,
 }
 
@@ -896,8 +911,11 @@ impl Service {
         };
         let (endpoint, spec) = (&endpoint, request.spec.as_deref());
         let remember = request.learn && self.config.learning.remember;
+        let escalate = self.escalates(spec, request.escalate);
         let (mut decisions, failures) = self
-            .judge_items(items, spec, &question, endpoint, remember, deadline)
+            .judge_items(
+                items, spec, &question, endpoint, remember, escalate, deadline,
+            )
             .await?;
         let warning = [warning, failures]
             .into_iter()
@@ -956,7 +974,12 @@ impl Service {
     }
 
     /// Judges each triage item before `deadline`. A failed item fails open to `unsure`, with a warning that counts
-    /// the failures; if every item failed, the request fails with the first error.
+    /// the failures; if every item failed, the request fails with the first error. With `escalate`, an item's
+    /// `unsure` answer is re-asked under the same deadline.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the per-request switches of triage, passed through once"
+    )]
     async fn judge_items(
         &self,
         items: Vec<(usize, String)>,
@@ -964,14 +987,22 @@ impl Service {
         question: &Question,
         endpoint: &str,
         remember: bool,
+        escalate: bool,
         deadline: tokio::time::Instant,
     ) -> Result<(Vec<(usize, Judgment)>, Option<String>), ServiceError> {
         let questions = slice::from_ref(question);
         let results = future::join_all(items.into_iter().map(|(index, state)| async move {
-            let judged = tokio::time::timeout_at(
-                deadline,
-                self.judge(&state, spec, questions, endpoint, remember),
-            )
+            // A deadline that passes during escalation drops the primary answer too; both end as `unsure`.
+            let judged = tokio::time::timeout_at(deadline, async {
+                let mut judgments = self
+                    .judge(&state, spec, questions, endpoint, remember)
+                    .await?;
+                if escalate {
+                    self.escalate(&state, spec, questions, endpoint, &mut judgments, remember)
+                        .await;
+                }
+                Ok::<_, ServiceError>(judgments)
+            })
             .await
             .unwrap_or_else(|_| {
                 Err(ServiceError::Backend {
@@ -1109,9 +1140,31 @@ impl Service {
         let (questions, endpoint) =
             self.resolve_questions(spec, &request.questions, request.endpoint.as_deref())?;
         let remember = request.learn && self.config.learning.remember;
-        let mut judgments = self
-            .judge(&request.state, spec, &questions, &endpoint, remember)
-            .await?;
+        let deadline = tokio::time::Instant::now() + ASK_DEADLINE;
+        let mut judgments = tokio::time::timeout_at(
+            deadline,
+            self.judge(&request.state, spec, &questions, &endpoint, remember),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(ServiceError::Backend {
+                endpoint: endpoint.clone(),
+                message: format!("ask deadline of {ASK_DEADLINE:?} passed"),
+            })
+        })?;
+        if self.escalates(spec, request.escalate) {
+            let escalated = self.escalate(
+                &request.state,
+                spec,
+                &questions,
+                &endpoint,
+                &mut judgments,
+                remember,
+            );
+            if tokio::time::timeout_at(deadline, escalated).await.is_err() {
+                tracing::warn!("escalation missed the ask deadline; keeping the unsure answer");
+            }
+        }
         if request.learn {
             for (judgment, question) in judgments.iter_mut().zip(&questions) {
                 // A caller works on a noul `yes` and skips a `no`; choices and scores are worked only when unsure.
@@ -1263,6 +1316,7 @@ impl Service {
                 report: false,
                 explored: false,
                 remembered,
+                escalated: false,
                 error: None,
             };
             judgments.push(Judgment {
@@ -1274,6 +1328,93 @@ impl Service {
         }
 
         Ok(judgments)
+    }
+
+    /// Whether `unsure` answers of this request go to the escalation endpoint.
+    fn escalates(&self, spec: Option<&str>, requested: Option<bool>) -> bool {
+        self.config.escalation.is_some()
+            && requested
+                .or_else(|| spec.and_then(|name| self.config.specs.get(name)?.escalate))
+                .unwrap_or(true)
+    }
+
+    /// Re-asks `unsure` answers on the escalation endpoint, about the state that the primary endpoint saw, so both
+    /// stored rows share a state hash and one label serves both. Fails open: an error or a spent budget keeps the
+    /// primary answer. It changes `judgments` only after its last await, so a deadline can cancel it safely.
+    async fn escalate(
+        &self,
+        state: &str,
+        spec: Option<&str>,
+        questions: &[Question],
+        primary: &str,
+        judgments: &mut [Judgment],
+        remember: bool,
+    ) {
+        let Some(escalation) = &self.config.escalation else {
+            return;
+        };
+        let name = escalation.endpoint.as_str();
+        if name == primary {
+            return;
+        }
+        let unsure: Vec<usize> = judgments
+            .iter()
+            .enumerate()
+            .filter(|(_, judgment)| {
+                let decision = &judgment.decision;
+                decision.verdict == "unsure" && !decision.remembered && decision.error.is_none()
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if unsure.is_empty() {
+            return;
+        }
+        let granted = grant(
+            &mut self.escalations.lock().expect("escalation budget"),
+            Instant::now(),
+            escalation.per_minute,
+            unsure.len(),
+        );
+        for _ in granted..unsure.len() {
+            self.metrics.record_escalation(name, "budget");
+        }
+        let unsure = &unsure[..granted];
+        if unsure.is_empty() {
+            return;
+        }
+        let endpoint = &self.endpoints[primary];
+        // `judge` just read this info, so it comes from the cache.
+        let Ok(info) = endpoint.info().await else {
+            return;
+        };
+        let state = endpoint.fitted(&info, state);
+        let asked: Vec<Question> = unsure
+            .iter()
+            .map(|&index| questions[index].clone())
+            .collect();
+        let escalated = match self.judge(&state, spec, &asked, name, remember).await {
+            Ok(escalated) => escalated,
+            Err(error) => {
+                tracing::warn!(%error, "escalation failed; keeping the unsure answer");
+                for _ in unsure {
+                    self.metrics.record_escalation(name, "error");
+                }
+                return;
+            }
+        };
+        for (&index, mut judgment) in unsure.iter().zip(escalated) {
+            let outcome = if judgment.decision.verdict == "unsure" {
+                "unsure"
+            } else {
+                "decided"
+            };
+            self.metrics.record_escalation(name, outcome);
+            judgment.decision.escalated = true;
+            let mut fresh = std::mem::take(&mut judgments[index].fresh);
+            fresh.append(&mut judgment.fresh);
+            judgment.fresh = fresh;
+            judgments[index] = judgment;
+        }
     }
 
     /// Reads what the store knows about one question and state, before the model call:
@@ -1372,8 +1513,14 @@ impl Service {
                     judgment.decision.id = id;
                 }
                 if judgment.decision.error.is_none() {
+                    let decided_by = match &self.config.escalation {
+                        Some(escalation) if judgment.decision.escalated => {
+                            escalation.endpoint.as_str()
+                        }
+                        _ => endpoint,
+                    };
                     self.metrics
-                        .record_decision(endpoint, spec, &judgment.decision);
+                        .record_decision(decided_by, spec, &judgment.decision);
                 }
 
                 judgment.decision
@@ -1393,10 +1540,6 @@ fn list_limit(limit: Option<usize>) -> Result<u32, ServiceError> {
 /// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
 // ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
 // that ever matters.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "escalation calls it in the next commit")
-)]
 fn grant(window: &mut (Instant, u32), now: Instant, per_minute: u32, wanted: usize) -> usize {
     if now.duration_since(window.0) >= Duration::from_secs(60) {
         *window = (now, 0);

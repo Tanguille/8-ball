@@ -16,6 +16,13 @@ struct EndpointLabels {
     endpoint: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct EscalationLabels {
+    endpoint: String,
+    /// decided, unsure, error or budget
+    outcome: String,
+}
+
 type Latency = Family<EndpointLabels, Histogram, fn() -> Histogram>;
 
 pub struct Metrics {
@@ -24,6 +31,7 @@ pub struct Metrics {
     backend_errors: Family<EndpointLabels, Counter>,
     backend_seconds: Latency,
     trimmed_states: Family<EndpointLabels, Counter>,
+    escalations: Family<EscalationLabels, Counter>,
 }
 impl Default for Metrics {
     fn default() -> Self {
@@ -37,6 +45,7 @@ impl Default for Metrics {
             ))
         });
         let trimmed_states = Family::<EndpointLabels, Counter>::default();
+        let escalations = Family::<EscalationLabels, Counter>::default();
         registry.register("eightball_decisions", "Decision results", decisions.clone());
         registry.register(
             "eightball_backend_errors",
@@ -53,6 +62,11 @@ impl Default for Metrics {
             "States whose middle was cut to fit max_state_chars",
             trimmed_states.clone(),
         );
+        registry.register(
+            "eightball_escalations",
+            "Unsure answers re-asked on the escalation endpoint, by outcome",
+            escalations.clone(),
+        );
 
         Self {
             registry,
@@ -60,6 +74,7 @@ impl Default for Metrics {
             backend_errors,
             backend_seconds,
             trimmed_states,
+            escalations,
         }
     }
 }
@@ -94,6 +109,15 @@ impl Metrics {
         self.trimmed_states
             .get_or_create(&EndpointLabels {
                 endpoint: endpoint.into(),
+            })
+            .inc();
+    }
+
+    pub(crate) fn record_escalation(&self, endpoint: &str, outcome: &str) {
+        self.escalations
+            .get_or_create(&EscalationLabels {
+                endpoint: endpoint.into(),
+                outcome: outcome.into(),
             })
             .inc();
     }
