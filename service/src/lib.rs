@@ -49,6 +49,9 @@ pub struct Decision {
     /// The verdict is a label reported earlier for the same question and state.
     #[serde(default)]
     pub remembered: bool,
+    /// Why this triage item has no answer. Its verdict is `unsure`: do the work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -244,7 +247,9 @@ pub struct DoctorEndpoint {
 
 struct Judgment {
     decision: Decision,
-    fresh: Option<NewDecision>,
+    /// Rows to store, oldest first. An escalated judgment holds the primary's row, then its own; the last row is
+    /// the returned decision unless that decision is `cached`.
+    fresh: Vec<NewDecision>,
     /// `verdict::explore_draw` for this question and state.
     explore_draw: f64,
     /// A spec, or an ad-hoc question whose text `label` can read.
@@ -1122,17 +1127,21 @@ impl Service {
             let remembered = label.is_some();
             let outcome =
                 label.unwrap_or_else(|| verdict::verdict(&question.kind, &probabilities, bands));
-            let fresh = (!cached).then(|| NewDecision {
-                spec: spec.map(Into::into),
-                question: stored_question(question).to_string(),
-                question_hash,
-                calibration_id,
-                state_hash: state_hash.clone(),
-                state: state.clone(),
-                answer: probabilities.clone(),
-                verdict: outcome.clone(),
-                endpoint: name.into(),
-            });
+            let fresh = if cached {
+                Vec::new()
+            } else {
+                vec![NewDecision {
+                    spec: spec.map(Into::into),
+                    question: stored_question(question).to_string(),
+                    question_hash,
+                    calibration_id,
+                    state_hash: state_hash.clone(),
+                    state: state.clone(),
+                    answer: probabilities.clone(),
+                    verdict: outcome.clone(),
+                    endpoint: name.into(),
+                }]
+            };
             let decision = Decision {
                 id,
                 question: question.id.clone(),
@@ -1152,6 +1161,7 @@ impl Service {
                 report: false,
                 explored: false,
                 remembered,
+                error: None,
             };
             judgments.push(Judgment {
                 decision,
@@ -1234,25 +1244,35 @@ impl Service {
         endpoint: &str,
         spec: Option<&str>,
     ) -> Result<Vec<Decision>, ServiceError> {
-        let fresh = judgments
+        let counts: Vec<usize> = judgments
+            .iter()
+            .map(|judgment| judgment.fresh.len())
+            .collect();
+        let rows: Vec<NewDecision> = judgments
             .iter_mut()
-            .filter_map(|judgment| judgment.fresh.take())
-            .collect::<Vec<_>>();
-        let ids = if fresh.is_empty() {
+            .flat_map(|judgment| std::mem::take(&mut judgment.fresh))
+            .collect();
+        let ids = if rows.is_empty() {
             Vec::new()
         } else {
-            self.store.insert_many(fresh).await?
+            self.store.insert_many(rows).await?
         };
         let mut ids = ids.into_iter();
 
         Ok(judgments
             .into_iter()
-            .map(|mut judgment| {
-                if !judgment.decision.cached {
-                    judgment.decision.id = ids.next().expect("id for each fresh decision");
+            .zip(counts)
+            .map(|(mut judgment, count)| {
+                // The last row is the returned decision, unless the decision came from the cache.
+                if let Some(id) = ids.by_ref().take(count).last()
+                    && !judgment.decision.cached
+                {
+                    judgment.decision.id = id;
                 }
-                self.metrics
-                    .record_decision(endpoint, spec, &judgment.decision);
+                if judgment.decision.error.is_none() {
+                    self.metrics
+                        .record_decision(endpoint, spec, &judgment.decision);
+                }
 
                 judgment.decision
             })
