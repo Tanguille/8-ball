@@ -1,16 +1,13 @@
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use sqlx::Connection;
 use wiremock::{MockServer, matchers};
 
 use domain::{config::BackendKind, verdict};
 use service::{Decision, TriageResponse};
 
-#[expect(
-    dead_code,
-    reason = "these tests call the service directly, without `serve`"
-)]
+use common::{indices, requests};
+
 mod common;
 
 struct App {
@@ -22,48 +19,11 @@ struct App {
     config: String,
 }
 
-/// `d3` answers noul by state (`yes-*` 0.97, `no-*` 0.03, else 0.5, `slow-*` after 5 s) and choices with `a`. `big` reads the prompt:
+/// `d3` is `common::systemone`. `big` reads the prompt:
 /// `maybe-yes` yes 0.95, `maybe-no` no 0.95, `maybe-fail` a 500, `maybe-slow` yes after 5 s, past both
 /// deadlines, which the fixture shortens to 1 s, else 0.5.
 async fn fixture(per_minute: u32, learning: &str) -> App {
-    let d3 = MockServer::start().await;
-    wiremock::Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(|request: &wiremock::Request| {
-            let body: Value = serde_json::from_slice(&request.body).unwrap();
-            let state = body["state"].as_str().unwrap();
-            let noul = if state.starts_with("yes-") {
-                0.97
-            } else if state.starts_with("no-") {
-                0.03
-            } else {
-                0.5
-            };
-            let answers: serde_json::Map<String, Value> = body["questions"]
-                .as_object()
-                .unwrap()
-                .iter()
-                .map(|(id, question)| {
-                    let answer = if question["type"] == "choice" {
-                        json!({"type":"choice","probabilities":{"a":0.99,"b":0.01}})
-                    } else {
-                        json!({"type":"noul","noul":noul})
-                    };
-
-                    (id.clone(), answer)
-                })
-                .collect();
-
-            let response =
-                wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}));
-            if state.starts_with("slow-") {
-                response.set_delay(Duration::from_secs(5))
-            } else {
-                response
-            }
-        })
-        .mount(&d3)
-        .await;
+    let d3 = common::systemone().await;
     let big = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/chat/completions"))
@@ -104,15 +64,12 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
         d3 = d3.uri(),
         big = big.uri(),
     );
-    let (service, store, directory) = common::service(toml::from_str(&config).unwrap()).await;
-    let service = std::sync::Arc::new(
-        std::sync::Arc::into_inner(service)
-            .unwrap()
-            .with_deadlines(Duration::from_secs(1), Duration::from_secs(1)),
-    );
+    let (store, directory) = common::store().await;
+    let service = service::Service::new(toml::from_str(&config).unwrap(), store.clone())
+        .with_deadlines(Duration::from_secs(1), Duration::from_secs(1));
 
     App {
-        service,
+        service: std::sync::Arc::new(service),
         store,
         d3,
         big,
@@ -139,32 +96,14 @@ async fn triage(app: &App, request: Value) -> TriageResponse {
     app.service.triage(request).await.unwrap()
 }
 
-/// Model calls only: the first request also fetches endpoint info.
-async fn requests(mock: &MockServer) -> Vec<Value> {
-    mock.received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .filter(|request| request.method == "POST")
-        .map(|request| serde_json::from_slice(&request.body).unwrap())
-        .collect()
-}
-
 /// Stored rows as `(id, endpoint, state_hash)`, oldest first.
 async fn rows(app: &App) -> Vec<(i64, String, String)> {
-    let path = app.directory.path().join("db.sqlite");
-    let mut connection = sqlx::SqliteConnection::connect(&format!("sqlite://{}", path.display()))
-        .await
-        .unwrap();
+    let mut connection = common::connection(&app.directory).await;
 
     sqlx::query_as("SELECT id,endpoint,state_hash FROM decisions ORDER BY id")
         .fetch_all(&mut connection)
         .await
         .unwrap()
-}
-
-fn indices(items: &[service::TriageItem]) -> Vec<usize> {
-    items.iter().map(|item| item.index).collect()
 }
 
 #[tokio::test]
