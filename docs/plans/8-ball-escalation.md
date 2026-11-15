@@ -236,7 +236,7 @@ struct Judgment {
 #### Wave 2 (sequential): Part A, escalation
 - [x] Chunk 3: `[escalation]` config and spec `escalate` (depends on 2)
 - [x] Chunk 4: escalation in `ask` and `triage`, budget, metric (depends on 3)
-- [ ] Chunk 5: labels and review stay coherent with two rows per case (depends on 4)
+- [x] Chunk 5: labels and review stay coherent with two rows per case (depends on 4)
 - [ ] Chunk 6: MCP instructions, docs, live tests (depends on 5)
 
 #### Wave 3: Rollout (cluster repo, owner-approved only)
@@ -778,7 +778,7 @@ mod tests {
 ---
 
 ### Chunk 5: Labels and review stay coherent with two rows per case
-**Wave:** 2 · **Complexity:** Medium
+**Wave:** 2 · **Complexity:** Medium · **Status:** Complete (2026-11-15, `067927c`, `ad20188`). The 24 store-only labels in Step 1 are set through `App.store`, which the escalation fixture now keeps.
 
 #### Step 1: `label` refits both endpoints (test first)
 1. In `service/tests/escalation.rs`, with `[learning] recalibrate_after = 25`:
@@ -845,7 +845,7 @@ mod tests {
 4. Commit: `feat(store): review each case once and show which endpoint answered`.
 
 #### Verification
-- [ ] `store/tests/store.rs` and `service/tests/{escalation,review,learning}.rs` pass; an existing database migrates (the store tests open a fresh file through all four migrations).
+- [x] `store/tests/store.rs` and `service/tests/{escalation,review,learning}.rs` pass; an existing database migrates (the store tests open a fresh file through all four migrations).
 
 ---
 
