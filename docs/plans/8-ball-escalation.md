@@ -1,7 +1,7 @@
 # 8-ball escalation and server-side triage batching
 
 **Created:** 2026-11-12
-**Status:** In progress: owner decisions recorded 2026-11-12; Chunk 0 with the owner, Chunk 1 complete, Chunk 2 next
+**Status:** In progress: owner decisions recorded 2026-11-12; Chunk 0 with the owner, Chunks 1 and 2 complete, Chunk 3 next
 **Complexity:** Medium
 **Estimated Chunks:** 7 (Chunk 0 is a gate without code, Chunk 7 is in the cluster repo)
 **Repo:** `/home/tanguille/Documents/PriveProjecten/8-ball`
@@ -231,7 +231,7 @@ struct Judgment {
 
 #### Wave 1 (sequential): Part B, triage batching
 - [x] Chunk 1: per-call timeout after the slot, `timeout_secs`
-- [ ] Chunk 2: triage fails open per item, request deadline (depends on 1)
+- [x] Chunk 2: triage fails open per item, request deadline (depends on 1)
 
 #### Wave 2 (sequential): Part A, escalation
 - [ ] Chunk 3: `[escalation]` config and spec `escalate` (depends on 2)
@@ -400,7 +400,12 @@ Do not copy `.claude/worktrees` into itself: if `cp -r .claude` would recurse, c
 ---
 
 ### Chunk 2: Triage fails open per item, with a request deadline
-**Wave:** 1 · **Complexity:** Medium
+**Wave:** 1 · **Complexity:** Medium · **Status:** Complete (2026-11-15, `4fad9f4`, `f9c4682`)
+
+Done as written, except: per-item judging moved into a `judge_items` helper (clippy `too_many_lines` on `triage`), the
+deadline also bounds the prefilter's embedder call (skipped with `prefilter skipped: triage deadline of 90s passed`),
+and the third test uses an `app_with(embed, endpoint_lines, delay)` helper. No test for the prefilter deadline: it
+needs a 90 s wait with the const deadline, and the embedder's own 10 s batch timeout fires first in a mock.
 
 #### Step 1: `Judgment.fresh` becomes a list (refactor, existing tests prove it)
 1. Change `Judgment.fresh` to `Vec<NewDecision>` (see "Internal"). In `judge`: `fresh: if cached { Vec::new() } else { vec![NewDecision { ... }] }`.
@@ -972,6 +977,6 @@ Only after Chunk 6 is merged and released (the image and chart workflows in `.gi
 ## Follow-ups from the Chunk 1 /simplify review (2026-11-15)
 
 Out of Chunk 1's write set, so recorded here instead of fixed:
-- **Chunk 2:** start `TRIAGE_DEADLINE` before `prefilter`. The embedder (`backend/src/embed.rs`) runs serial 10 s batches outside the deadline, up to ~90 s for 64 items.
+- [x] **Chunk 2:** start `TRIAGE_DEADLINE` before `prefilter`. The embedder (`backend/src/embed.rs`) runs serial 10 s batches outside the deadline, up to ~90 s for 64 items.
 - **Chunk 4:** single `ask` has no request-level deadline. `timeout_secs` is now per attempt, so a call, a retry and an escalation can outlast the CLI's 25 s default (`cli/src/main.rs`) and the plugin skill's `timeout=25`. Add an `ASK_DEADLINE` or raise those client defaults.
 - **Later:** `Endpoint::info()` is no longer bounded by the old outer timeout. A never-detected backend with a hung `/props` costs 5-10 s per call, serialized on the info lock. Consider a short negative cache.
