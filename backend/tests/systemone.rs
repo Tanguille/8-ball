@@ -265,3 +265,23 @@ async fn slow_call_times_out_after_timeout_secs() {
     let error = endpoint.ask("hi", &[question()]).await.unwrap_err();
     assert_eq!(error.0, "timed out after 1s");
 }
+
+/// Four calls on one slot take 4 x 0.6 s. Each call is within its 1 s, so none times out.
+#[tokio::test]
+async fn queued_calls_do_not_count_the_queue_wait() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ResponseTemplate::new(200)
+            .set_body_json(response())
+            .set_delay(std::time::Duration::from_millis(600)),
+    )
+    .await;
+    let endpoint = Endpoint::new("d3", &timed_config(&server.uri(), 1, 1), None);
+    let question = question();
+    let results = futures::future::join_all(
+        (0..4).map(|_| endpoint.ask("hi", std::slice::from_ref(&question))),
+    )
+    .await;
+    assert!(results.iter().all(Result::is_ok), "{results:?}");
+}
