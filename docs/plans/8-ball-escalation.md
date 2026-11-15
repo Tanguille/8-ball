@@ -1,7 +1,7 @@
 # 8-ball escalation and server-side triage batching
 
 **Created:** 2026-11-12
-**Status:** In progress: owner decisions recorded 2026-11-12; Chunk 0 with the owner, Chunks 1, 2 and 3 complete, Chunk 4 next
+**Status:** In progress: owner decisions recorded 2026-11-12; Chunk 0 with the owner, Chunks 1 to 4 complete, Chunk 5 next
 **Complexity:** Medium
 **Estimated Chunks:** 7 (Chunk 0 is a gate without code, Chunk 7 is in the cluster repo)
 **Repo:** `/home/tanguille/Documents/PriveProjecten/8-ball`
@@ -235,7 +235,7 @@ struct Judgment {
 
 #### Wave 2 (sequential): Part A, escalation
 - [x] Chunk 3: `[escalation]` config and spec `escalate` (depends on 2)
-- [ ] Chunk 4: escalation in `ask` and `triage`, budget, metric (depends on 3)
+- [x] Chunk 4: escalation in `ask` and `triage`, budget, metric (depends on 3)
 - [ ] Chunk 5: labels and review stay coherent with two rows per case (depends on 4)
 - [ ] Chunk 6: MCP instructions, docs, live tests (depends on 5)
 
@@ -568,7 +568,14 @@ needs a 90 s wait with the const deadline, and the embedder's own 10 s batch tim
 ---
 
 ### Chunk 4: Escalation in `ask` and `triage`
-**Wave:** 2 · **Complexity:** High
+**Wave:** 2 · **Complexity:** High · **Status:** Complete (2026-11-15, `fd32462`, `10831e8`)
+
+Done as written, plus the Chunk 1 follow-up: `ASK_DEADLINE = 20 s` bounds a single `ask` (primary and escalation;
+a missed primary fails the request, a missed escalation keeps the primary `unsure`), tested by
+`ask_deadline_keeps_the_primary_unsure` (a 30 s `maybe-slow` reply on `big` with `timeout_secs=60`; 20 s of wall
+time). Also: Steps 2 and 3 share one commit (the metric alone is dead code); `judge_items` takes an `escalate` flag
+under `#[expect(clippy::too_many_arguments)]`; `service/tests/cache.rs` gains `escalate: None` in its `AskRequest`
+literal; `rows` also returns the id. A cancelled escalation records no `eightball_escalations_total` outcome.
 
 #### Step 1: Budget (unit test first)
 Add to `service/src/lib.rs` (a pure function so it is testable without clocks; `cli/src/evaluate.rs` has the same `#[cfg(test)]` precedent):
@@ -978,5 +985,5 @@ Only after Chunk 6 is merged and released (the image and chart workflows in `.gi
 
 Out of Chunk 1's write set, so recorded here instead of fixed:
 - [x] **Chunk 2:** start `TRIAGE_DEADLINE` before `prefilter`. The embedder (`backend/src/embed.rs`) runs serial 10 s batches outside the deadline, up to ~90 s for 64 items.
-- **Chunk 4:** single `ask` has no request-level deadline. `timeout_secs` is now per attempt, so a call, a retry and an escalation can outlast the CLI's 25 s default (`cli/src/main.rs`) and the plugin skill's `timeout=25`. Add an `ASK_DEADLINE` or raise those client defaults.
+- [x] **Chunk 4:** single `ask` has no request-level deadline. `timeout_secs` is now per attempt, so a call, a retry and an escalation can outlast the CLI's 25 s default (`cli/src/main.rs`) and the plugin skill's `timeout=25`. Add an `ASK_DEADLINE` or raise those client defaults.
 - **Later:** `Endpoint::info()` is no longer bounded by the old outer timeout. A never-detected backend with a hung `/props` costs 5-10 s per call, serialized on the info lock. Consider a short negative cache.
