@@ -368,7 +368,7 @@ pub struct Service {
     refit: Mutex<()>,
     /// The escalation budget window: its start and the escalations granted in it. A std mutex, held for a few
     /// instructions and never across an await.
-    escalations: std::sync::Mutex<(Instant, u32)>,
+    escalations: std::sync::Mutex<(Instant, usize)>,
     triage_deadline: Duration,
     ask_deadline: Duration,
 }
@@ -1413,7 +1413,7 @@ impl Service {
         judgments: &mut [Judgment],
     ) {
         let name = escalation.endpoint.as_str();
-        let unsure: Vec<usize> = judgments
+        let mut unsure: Vec<usize> = judgments
             .iter()
             .enumerate()
             .filter(|(_, judgment)| {
@@ -1422,9 +1422,6 @@ impl Service {
             })
             .map(|(index, _)| index)
             .collect();
-        if unsure.is_empty() {
-            return;
-        }
         let granted = grant(
             &mut self.escalations.lock().expect("escalation budget"),
             Instant::now(),
@@ -1435,7 +1432,7 @@ impl Service {
             self.metrics
                 .record_escalation(name, "budget", unsure.len() - granted);
         }
-        let unsure = &unsure[..granted];
+        unsure.truncate(granted);
         if unsure.is_empty() {
             return;
         }
@@ -1460,9 +1457,7 @@ impl Service {
             .filter(|judgment| judgment.decision.cached)
             .count();
         let mut window = self.escalations.lock().expect("escalation budget");
-        window.1 = window
-            .1
-            .saturating_sub(u32::try_from(cached).unwrap_or(u32::MAX));
+        window.1 = window.1.saturating_sub(cached);
         drop(window);
         for (&index, mut judgment) in unsure.iter().zip(escalated) {
             let outcome = if judgment.decision.verdict == "unsure" {
@@ -1472,9 +1467,9 @@ impl Service {
             };
             self.metrics.record_escalation(name, outcome, 1);
             judgment.decision.escalated = true;
-            let mut fresh = std::mem::take(&mut judgments[index].fresh);
-            fresh.append(&mut judgment.fresh);
-            judgment.fresh = fresh;
+            judgment
+                .fresh
+                .splice(0..0, std::mem::take(&mut judgments[index].fresh));
             judgments[index] = judgment;
         }
     }
@@ -1595,16 +1590,14 @@ fn list_limit(limit: Option<usize>) -> Result<u32, ServiceError> {
 /// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
 // ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
 // that ever matters.
-fn grant(window: &mut (Instant, u32), now: Instant, per_minute: u32, wanted: usize) -> usize {
+fn grant(window: &mut (Instant, usize), now: Instant, per_minute: usize, wanted: usize) -> usize {
     if now.duration_since(window.0) >= Duration::from_secs(60) {
         *window = (now, 0);
     }
-    let granted = per_minute
-        .saturating_sub(window.1)
-        .min(u32::try_from(wanted).unwrap_or(u32::MAX));
+    let granted = per_minute.saturating_sub(window.1).min(wanted);
     window.1 += granted;
 
-    usize::try_from(granted).expect("u32 fits usize")
+    granted
 }
 
 /// The stored form of a question: its JSON without the caller's id, which is not part of the hash.

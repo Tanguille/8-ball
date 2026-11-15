@@ -22,7 +22,7 @@ struct App {
 /// `d3` is `common::systemone`. `big` reads the prompt:
 /// `maybe-yes` yes 0.95, `maybe-no` no 0.95, `maybe-fail` a 500, `maybe-slow` yes after 5 s, past both
 /// deadlines, which the fixture shortens to 1 s, else 0.5.
-async fn fixture(per_minute: u32, learning: &str) -> App {
+async fn fixture(per_minute: usize, learning: &str) -> App {
     let d3 = common::systemone().await;
     let big = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))

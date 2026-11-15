@@ -105,7 +105,10 @@ impl Endpoint {
         if let Some(model) = &self.config.model {
             body["model"] = model.as_str().into();
         }
-        let timeout = self.timeout();
+        let timeout = self
+            .config
+            .timeout_secs
+            .map_or(DECISION_TIMEOUT, Duration::from_secs);
         let timed_out = |error: Error| {
             if error.is_timeout() {
                 BackendError(format!("timed out after {timeout:?}"))
@@ -268,12 +271,6 @@ impl Endpoint {
         });
 
         fit(state, maximum)
-    }
-
-    fn timeout(&self) -> Duration {
-        self.config
-            .timeout_secs
-            .map_or(DECISION_TIMEOUT, Duration::from_secs)
     }
 
     /// Ask all questions about an already-fitted state.

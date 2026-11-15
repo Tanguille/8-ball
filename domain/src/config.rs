@@ -26,10 +26,10 @@ pub struct Escalation {
     pub endpoint: String,
     /// Most re-asks per minute that reach the model, across all requests. Answers over the budget stay `unsure`.
     #[serde(default = "default_per_minute")]
-    pub per_minute: u32,
+    pub per_minute: usize,
 }
 
-const fn default_per_minute() -> u32 {
+const fn default_per_minute() -> usize {
     30
 }
 
@@ -103,7 +103,6 @@ pub struct SpecConfig {
     pub kind: crate::question::Kind,
     pub endpoint: Option<String>,
     /// False keeps this spec's `unsure` answers; default true when `[escalation]` exists.
-    #[serde(default)]
     pub escalate: Option<bool>,
 }
 
