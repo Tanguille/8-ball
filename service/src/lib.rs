@@ -314,6 +314,10 @@ pub struct Service {
     metrics: Metrics,
     /// Held during an automatic refit, so concurrent labels skip theirs.
     refit: Mutex<()>,
+    /// The escalation budget window: its start and the escalations granted in it. A std mutex, held for a few
+    /// instructions and never across an await.
+    #[expect(dead_code, reason = "escalation spends it in the next commit")]
+    escalations: std::sync::Mutex<(Instant, u32)>,
 }
 
 impl Service {
@@ -342,6 +346,7 @@ impl Service {
             store,
             metrics: Metrics::default(),
             refit: Mutex::new(()),
+            escalations: std::sync::Mutex::new((Instant::now(), 0)),
         }
     }
 
@@ -1385,6 +1390,25 @@ fn list_limit(limit: Option<usize>) -> Result<u32, ServiceError> {
     }
 }
 
+/// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
+// ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
+// that ever matters.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "escalation calls it in the next commit")
+)]
+fn grant(window: &mut (Instant, u32), now: Instant, per_minute: u32, wanted: usize) -> usize {
+    if now.duration_since(window.0) >= Duration::from_secs(60) {
+        *window = (now, 0);
+    }
+    let granted = per_minute
+        .saturating_sub(window.1)
+        .min(u32::try_from(wanted).unwrap_or(u32::MAX));
+    window.1 += granted;
+
+    usize::try_from(granted).expect("u32 fits usize")
+}
+
 /// The stored form of a question: its JSON without the caller's id, which is not part of the hash.
 fn stored_question(question: &Question) -> Value {
     let mut value = serde_json::to_value(question).expect("question serializes");
@@ -1394,4 +1418,18 @@ fn stored_question(question: &Question) -> Value {
         .remove("id");
 
     value
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn grant_spends_then_refills_after_a_minute() {
+        let start = std::time::Instant::now();
+        let mut window = (start, 0);
+        assert_eq!(super::grant(&mut window, start, 3, 2), 2);
+        assert_eq!(super::grant(&mut window, start, 3, 2), 1);
+        assert_eq!(super::grant(&mut window, start, 3, 1), 0);
+        let later = start + std::time::Duration::from_secs(60);
+        assert_eq!(super::grant(&mut window, later, 3, 5), 3);
+    }
 }
