@@ -1,6 +1,9 @@
 //! The decision service, and its REST, MCP and metrics front ends.
 
-use std::{slice, time::Instant};
+use std::{
+    slice,
+    time::{Duration, Instant},
+};
 
 use futures::future;
 use indexmap::IndexMap;
@@ -245,6 +248,15 @@ pub struct DoctorEndpoint {
     pub error: Option<String>,
 }
 
+// ponytail: one deadline for the whole triage, prefilter included; items still unjudged when it passes fail open
+// to `unsure`. At 64 items, 2 slots and the 2.7 s p90 call this leaves room; a request field if callers need another
+// value.
+const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
+
+fn deadline_passed() -> String {
+    format!("triage deadline of {TRIAGE_DEADLINE:?} passed")
+}
+
 struct Judgment {
     decision: Decision,
     /// Rows to store, oldest first. An escalated judgment holds the primary's row, then its own; the last row is
@@ -254,6 +266,32 @@ struct Judgment {
     explore_draw: f64,
     /// A spec, or an ad-hoc question whose text `label` can read.
     learnable: bool,
+}
+
+impl Judgment {
+    /// A triage item whose judgment failed: `unsure`, not stored, never reported.
+    fn failed(question: &Question, error: &ServiceError) -> Self {
+        Self {
+            decision: Decision {
+                id: 0,
+                question: question.id.clone(),
+                question_type: question.kind.type_name().into(),
+                verdict: "unsure".into(),
+                confidence: 0.0,
+                probabilities: IndexMap::new(),
+                score: None,
+                calibrated: false,
+                cached: false,
+                report: false,
+                explored: false,
+                remembered: false,
+                error: Some(error.to_string()),
+            },
+            fresh: Vec::new(),
+            explore_draw: 1.0,
+            learnable: false,
+        }
+    }
 }
 
 /// What the caller does with a verdict, which decides whether `learn` reports or explores it.
@@ -844,23 +882,22 @@ impl Service {
             .triage_items(&endpoint, request.items, request.context.as_deref())
             .await?;
         let unique_count = items.len();
+        let deadline = tokio::time::Instant::now() + TRIAGE_DEADLINE;
         let (prefiltered, warning) = if let Some(top_k) = request.top_k {
-            self.prefilter(&question, &mut items, top_k).await?
+            self.prefilter(&question, &mut items, top_k, deadline)
+                .await?
         } else {
             (Vec::new(), None)
         };
-        let questions = slice::from_ref(&question);
         let (endpoint, spec) = (&endpoint, request.spec.as_deref());
         let remember = request.learn && self.config.learning.remember;
-        let mut decisions =
-            future::try_join_all(items.into_iter().map(|(index, state)| async move {
-                let mut judgments = self
-                    .judge(&state, spec, questions, endpoint, remember)
-                    .await?;
-
-                Ok::<_, ServiceError>((index, judgments.remove(0)))
-            }))
+        let (mut decisions, failures) = self
+            .judge_items(items, spec, &question, endpoint, remember, deadline)
             .await?;
+        let warning = [warning, failures]
+            .into_iter()
+            .flatten()
+            .reduce(|first, second| format!("{first}; {second}"));
         decisions.sort_by_key(|(index, _)| *index);
         let matches = |verdict: &str| {
             if matches!(question.kind, Kind::Score { .. }) {
@@ -913,6 +950,59 @@ impl Service {
         })
     }
 
+    /// Judges each triage item before `deadline`. A failed item fails open to `unsure`, with a warning that counts
+    /// the failures; if every item failed, the request fails with the first error.
+    async fn judge_items(
+        &self,
+        items: Vec<(usize, String)>,
+        spec: Option<&str>,
+        question: &Question,
+        endpoint: &str,
+        remember: bool,
+        deadline: tokio::time::Instant,
+    ) -> Result<(Vec<(usize, Judgment)>, Option<String>), ServiceError> {
+        let questions = slice::from_ref(question);
+        let results = future::join_all(items.into_iter().map(|(index, state)| async move {
+            let judged = tokio::time::timeout_at(
+                deadline,
+                self.judge(&state, spec, questions, endpoint, remember),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                Err(ServiceError::Backend {
+                    endpoint: endpoint.into(),
+                    message: deadline_passed(),
+                })
+            })
+            .map(|mut judgments| judgments.remove(0));
+
+            (index, judged)
+        }))
+        .await;
+        let total = results.len();
+        let mut failed = 0;
+        let mut first_error = None;
+        let mut decisions = Vec::with_capacity(total);
+        for (index, judged) in results {
+            let judgment = judged.unwrap_or_else(|error| {
+                failed += 1;
+                let judgment = Judgment::failed(question, &error);
+                first_error.get_or_insert(error);
+                judgment
+            });
+            decisions.push((index, judgment));
+        }
+        let warning = match first_error {
+            Some(error) if failed == total => return Err(error),
+            Some(error) => Some(format!(
+                "{failed} of {total} items failed and are unsure: {error}"
+            )),
+            None => None,
+        };
+
+        Ok((decisions, warning))
+    }
+
     async fn triage_items(
         &self,
         endpoint: &str,
@@ -956,6 +1046,7 @@ impl Service {
         question: &Question,
         items: &mut Vec<(usize, String)>,
         top_k: usize,
+        deadline: tokio::time::Instant,
     ) -> Result<(Vec<usize>, Option<String>), ServiceError> {
         let embedder = self
             .embedder
@@ -967,9 +1058,15 @@ impl Service {
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
             .collect::<Vec<_>>();
-        let vectors = match embedder.embed(&texts).await {
-            Ok(vectors) => vectors,
-            Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
+        let vectors = match tokio::time::timeout_at(deadline, embedder.embed(&texts)).await {
+            Ok(Ok(vectors)) => vectors,
+            Ok(Err(e)) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
+            Err(_) => {
+                return Ok((
+                    Vec::new(),
+                    Some(format!("prefilter skipped: {}", deadline_passed())),
+                ));
+            }
         };
         let mut ranked: Vec<_> = items
             .drain(..)
