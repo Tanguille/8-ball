@@ -258,13 +258,20 @@ impl Endpoint {
         fit(state, maximum)
     }
 
+    fn timeout(&self) -> Duration {
+        self.config
+            .timeout_secs
+            .map_or(DECISION_TIMEOUT, Duration::from_secs)
+    }
+
     /// Ask all questions about an already-fitted state.
     pub async fn ask(
         &self,
         state: &str,
         questions: &[domain::question::Question],
     ) -> Result<Vec<domain::Probs>, BackendError> {
-        tokio::time::timeout(DECISION_TIMEOUT, async {
+        let timeout = self.timeout();
+        tokio::time::timeout(timeout, async {
             let info = self.info().await?;
 
             match info.kind {
@@ -276,7 +283,7 @@ impl Endpoint {
             }
         })
         .await
-        .map_err(|_| BackendError(format!("timed out after {DECISION_TIMEOUT:?}")))?
+        .map_err(|_| BackendError(format!("timed out after {timeout:?}")))?
     }
 }
 

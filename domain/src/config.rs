@@ -57,6 +57,8 @@ pub struct EndpointConfig {
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
     /// Spaces requests evenly to stay under a hosted provider's rate limit.
     pub requests_per_minute: Option<u32>,
+    /// Seconds one model call may take once it has a slot; default 20. Time spent waiting for a slot is not counted.
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
@@ -142,6 +144,9 @@ impl Config {
         for (name, endpoint) in &self.endpoints {
             if endpoint.concurrency == Some(0) {
                 return Err(format!("endpoint {name}: concurrency must be positive"));
+            }
+            if endpoint.timeout_secs == Some(0) {
+                return Err(format!("endpoint {name}: timeout_secs must be positive"));
             }
             if endpoint.kind == Some(BackendKind::Logprob) && endpoint.model.is_none() {
                 return Err(format!("endpoint {name}: logprob needs model"));

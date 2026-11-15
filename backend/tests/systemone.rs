@@ -16,6 +16,16 @@ fn question() -> Question {
 fn endpoint_config(url: &str) -> domain::config::EndpointConfig {
     toml::from_str(&format!("url = '{url}'\nkind = 'systemone'\n")).unwrap()
 }
+fn timed_config(
+    url: &str,
+    concurrency: usize,
+    timeout_secs: u64,
+) -> domain::config::EndpointConfig {
+    toml::from_str(&format!(
+        "url = '{url}'\nkind = 'systemone'\nconcurrency = {concurrency}\ntimeout_secs = {timeout_secs}\n"
+    ))
+    .unwrap()
+}
 fn response() -> Value {
     json!({"answers":{"q":{"type":"noul","noul":0.97}}})
 }
@@ -239,4 +249,19 @@ async fn invalid_backend_probabilities_are_rejected() {
             "accepted {value}"
         );
     }
+}
+
+#[tokio::test]
+async fn slow_call_times_out_after_timeout_secs() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ResponseTemplate::new(200)
+            .set_body_json(response())
+            .set_delay(std::time::Duration::from_millis(1500)),
+    )
+    .await;
+    let endpoint = Endpoint::new("d3", &timed_config(&server.uri(), 1, 1), None);
+    let error = endpoint.ask("hi", &[question()]).await.unwrap_err();
+    assert_eq!(error.0, "timed out after 1s");
 }

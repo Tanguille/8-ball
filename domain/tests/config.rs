@@ -123,3 +123,13 @@ fn learning_unknown_key_rejected() {
             .contains("colour")
     );
 }
+
+#[test]
+fn zero_timeout_rejected() {
+    assert!(
+        Config::parse(&format!("{MINIMAL}timeout_secs = 0\n"), "test")
+            .unwrap_err()
+            .to_string()
+            .contains("timeout_secs must be positive")
+    );
+}
