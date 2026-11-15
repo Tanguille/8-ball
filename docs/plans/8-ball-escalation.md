@@ -984,19 +984,20 @@ Only after Chunk 6 is merged and released (the image and chart workflows in `.gi
 ## Follow-ups from the Chunk 1 /simplify review (2026-11-15)
 
 Out of Chunk 1's write set, so recorded here instead of fixed:
+
 - [x] **Chunk 2:** start `TRIAGE_DEADLINE` before `prefilter`. The embedder (`backend/src/embed.rs`) runs serial 10 s batches outside the deadline, up to ~90 s for 64 items.
 - [x] **Chunk 4:** single `ask` has no request-level deadline. `timeout_secs` is now per attempt, so a call, a retry and an escalation can outlast the CLI's 25 s default (`cli/src/main.rs`) and the plugin skill's `timeout=25`. Add an `ASK_DEADLINE` or raise those client defaults.
 - **Later:** `Endpoint::info()` is no longer bounded by the old outer timeout. A never-detected backend with a hung `/props` costs 5-10 s per call, serialized on the info lock. Consider a short negative cache.
 
 ## Follow-ups from the Chunk 6 /simplify review (2026-11-15)
 
-Not fixed: outside Chunk 6's write set. Owner decides before the PR.
+Outside Chunk 6's write set; applied after it, except where noted.
 
-- `Judgment::failed` and `judge` both spell out every `Decision` field; one `Decision::unsure(question)` constructor would serve both.
-- `timeout_at(...)` to `ServiceError::Backend` is written for ask, triage and prefilter; one `within(deadline, endpoint, fut)` helper.
-- `record_escalation` is called in a loop per item; take a count and use `Counter::inc_by`.
-- `label` re-derives the spec's endpoint like `resolve_questions`; share one `spec_endpoint` helper.
-- `escalates()` could return `Option<&Escalation>` so `escalate` drops its second `config.escalation` check.
-- In triage, a deadline during escalation drops a finished primary answer; wrapping only `escalate` in `timeout_at`, as `ask` does, would keep it (behaviour change).
-- `label` runs `labelled_count`/`labelled` once per endpoint; lift the shared reads out of the loop.
-- `escalate` calls the primary's `info()` again per item to refit the state; `judge` could hand back the fitted state.
+- [x] `Judgment::failed` and `judge` both spell out every `Decision` field; one `Decision::unsure(question)` constructor would serve both.
+- [x] `timeout_at(...)` to `ServiceError::Backend` is written for ask, triage and prefilter; one `within(deadline, endpoint, fut)` helper. Done as `within(deadline, future, passed)`, since prefilter's error is a `BackendError`.
+- [x] `record_escalation` is called in a loop per item; take a count and use `Counter::inc_by`.
+- [x] `label` re-derives the spec's endpoint like `resolve_questions`; share one `spec_endpoint` helper.
+- [ ] Skipped: `escalates()` could return `Option<&Escalation>` so `escalate` drops its second `config.escalation` check. Passing it in gives `escalate` an eighth argument and trips `clippy::too_many_arguments`, which costs more than the `let else` it removes.
+- [x] In triage, a deadline during escalation drops a finished primary answer; wrapping only `escalate` in `timeout_at`, as `ask` does, would keep it (behaviour change).
+- [ ] Skipped: `label` runs `labelled_count`/`labelled` once per endpoint; lift the shared reads out of the loop. `labelled` runs only inside a refit that happens, so lifting it reads every labelled row on each label. Lifting `labelled_count` turns its store error from a warning into a failed label and adds a query when `recalibrate_after = 0`. At most 2 extra counts per label.
+- [x] `escalate` calls the primary's `info()` again per item to refit the state; `judge` could hand back the fitted state.
