@@ -292,15 +292,15 @@ const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
 // The primary answer fails the request when it misses it; an escalation that misses it keeps the primary `unsure`.
 const ASK_DEADLINE: Duration = Duration::from_secs(20);
 
-/// The result of `future`, or `passed` once `deadline` is reached.
+/// The result of `future`, or the error of `passed` once `deadline` is reached.
 async fn within<T, E>(
     deadline: tokio::time::Instant,
     future: impl Future<Output = Result<T, E>>,
-    passed: E,
+    passed: impl FnOnce() -> E,
 ) -> Result<T, E> {
     tokio::time::timeout_at(deadline, future)
         .await
-        .unwrap_or(Err(passed))
+        .unwrap_or_else(|_| Err(passed()))
 }
 
 /// One request's judging switches, shared by the primary call and its escalation.
@@ -1126,7 +1126,7 @@ impl Service {
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
             .collect::<Vec<_>>();
-        let passed = backend::BackendError(pass.passed.clone());
+        let passed = || backend::BackendError(pass.passed.clone());
         let vectors = match within(pass.deadline, embedder.embed(&texts), passed).await {
             Ok(vectors) => vectors,
             Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
@@ -1382,10 +1382,7 @@ impl Service {
         let (mut judgments, state) = within(
             pass.deadline,
             self.judge(state, pass.spec, questions, pass.endpoint, pass.remember),
-            ServiceError::Backend {
-                endpoint: pass.endpoint.into(),
-                message: pass.passed.clone(),
-            },
+            || self.backend_error(pass.endpoint, backend::BackendError(pass.passed.clone())),
         )
         .await?;
         if let Some(escalation) = pass.escalation {

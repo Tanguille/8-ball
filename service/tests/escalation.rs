@@ -22,7 +22,7 @@ struct App {
     config: String,
 }
 
-/// `d3` answers noul by state (`yes-*` 0.97, `no-*` 0.03, else 0.5) and choices with `a`. `big` reads the prompt:
+/// `d3` answers noul by state (`yes-*` 0.97, `no-*` 0.03, else 0.5, `slow-*` after 5 s) and choices with `a`. `big` reads the prompt:
 /// `maybe-yes` yes 0.95, `maybe-no` no 0.95, `maybe-fail` a 500, `maybe-slow` yes after 5 s, past both
 /// deadlines, which the fixture shortens to 1 s, else 0.5.
 async fn fixture(per_minute: u32, learning: &str) -> App {
@@ -54,7 +54,13 @@ async fn fixture(per_minute: u32, learning: &str) -> App {
                 })
                 .collect();
 
-            wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
+            let response =
+                wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}));
+            if state.starts_with("slow-") {
+                response.set_delay(Duration::from_secs(5))
+            } else {
+                response
+            }
         })
         .mount(&d3)
         .await;
@@ -454,4 +460,17 @@ async fn cached_escalations_do_not_spend_the_budget() {
     }
     assert_eq!(requests(&app.big).await.len(), 1);
     assert!(greeting(&app, "maybe-yes-2").await.escalated);
+}
+
+#[tokio::test]
+async fn a_missed_triage_deadline_is_a_counted_backend_error() {
+    let app = fixture(30, "").await;
+    let response = triage(&app, json!({"spec":"greeting","items":["yes-1","slow-1"]})).await;
+    let error = response.unsure[0].decision.error.as_deref().unwrap();
+    assert!(error.contains("triage deadline"), "{error}");
+    let metrics = app.service.metrics();
+    assert!(
+        metrics.contains(r#"eightball_backend_errors_total{endpoint="d3"} 1"#),
+        "{metrics}"
+    );
 }

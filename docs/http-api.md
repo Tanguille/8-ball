@@ -10,7 +10,7 @@ If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authoriz
 | `GET /v1/doctor` | Yes | Return the `doctor` report. |
 | `/mcp` | Yes | Serve HTTP MCP. |
 | `GET /healthz` | No | Return `ok`. |
-| `GET /metrics` | No | Return OpenMetrics: `eightball_decisions_total` (with a `cached` label), `eightball_backend_errors_total`, `eightball_trimmed_states_total`, `eightball_escalations_total` (with `endpoint` and `outcome`: `decided`, `unsure`, `error`, `budget`), and the histogram `eightball_backend_request_duration_seconds`. |
+| `GET /metrics` | No | Return OpenMetrics: `eightball_decisions_total` (with a `cached` label), `eightball_backend_errors_total` (missed request deadlines included), `eightball_trimmed_states_total`, `eightball_escalations_total` (with `endpoint` and `outcome`: `decided`, `unsure`, `error`, `budget`), and the histogram `eightball_backend_request_duration_seconds`. |
 | `POST /register`, `GET /.well-known/{*rest}` | No | Return 404, because 8-ball does not use OAuth. |
 
 Service, authentication, and host errors are JSON with an `error` field. Rejected request bodies return plain text.
