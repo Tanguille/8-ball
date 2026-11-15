@@ -319,6 +319,8 @@ struct Pass<'a> {
 
 struct Judgment {
     decision: Decision,
+    /// The endpoint that answered.
+    endpoint: String,
     /// Rows to store, oldest first. An escalated judgment holds the primary's row, then its own; the last row is
     /// the returned decision unless that decision is `cached`.
     fresh: Vec<NewDecision>,
@@ -330,12 +332,13 @@ struct Judgment {
 
 impl Judgment {
     /// A triage item whose judgment failed: `unsure`, not stored, never reported.
-    fn failed(question: &Question, error: &ServiceError) -> Self {
+    fn failed(question: &Question, endpoint: &str, error: &ServiceError) -> Self {
         Self {
             decision: Decision {
                 error: Some(error.to_string()),
                 ..Decision::unsure(question)
             },
+            endpoint: endpoint.into(),
             fresh: Vec::new(),
             explore_draw: 1.0,
             learnable: false,
@@ -787,7 +790,7 @@ impl Service {
                     .judge(&first.state, spec, slice::from_ref(question), name, false)
                     .await?;
 
-                self.persist(judgments, name, spec)
+                self.persist(judgments, spec)
                     .await?
                     .remove(0)
                     .probabilities
@@ -1006,7 +1009,7 @@ impl Service {
         let mut unsure = Vec::new();
         let mut rejected = Vec::new();
         let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
-        let decisions = self.persist(judgments, &endpoint, spec).await?;
+        let decisions = self.persist(judgments, spec).await?;
         for (index, decision) in indices.into_iter().zip(decisions) {
             let item = TriageItem { index, decision };
             if item.decision.verdict == "unsure" {
@@ -1059,7 +1062,8 @@ impl Service {
             .map(|(index, judged)| {
                 (
                     index,
-                    judged.unwrap_or_else(|error| Judgment::failed(question, &error)),
+                    judged
+                        .unwrap_or_else(|error| Judgment::failed(question, pass.endpoint, &error)),
                 )
             })
             .collect();
@@ -1187,7 +1191,7 @@ impl Service {
         }
 
         Ok(AskResponse {
-            results: self.persist(judgments, &endpoint, spec).await?,
+            results: self.persist(judgments, spec).await?,
         })
     }
 
@@ -1328,6 +1332,7 @@ impl Service {
             };
             judgments.push(Judgment {
                 decision,
+                endpoint: name.into(),
                 fresh,
                 explore_draw,
                 learnable,
@@ -1544,7 +1549,6 @@ impl Service {
     async fn persist(
         &self,
         mut judgments: Vec<Judgment>,
-        endpoint: &str,
         spec: Option<&str>,
     ) -> Result<Vec<Decision>, ServiceError> {
         let counts: Vec<usize> = judgments
@@ -1573,14 +1577,8 @@ impl Service {
                     judgment.decision.id = id;
                 }
                 if judgment.decision.error.is_none() {
-                    let decided_by = match &self.config.escalation {
-                        Some(escalation) if judgment.decision.escalated => {
-                            escalation.endpoint.as_str()
-                        }
-                        _ => endpoint,
-                    };
                     self.metrics
-                        .record_decision(decided_by, spec, &judgment.decision);
+                        .record_decision(&judgment.endpoint, spec, &judgment.decision);
                 }
 
                 judgment.decision
