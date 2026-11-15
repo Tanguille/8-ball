@@ -113,13 +113,13 @@ impl Metrics {
             .inc();
     }
 
-    pub(crate) fn record_escalation(&self, endpoint: &str, outcome: &str) {
+    pub(crate) fn record_escalation(&self, endpoint: &str, outcome: &str, count: usize) {
         self.escalations
             .get_or_create(&EscalationLabels {
                 endpoint: endpoint.into(),
                 outcome: outcome.into(),
             })
-            .inc();
+            .inc_by(count as u64);
     }
 
     pub(crate) fn record_decision(

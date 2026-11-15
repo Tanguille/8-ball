@@ -60,6 +60,28 @@ pub struct Decision {
     pub error: Option<String>,
 }
 
+impl Decision {
+    /// An unstored `unsure` answer with no probabilities, which `judge` and a failed triage item fill in.
+    fn unsure(question: &Question) -> Self {
+        Self {
+            id: 0,
+            question: question.id.clone(),
+            question_type: question.kind.type_name().into(),
+            verdict: "unsure".into(),
+            confidence: 0.0,
+            probabilities: IndexMap::new(),
+            score: None,
+            calibrated: false,
+            cached: false,
+            report: false,
+            explored: false,
+            remembered: false,
+            escalated: false,
+            error: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AskResponse {
     pub results: Vec<Decision>,
@@ -274,6 +296,17 @@ fn deadline_passed() -> String {
     format!("triage deadline of {TRIAGE_DEADLINE:?} passed")
 }
 
+/// The result of `future`, or `passed` once `deadline` is reached.
+async fn within<T, E>(
+    deadline: tokio::time::Instant,
+    future: impl Future<Output = Result<T, E>>,
+    passed: E,
+) -> Result<T, E> {
+    tokio::time::timeout_at(deadline, future)
+        .await
+        .unwrap_or(Err(passed))
+}
+
 struct Judgment {
     decision: Decision,
     /// Rows to store, oldest first. An escalated judgment holds the primary's row, then its own; the last row is
@@ -290,20 +323,8 @@ impl Judgment {
     fn failed(question: &Question, error: &ServiceError) -> Self {
         Self {
             decision: Decision {
-                id: 0,
-                question: question.id.clone(),
-                question_type: question.kind.type_name().into(),
-                verdict: "unsure".into(),
-                confidence: 0.0,
-                probabilities: IndexMap::new(),
-                score: None,
-                calibrated: false,
-                cached: false,
-                report: false,
-                explored: false,
-                remembered: false,
-                escalated: false,
                 error: Some(error.to_string()),
+                ..Decision::unsure(question)
             },
             fresh: Vec::new(),
             explore_draw: 1.0,
@@ -1011,17 +1032,15 @@ impl Service {
     ) -> Result<(Vec<(usize, Judgment)>, Option<String>), ServiceError> {
         let questions = slice::from_ref(question);
         let results = future::join_all(items.into_iter().map(|(index, state)| async move {
-            let judged = tokio::time::timeout_at(
+            let judged = within(
                 deadline,
                 self.judge(&state, spec, questions, endpoint, remember),
-            )
-            .await
-            .unwrap_or_else(|_| {
-                Err(ServiceError::Backend {
+                ServiceError::Backend {
                     endpoint: endpoint.into(),
                     message: deadline_passed(),
-                })
-            });
+                },
+            )
+            .await;
             let mut judgments = match judged {
                 Ok(judgments) => judgments,
                 Err(error) => return (index, Err(error)),
@@ -1119,15 +1138,10 @@ impl Service {
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
             .collect::<Vec<_>>();
-        let vectors = match tokio::time::timeout_at(deadline, embedder.embed(&texts)).await {
-            Ok(Ok(vectors)) => vectors,
-            Ok(Err(e)) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
-            Err(_) => {
-                return Ok((
-                    Vec::new(),
-                    Some(format!("prefilter skipped: {}", deadline_passed())),
-                ));
-            }
+        let passed = backend::BackendError(deadline_passed());
+        let vectors = match within(deadline, embedder.embed(&texts), passed).await {
+            Ok(vectors) => vectors,
+            Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
         };
         let mut ranked: Vec<_> = items
             .drain(..)
@@ -1166,17 +1180,15 @@ impl Service {
             self.resolve_questions(spec, &request.questions, request.endpoint.as_deref())?;
         let remember = request.learn && self.config.learning.remember;
         let deadline = tokio::time::Instant::now() + ASK_DEADLINE;
-        let mut judgments = tokio::time::timeout_at(
+        let mut judgments = within(
             deadline,
             self.judge(&request.state, spec, &questions, &endpoint, remember),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            Err(ServiceError::Backend {
+            ServiceError::Backend {
                 endpoint: endpoint.clone(),
                 message: format!("ask deadline of {ASK_DEADLINE:?} passed"),
-            })
-        })?;
+            },
+        )
+        .await?;
         if self.escalates(spec, request.escalate) {
             let escalated = self.escalate(
                 &request.state,
@@ -1324,8 +1336,6 @@ impl Service {
             };
             let decision = Decision {
                 id,
-                question: question.id.clone(),
-                question_type: question.kind.type_name().into(),
                 verdict: outcome,
                 confidence: verdict::confidence(&question.kind, &probabilities),
                 score: matches!(question.kind, Kind::Score { .. })
@@ -1338,11 +1348,8 @@ impl Service {
                     .collect(),
                 calibrated,
                 cached,
-                report: false,
-                explored: false,
                 remembered,
-                escalated: false,
-                error: None,
+                ..Decision::unsure(question)
             };
             judgments.push(Judgment {
                 decision,
@@ -1400,8 +1407,9 @@ impl Service {
             escalation.per_minute,
             unsure.len(),
         );
-        for _ in granted..unsure.len() {
-            self.metrics.record_escalation(name, "budget");
+        if granted < unsure.len() {
+            self.metrics
+                .record_escalation(name, "budget", unsure.len() - granted);
         }
         let unsure = &unsure[..granted];
         if unsure.is_empty() {
@@ -1421,9 +1429,7 @@ impl Service {
             Ok(escalated) => escalated,
             Err(error) => {
                 tracing::warn!(%error, "escalation failed; keeping the unsure answer");
-                for _ in unsure {
-                    self.metrics.record_escalation(name, "error");
-                }
+                self.metrics.record_escalation(name, "error", unsure.len());
                 return;
             }
         };
@@ -1433,7 +1439,7 @@ impl Service {
             } else {
                 "decided"
             };
-            self.metrics.record_escalation(name, outcome);
+            self.metrics.record_escalation(name, outcome, 1);
             judgment.decision.escalated = true;
             let mut fresh = std::mem::take(&mut judgments[index].fresh);
             fresh.append(&mut judgment.fresh);
