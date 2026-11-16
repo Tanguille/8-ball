@@ -25,7 +25,9 @@ pub struct Endpoint {
     next_request: Mutex<Instant>,
 }
 
-// Decision models answer in under 1 s; 20 s only absorbs a cold model load. See `EndpointConfig::timeout_secs`.
+// Decision models answer in under 1 s; 20 s only absorbs a cold model load. It bounds one HTTP attempt once the call
+// has a slot (see `EndpointConfig::timeout_secs`). It does not wrap `info()`, so endpoint detection is bounded only by
+// its 5 s GETs and by the deadline of the request.
 const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
 // A new model behind the same URL gets its own fingerprint, and so its own cache and calibration, within this time.
 const INFO_TTL: Duration = Duration::from_secs(60);
