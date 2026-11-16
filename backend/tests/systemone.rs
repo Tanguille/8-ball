@@ -240,3 +240,43 @@ async fn invalid_backend_probabilities_are_rejected() {
         );
     }
 }
+
+#[tokio::test]
+async fn slow_call_times_out_after_timeout_secs() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ResponseTemplate::new(200)
+            .set_body_json(response())
+            .set_delay(std::time::Duration::from_millis(1500)),
+    )
+    .await;
+    let mut config = endpoint_config(&server.uri());
+    config.timeout_secs = Some(1);
+    let endpoint = Endpoint::new("d3", &config, None);
+    let error = endpoint.ask("hi", &[question()]).await.unwrap_err();
+    assert_eq!(error.0, "timed out after 1s");
+}
+
+/// Two calls on one slot take 2 x 0.6 s. Each call is within its 1 s, so none times out.
+#[tokio::test]
+async fn queued_calls_do_not_count_the_queue_wait() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ResponseTemplate::new(200)
+            .set_body_json(response())
+            .set_delay(std::time::Duration::from_millis(600)),
+    )
+    .await;
+    let mut config = endpoint_config(&server.uri());
+    config.concurrency = Some(1);
+    config.timeout_secs = Some(1);
+    let endpoint = Endpoint::new("d3", &config, None);
+    let question = question();
+    let results = futures::future::join_all(
+        (0..2).map(|_| endpoint.ask("hi", std::slice::from_ref(&question))),
+    )
+    .await;
+    assert!(results.iter().all(Result::is_ok), "{results:?}");
+}

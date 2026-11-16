@@ -13,6 +13,7 @@ concurrency = 1                 # optional: max parallel requests. Omitted = /pr
 model = "qwen-3.8-fast"         # optional: sent as "model". Required for kind logprob.
 api_key_env = "TYPESAFE_KEY"    # optional: NAME of an env var whose value is sent as "Authorization: Bearer <value>"
 max_state_chars = 2000          # optional: default 2000 for systemone, decisions and rerank, no limit for logprob
+timeout_secs = 20               # optional: seconds per HTTP attempt once it has a slot (a retry gets its own); waiting for a slot is not counted
 extra_body = { reasoning_effort = "none" }   # optional: merged into logprob request JSON
 requests_per_minute = 30        # optional: space requests evenly, for a hosted provider's rate limit
 
@@ -37,6 +38,23 @@ ad_hoc = true                   # also learn ad-hoc questions, by their exact te
 ```
 
 `[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. A reranker scores how well the state matches the topic of the question, not if the answer is yes. So its answers stay `unsure` until you [calibrate](calibration.md) the question. `decisions` sends System One questions, with `model`, to a hosted `/v1/decisions` API. Auto-detection reads `/props` and `/v1/models`. A hosted catalog that lists each model's `endpoints` selects `decisions` or `logprob` for the configured `model`. 8-ball tries a request once more after a 429 response with a `Retry-After` of 10 seconds or less (it waits at least 1 second), or after a 502 or 503 response. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
+
+## Escalation
+
+```toml
+[escalation]                    # optional table
+endpoint = "qwen"               # required: a configured endpoint other than `default`
+per_minute = 30                 # optional (default 30): model re-asks per minute, across all requests; cached ones are free
+
+[specs.gitops-investigate]
+escalate = false                # optional: keep this spec's `unsure` answers
+```
+
+When `[escalation]` exists, 8-ball re-asks every `unsure` answer on the escalation endpoint before it returns. A request's `escalate` field wins, then the spec's `escalate`, else escalation is on. Without `[escalation]`, it is always off. A remembered answer does not escalate. The escalation endpoint judges the same trimmed state that the default endpoint saw.
+
+An escalation that fails, times out, or goes over `per_minute` keeps the `unsure` answer and logs a warning. The request deadlines also bound it; see [Decisions](http-api.md#decisions).
+
+The escalation endpoint is usually a chat model with `kind = "logprob"` and thinking off, for example the 27B Qwen with `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. Do not use a router that can turn thinking on: the first token is then `<think>`, and the logprob answer breaks.
 
 ## Environment variables
 

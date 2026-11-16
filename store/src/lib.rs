@@ -47,6 +47,7 @@ pub struct DecisionRow {
     pub answer: Probs,
     pub state: String,
     pub label: Option<String>,
+    pub endpoint: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -104,6 +105,7 @@ impl Store {
             migration(1, "storage", SCHEMA),
             migration(2, "questions", QUESTIONS),
             migration(3, "question index", QUESTION_INDEX),
+            migration(4, "state index", STATE_INDEX),
         ]);
         migrator
             .run(&mut *transaction)
@@ -163,17 +165,34 @@ impl Store {
             .transpose()
     }
 
-    /// Returns `(spec, question_hash, endpoint)`.
+    /// Returns `(spec, question_hash, state_hash)`.
     pub async fn metadata(
         &self,
         id: i64,
     ) -> Result<Option<(Option<String>, String, String)>, StoreError> {
         Ok(
-            sqlx::query_as("SELECT spec,question_hash,endpoint FROM decisions WHERE id=?1")
+            sqlx::query_as("SELECT spec,question_hash,state_hash FROM decisions WHERE id=?1")
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?,
         )
+    }
+
+    /// The endpoints that answered this question about this state, first answer first.
+    pub async fn endpoints(
+        &self,
+        spec: Option<&str>,
+        question_hash: &str,
+        state_hash: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        Ok(sqlx::query_scalar(
+            "SELECT endpoint FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND state_hash=?3 GROUP BY endpoint ORDER BY MIN(id)",
+        )
+        .bind(spec)
+        .bind(question_hash)
+        .bind(state_hash)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     /// Returns false when no row has this id.
@@ -231,16 +250,21 @@ impl Store {
             .transpose()
     }
 
-    pub async fn labelled_count(
+    /// Labelled states of a question that have an answer cached under `calibration_id`: the examples a refit of
+    /// that calibration can use.
+    pub async fn labelled_states(
         &self,
         spec: Option<&str>,
         question_hash: &str,
+        calibration_id: &str,
     ) -> Result<usize, StoreError> {
         let count: u64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL",
+            "SELECT COUNT(DISTINCT state_hash) FROM decisions AS labelled WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL \
+             AND EXISTS (SELECT 1 FROM decisions WHERE calibration_id=?3 AND state_hash=labelled.state_hash AND spec IS ?1)",
         )
         .bind(spec)
         .bind(question_hash)
+        .bind(calibration_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -351,7 +375,8 @@ impl Store {
         )
     }
 
-    /// Newest first. `spec` None selects ad-hoc decisions.
+    /// Newest first. `spec` None selects ad-hoc decisions. `unlabelled` lists the newest row of each state that has no
+    /// label on any row, so a case answered by two endpoints is reviewed once.
     pub async fn decisions(
         &self,
         spec: Option<&str>,
@@ -359,9 +384,18 @@ impl Store {
         unlabelled: bool,
         limit: u32,
     ) -> Result<Vec<DecisionRow>, StoreError> {
-        let rows: Vec<(i64, String, String, String, String, Option<String>)> = sqlx::query_as(
-            "SELECT id,ts,verdict,answer,state,label FROM decisions \
-             WHERE spec IS ?1 AND question_hash=?2 AND (?3=0 OR label IS NULL) ORDER BY id DESC LIMIT ?4",
+        // id, ts, verdict, answer, state, label, endpoint
+        type Row = (i64, String, String, String, String, Option<String>, String);
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT id,ts,verdict,answer,state,label,endpoint FROM decisions d \
+             WHERE spec IS ?1 AND question_hash=?2 \
+               AND (?3=0 OR ( \
+                 id = (SELECT MAX(id) FROM decisions m \
+                       WHERE m.spec IS d.spec AND m.question_hash=d.question_hash AND m.state_hash=d.state_hash) \
+                 AND NOT EXISTS (SELECT 1 FROM decisions l \
+                       WHERE l.spec IS d.spec AND l.question_hash=d.question_hash AND l.state_hash=d.state_hash \
+                         AND l.label IS NOT NULL))) \
+             ORDER BY id DESC LIMIT ?4",
         )
         .bind(spec)
         .bind(question_hash)
@@ -371,7 +405,7 @@ impl Store {
         .await?;
 
         rows.into_iter()
-            .map(|(id, at, verdict, answer, state, label)| {
+            .map(|(id, at, verdict, answer, state, label, endpoint)| {
                 Ok(DecisionRow {
                     id,
                     at,
@@ -379,6 +413,7 @@ impl Store {
                     answer: serde_json::from_str(&answer)?,
                     state,
                     label,
+                    endpoint,
                 })
             })
             .collect()
@@ -388,3 +423,4 @@ impl Store {
 const SCHEMA: &str = include_str!("../migrations/0001_storage.sql");
 const QUESTIONS: &str = include_str!("../migrations/0002_questions.sql");
 const QUESTION_INDEX: &str = include_str!("../migrations/0003_question_index.sql");
+const STATE_INDEX: &str = include_str!("../migrations/0004_state_index.sql");

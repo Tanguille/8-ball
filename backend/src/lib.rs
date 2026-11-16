@@ -25,11 +25,13 @@ pub struct Endpoint {
     next_request: Mutex<Instant>,
 }
 
-// Decision models answer in under 1 s; 20 s only absorbs a cold model load.
+// Decision models answer in under 1 s; 20 s only absorbs a cold model load. It bounds one HTTP attempt once the call
+// has a slot (see `EndpointConfig::timeout_secs`). It does not wrap `info()`, so endpoint detection is bounded only by
+// its 5 s GETs and by the deadline of the request.
 const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
 // A new model behind the same URL gets its own fingerprint, and so its own cache and calibration, within this time.
 const INFO_TTL: Duration = Duration::from_secs(60);
-// A 429 that asks for a longer wait fails at once: the request would hit DECISION_TIMEOUT anyway.
+// A 429 that asks for a longer wait fails at once instead of holding the caller that long.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
 // The shortest wait before a retry, so that `Retry-After: 0` cannot spin.
 const MIN_RETRY: Duration = Duration::from_secs(1);
@@ -105,6 +107,17 @@ impl Endpoint {
         if let Some(model) = &self.config.model {
             body["model"] = model.as_str().into();
         }
+        let timeout = self
+            .config
+            .timeout_secs
+            .map_or(DECISION_TIMEOUT, Duration::from_secs);
+        let timed_out = |error: Error| {
+            if error.is_timeout() {
+                BackendError(format!("timed out after {timeout:?}"))
+            } else {
+                error.into()
+            }
+        };
         let mut retried = false;
         let (status, text) = loop {
             self.pace().await;
@@ -116,8 +129,12 @@ impl Endpoint {
             let request = self
                 .client
                 .post(format!("{}{path}", self.config.url))
-                .json(&body);
-            let response = authed(request, self.api_key.as_deref()).send().await?;
+                .json(&body)
+                .timeout(timeout);
+            let response = authed(request, self.api_key.as_deref())
+                .send()
+                .await
+                .map_err(timed_out)?;
             let status = response.status();
             let retry_after = response
                 .headers()
@@ -125,7 +142,7 @@ impl Endpoint {
                 .and_then(|value| value.to_str().ok()?.trim().parse::<u64>().ok())
                 .map_or(MIN_RETRY, Duration::from_secs)
                 .max(MIN_RETRY);
-            let text = response.text().await?;
+            let text = response.text().await.map_err(timed_out)?;
             drop(permit);
             // One retry: a short 429 after its wait, and a 502 or 503, which a hosted gateway may answer from another upstream the next time.
             let wait = match status {
@@ -264,19 +281,15 @@ impl Endpoint {
         state: &str,
         questions: &[domain::question::Question],
     ) -> Result<Vec<domain::Probs>, BackendError> {
-        tokio::time::timeout(DECISION_TIMEOUT, async {
-            let info = self.info().await?;
+        let info = self.info().await?;
 
-            match info.kind {
-                BackendKind::Systemone | BackendKind::Decisions => {
-                    systemone::ask(self, &info, state, questions).await
-                }
-                BackendKind::Logprob => logprob::ask(self, &info, state, questions).await,
-                BackendKind::Rerank => rerank::ask(self, &info, state, questions).await,
+        match info.kind {
+            BackendKind::Systemone | BackendKind::Decisions => {
+                systemone::ask(self, &info, state, questions).await
             }
-        })
-        .await
-        .map_err(|_| BackendError(format!("timed out after {DECISION_TIMEOUT:?}")))?
+            BackendKind::Logprob => logprob::ask(self, &info, state, questions).await,
+            BackendKind::Rerank => rerank::ask(self, &info, state, questions).await,
+        }
     }
 }
 

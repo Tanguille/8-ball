@@ -1,9 +1,10 @@
 use serde_json::{Value, json};
-use sqlx::Connection;
-use wiremock::{MockServer, matchers};
+use wiremock::MockServer;
 
 use domain::verdict;
 use service::{Decision, TriageResponse};
+
+use common::{indices, requests};
 
 mod common;
 
@@ -14,40 +15,9 @@ struct App {
     directory: tempfile::TempDir,
 }
 
-/// A systemone mock that answers by state: `yes-*` 0.97, `maybe-*` 0.5, `no-*` 0.03, and option `a` for choices.
+/// `common::systemone` as endpoint `d3`.
 async fn fixture(learning: &str) -> App {
-    let mock = MockServer::start().await;
-    wiremock::Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(|request: &wiremock::Request| {
-            let body: Value = serde_json::from_slice(&request.body).unwrap();
-            let state = body["state"].as_str().unwrap();
-            let noul = if state.starts_with("yes-") {
-                0.97
-            } else if state.starts_with("no-") {
-                0.03
-            } else {
-                0.5
-            };
-            let answers: serde_json::Map<String, Value> = body["questions"]
-                .as_object()
-                .unwrap()
-                .iter()
-                .map(|(id, question)| {
-                    let answer = if question["type"] == "choice" {
-                        json!({"type":"choice","probabilities":{"a":0.99,"b":0.01}})
-                    } else {
-                        json!({"type":"noul","noul":noul})
-                    };
-
-                    (id.clone(), answer)
-                })
-                .collect();
-
-            wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
-        })
-        .mount(&mock)
-        .await;
+    let mock = common::systemone().await;
     let config = toml::from_str(&format!(
         "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.bucket]\ntype='choice'\ninstructions='Bucket?'\ncriteria={{a='',b=''}}\n[learning]\n{learning}",
         mock.uri(),
@@ -82,17 +52,6 @@ async fn triage(app: &App, request: Value) -> TriageResponse {
     app.service.triage(request).await.unwrap()
 }
 
-/// Model calls only: the first request also fetches endpoint info.
-async fn requests(mock: &MockServer) -> Vec<Value> {
-    mock.received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .filter(|request| request.method == "POST")
-        .map(|request| serde_json::from_slice(&request.body).unwrap())
-        .collect()
-}
-
 /// A labeled `greeting` decision under a model the service never uses, so only `remember` can find it.
 async fn label_under_old_model(app: &App, state: &str, label: &str) -> i64 {
     let id = app
@@ -113,10 +72,6 @@ async fn label_under_old_model(app: &App, state: &str, label: &str) -> i64 {
     assert!(app.store.set_label(id, label).await.unwrap());
 
     id
-}
-
-fn indices(items: &[service::TriageItem]) -> Vec<usize> {
-    items.iter().map(|item| item.index).collect()
 }
 
 #[tokio::test]
@@ -352,11 +307,7 @@ async fn ad_hoc_questions_learn_by_their_stored_text() {
     let id = ask(&app, json!({"state":"maybe-1","questions":[urgent]}))
         .await
         .id;
-    let mut connection = sqlx::SqliteConnection::connect_with(
-        &sqlx::sqlite::SqliteConnectOptions::new().filename(app.directory.path().join("db.sqlite")),
-    )
-    .await
-    .unwrap();
+    let mut connection = common::connection(&app.directory).await;
     sqlx::query("DELETE FROM questions")
         .execute(&mut connection)
         .await

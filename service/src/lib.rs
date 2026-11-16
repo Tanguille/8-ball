@@ -1,6 +1,9 @@
 //! The decision service, and its REST, MCP and metrics front ends.
 
-use std::{slice, time::Instant};
+use std::{
+    slice,
+    time::{Duration, Instant},
+};
 
 use futures::future;
 use indexmap::IndexMap;
@@ -12,7 +15,7 @@ use tokio::sync::Mutex;
 
 use backend::{Endpoint, embed::Embedder};
 use domain::{
-    config::{BackendKind, Config},
+    config::{BackendKind, Config, Escalation},
     question::{Kind, Question},
     verdict::{self, Bands},
 };
@@ -49,6 +52,34 @@ pub struct Decision {
     /// The verdict is a label reported earlier for the same question and state.
     #[serde(default)]
     pub remembered: bool,
+    /// The verdict came from the escalation endpoint, after the default model was unsure.
+    #[serde(default)]
+    pub escalated: bool,
+    /// Why this triage item has no answer. Its verdict is `unsure`: do the work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl Decision {
+    /// An unstored `unsure` answer with no probabilities, which `judge` and a failed triage item fill in.
+    fn unsure(question: &Question) -> Self {
+        Self {
+            id: 0,
+            question: question.id.clone(),
+            question_type: question.kind.type_name().into(),
+            verdict: "unsure".into(),
+            confidence: 0.0,
+            probabilities: IndexMap::new(),
+            score: None,
+            calibrated: false,
+            cached: false,
+            report: false,
+            explored: false,
+            remembered: false,
+            escalated: false,
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -71,6 +102,10 @@ pub struct AskRequest {
     /// False turns off remembered labels, exploration and reports for this request.
     #[serde(default = "learn_default")]
     pub learn: bool,
+    /// True re-asks `unsure` answers on the server's escalation endpoint, false keeps them. Default: the spec's
+    /// `escalate`, else on when the server has [escalation].
+    #[serde(default)]
+    pub escalate: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -96,6 +131,9 @@ pub struct TriageRequest {
     /// False turns off remembered labels, exploration and reports for this request.
     #[serde(default = "learn_default")]
     pub learn: bool,
+    /// As in `decision_ask`.
+    #[serde(default)]
+    pub escalate: Option<bool>,
 }
 
 const fn learn_default() -> bool {
@@ -178,6 +216,8 @@ pub struct StoredDecision {
     pub probabilities: Value,
     pub state: String,
     pub label: Option<String>,
+    /// The endpoint that answered.
+    pub endpoint: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -242,13 +282,67 @@ pub struct DoctorEndpoint {
     pub error: Option<String>,
 }
 
+// ponytail: one deadline for the whole triage, prefilter included; items still unjudged when it passes fail open
+// to `unsure`. At 64 items, 2 slots and the 2.7 s p90 call this leaves room; a request field if callers need another
+// value.
+const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
+
+// ponytail: one deadline for a single ask, escalation included, below the 25 s that the CLI and the plugin skill wait.
+// The primary answer fails the request when it misses it; an escalation that misses it keeps the primary `unsure`.
+const ASK_DEADLINE: Duration = Duration::from_secs(20);
+
+/// The result of `future`, or the error of `passed` once `deadline` is reached.
+async fn within<T, E>(
+    deadline: tokio::time::Instant,
+    future: impl Future<Output = Result<T, E>>,
+    passed: impl FnOnce() -> E,
+) -> Result<T, E> {
+    tokio::time::timeout_at(deadline, future)
+        .await
+        .unwrap_or_else(|_| Err(passed()))
+}
+
+/// One request's judging switches, shared by the primary call and its escalation.
+struct Pass<'a> {
+    spec: Option<&'a str>,
+    endpoint: &'a str,
+    remember: bool,
+    /// Where `unsure` answers go; `None` keeps them.
+    escalation: Option<&'a Escalation>,
+    deadline: tokio::time::Instant,
+    /// `ask` or `triage`, for the deadline messages.
+    request: &'static str,
+    /// The error message once `deadline` passes.
+    passed: String,
+}
+
 struct Judgment {
     decision: Decision,
-    fresh: Option<NewDecision>,
+    /// The endpoint that answered.
+    endpoint: String,
+    /// Rows to store, oldest first. An escalated judgment holds the primary's row, then its own; the last row is
+    /// the returned decision unless that decision is `cached`.
+    fresh: Vec<NewDecision>,
     /// `verdict::explore_draw` for this question and state.
     explore_draw: f64,
     /// A spec, or an ad-hoc question whose text `label` can read.
     learnable: bool,
+}
+
+impl Judgment {
+    /// A triage item whose judgment failed: `unsure`, not stored, never reported.
+    fn failed(question: &Question, endpoint: &str, error: &ServiceError) -> Self {
+        Self {
+            decision: Decision {
+                error: Some(error.to_string()),
+                ..Decision::unsure(question)
+            },
+            endpoint: endpoint.into(),
+            fresh: Vec::new(),
+            explore_draw: 1.0,
+            learnable: false,
+        }
+    }
 }
 
 /// What the caller does with a verdict, which decides whether `learn` reports or explores it.
@@ -271,6 +365,11 @@ pub struct Service {
     metrics: Metrics,
     /// Held during an automatic refit, so concurrent labels skip theirs.
     refit: Mutex<()>,
+    /// The escalation budget window: its start and the escalations granted in it. A std mutex, held for a few
+    /// instructions and never across an await.
+    escalations: std::sync::Mutex<(Instant, usize)>,
+    triage_deadline: Duration,
+    ask_deadline: Duration,
 }
 
 impl Service {
@@ -299,7 +398,19 @@ impl Service {
             store,
             metrics: Metrics::default(),
             refit: Mutex::new(()),
+            escalations: std::sync::Mutex::new((Instant::now(), 0)),
+            triage_deadline: TRIAGE_DEADLINE,
+            ask_deadline: ASK_DEADLINE,
         }
+    }
+
+    /// Replaces the triage and ask deadlines, so tests need not wait 90 s and 20 s.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_deadlines(mut self, triage: Duration, ask: Duration) -> Self {
+        self.triage_deadline = triage;
+        self.ask_deadline = ask;
+        self
     }
 
     pub(crate) const fn learning(&self) -> &domain::config::Learning {
@@ -330,7 +441,7 @@ impl Service {
     }
 
     pub async fn label(&self, id: i64, value: String) -> Result<LabelResponse, ServiceError> {
-        let (spec, question_hash, endpoint) = self
+        let (spec, question_hash, state_hash) = self
             .store
             .metadata(id)
             .await?
@@ -363,11 +474,18 @@ impl Service {
         if !self.store.set_label(id, &value).await? {
             return Err(ServiceError::BadRequest(format!("no decision {id}")));
         }
-        if let Err(e) = self
-            .maybe_recalibrate(spec.as_deref(), &question, &endpoint)
-            .await
-        {
-            tracing::warn!(error = %e, "automatic recalibration failed");
+        // A label serves every endpoint that answered this state, an escalated one's primary included.
+        let endpoints = self
+            .store
+            .endpoints(spec.as_deref(), &question_hash, &state_hash)
+            .await?;
+        for name in &endpoints {
+            if let Err(e) = self
+                .maybe_recalibrate(spec.as_deref(), &question, name)
+                .await
+            {
+                tracing::warn!(error = %e, endpoint = %name, "automatic recalibration failed");
+            }
         }
 
         Ok(LabelResponse { id, label: value })
@@ -403,9 +521,13 @@ impl Service {
         if every == 0 {
             return Ok(());
         }
+        let question_hash = verdict::question_hash(question);
+        let (calibration_id, backend) = self.calibration_id(endpoint, &question_hash).await?;
+        // Only the states this endpoint answered, which its fit counts as examples, so an escalation endpoint that
+        // sees a few states refits on its own cadence.
         let count = self
             .store
-            .labelled_count(spec, &verdict::question_hash(question))
+            .labelled_states(spec, &question_hash, &calibration_id)
             .await?;
         if count < every {
             return Ok(());
@@ -413,9 +535,6 @@ impl Service {
         let Ok(_refit) = self.refit.try_lock() else {
             return Ok(());
         };
-        let (calibration_id, backend) = self
-            .calibration_id(endpoint, &verdict::question_hash(question))
-            .await?;
         let stored = self.store.calibration(&calibration_id, spec).await?;
         // Refit once the count has crossed a multiple since the last fit, so a refit that a failed probe or a busy
         // lock skipped runs at the next label instead of the next multiple.
@@ -519,6 +638,7 @@ impl Service {
                 },
                 state: row.state,
                 label: row.label,
+                endpoint: row.endpoint,
             })
             .collect();
 
@@ -665,11 +785,11 @@ impl Service {
                 continue;
             } else {
                 // Never remember here: a fit must use the model's answers, not the labels themselves.
-                let judgments = self
+                let (judgments, _) = self
                     .judge(&first.state, spec, slice::from_ref(question), name, false)
                     .await?;
 
-                self.persist(judgments, name, spec)
+                self.persist(judgments, spec)
                     .await?
                     .remove(0)
                     .probabilities
@@ -839,23 +959,25 @@ impl Service {
             .triage_items(&endpoint, request.items, request.context.as_deref())
             .await?;
         let unique_count = items.len();
+        let spec = request.spec.as_deref();
+        let pass = self.pass(
+            spec,
+            &endpoint,
+            request.learn,
+            request.escalate,
+            "triage",
+            self.triage_deadline,
+        );
         let (prefiltered, warning) = if let Some(top_k) = request.top_k {
-            self.prefilter(&question, &mut items, top_k).await?
+            self.prefilter(&question, &mut items, top_k, &pass).await?
         } else {
             (Vec::new(), None)
         };
-        let questions = slice::from_ref(&question);
-        let (endpoint, spec) = (&endpoint, request.spec.as_deref());
-        let remember = request.learn && self.config.learning.remember;
-        let mut decisions =
-            future::try_join_all(items.into_iter().map(|(index, state)| async move {
-                let mut judgments = self
-                    .judge(&state, spec, questions, endpoint, remember)
-                    .await?;
-
-                Ok::<_, ServiceError>((index, judgments.remove(0)))
-            }))
-            .await?;
+        let (mut decisions, failures) = self.judge_items(items, &question, &pass).await?;
+        let warning = [warning, failures]
+            .into_iter()
+            .flatten()
+            .reduce(|first, second| format!("{first}; {second}"));
         decisions.sort_by_key(|(index, _)| *index);
         let matches = |verdict: &str| {
             if matches!(question.kind, Kind::Score { .. }) {
@@ -886,7 +1008,7 @@ impl Service {
         let mut unsure = Vec::new();
         let mut rejected = Vec::new();
         let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
-        let decisions = self.persist(judgments, endpoint, spec).await?;
+        let decisions = self.persist(judgments, spec).await?;
         for (index, decision) in indices.into_iter().zip(decisions) {
             let item = TriageItem { index, decision };
             if item.decision.verdict == "unsure" {
@@ -906,6 +1028,46 @@ impl Service {
             rejected,
             prefiltered,
         })
+    }
+
+    /// Judges each triage item before the deadline. A failed item fails open to `unsure`, with a warning that counts
+    /// the failures; if every item failed, the request fails with the first error.
+    async fn judge_items(
+        &self,
+        items: Vec<(usize, String)>,
+        question: &Question,
+        pass: &Pass<'_>,
+    ) -> Result<(Vec<(usize, Judgment)>, Option<String>), ServiceError> {
+        let questions = slice::from_ref(question);
+        let results = future::join_all(items.into_iter().map(|(index, state)| async move {
+            let judged = self.judge_escalating(&state, questions, pass).await;
+
+            (index, judged.map(|mut judgments| judgments.remove(0)))
+        }))
+        .await;
+        let total = results.len();
+        let failed = results.iter().filter(|(_, judged)| judged.is_err()).count();
+        if failed > 0 && failed == total {
+            let first = results.into_iter().find_map(|(_, judged)| judged.err());
+
+            return Err(first.expect("a failed item"));
+        }
+        let warning = results
+            .iter()
+            .find_map(|(_, judged)| judged.as_ref().err())
+            .map(|error| format!("{failed} of {total} items failed and are unsure: {error}"));
+        let decisions = results
+            .into_iter()
+            .map(|(index, judged)| {
+                (
+                    index,
+                    judged
+                        .unwrap_or_else(|error| Judgment::failed(question, pass.endpoint, &error)),
+                )
+            })
+            .collect();
+
+        Ok((decisions, warning))
     }
 
     async fn triage_items(
@@ -951,6 +1113,7 @@ impl Service {
         question: &Question,
         items: &mut Vec<(usize, String)>,
         top_k: usize,
+        pass: &Pass<'_>,
     ) -> Result<(Vec<usize>, Option<String>), ServiceError> {
         let embedder = self
             .embedder
@@ -962,7 +1125,8 @@ impl Service {
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
             .collect::<Vec<_>>();
-        let vectors = match embedder.embed(&texts).await {
+        let passed = || backend::BackendError(pass.passed.clone());
+        let vectors = match within(pass.deadline, embedder.embed(&texts), passed).await {
             Ok(vectors) => vectors,
             Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
         };
@@ -1001,9 +1165,16 @@ impl Service {
         let spec = request.spec.as_deref();
         let (questions, endpoint) =
             self.resolve_questions(spec, &request.questions, request.endpoint.as_deref())?;
-        let remember = request.learn && self.config.learning.remember;
+        let pass = self.pass(
+            spec,
+            &endpoint,
+            request.learn,
+            request.escalate,
+            "ask",
+            self.ask_deadline,
+        );
         let mut judgments = self
-            .judge(&request.state, spec, &questions, &endpoint, remember)
+            .judge_escalating(&request.state, &questions, &pass)
             .await?;
         if request.learn {
             for (judgment, question) in judgments.iter_mut().zip(&questions) {
@@ -1019,7 +1190,7 @@ impl Service {
         }
 
         Ok(AskResponse {
-            results: self.persist(judgments, &endpoint, spec).await?,
+            results: self.persist(judgments, spec).await?,
         })
     }
 
@@ -1029,7 +1200,7 @@ impl Service {
         questions: &[Question],
         endpoint: Option<&str>,
     ) -> Result<(Vec<Question>, String), ServiceError> {
-        let (questions, spec_endpoint) = if let Some(name) = spec {
+        let questions = if let Some(name) = spec {
             if !questions.is_empty() {
                 return Err(ServiceError::BadRequest(
                     "use spec or questions, not both".into(),
@@ -1040,20 +1211,17 @@ impl Service {
                 .specs
                 .get(name)
                 .ok_or_else(|| ServiceError::BadRequest(format!("unknown spec {name}")))?;
-            (
-                vec![Question {
-                    id: name.into(),
-                    instructions: spec.instructions.clone(),
-                    kind: spec.kind.clone(),
-                }],
-                spec.endpoint.as_deref(),
-            )
+            vec![Question {
+                id: name.into(),
+                instructions: spec.instructions.clone(),
+                kind: spec.kind.clone(),
+            }]
         } else {
-            (questions.to_vec(), None)
+            questions.to_vec()
         };
         domain::question::validate_all(&questions)
             .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-        let name = endpoint.or(spec_endpoint).unwrap_or(&self.config.default);
+        let name = endpoint.unwrap_or_else(|| self.spec_endpoint(spec));
         if !self.endpoints.contains_key(name) {
             return Err(ServiceError::BadRequest(format!("unknown endpoint {name}")));
         }
@@ -1061,8 +1229,15 @@ impl Service {
         Ok((questions, name.into()))
     }
 
+    /// The endpoint of `spec`, else the default.
+    fn spec_endpoint(&self, spec: Option<&str>) -> &str {
+        spec.and_then(|name| self.config.specs.get(name)?.endpoint.as_deref())
+            .unwrap_or(&self.config.default)
+    }
+
     /// Judges resolved questions; `resolve_questions` must have validated them and `name`.
     /// With `remember`, a label reported for the same question and state is the verdict.
+    /// Also returns the state as fitted to the endpoint, which `escalate` re-asks about.
     async fn judge(
         &self,
         state: &str,
@@ -1070,7 +1245,7 @@ impl Service {
         questions: &[Question],
         name: &str,
         remember: bool,
-    ) -> Result<Vec<Judgment>, ServiceError> {
+    ) -> Result<(Vec<Judgment>, String), ServiceError> {
         let endpoint = &self.endpoints[name];
         let backend_error = |e| self.backend_error(name, e);
         let info = endpoint.info().await.map_err(backend_error)?;
@@ -1122,21 +1297,23 @@ impl Service {
             let remembered = label.is_some();
             let outcome =
                 label.unwrap_or_else(|| verdict::verdict(&question.kind, &probabilities, bands));
-            let fresh = (!cached).then(|| NewDecision {
-                spec: spec.map(Into::into),
-                question: stored_question(question).to_string(),
-                question_hash,
-                calibration_id,
-                state_hash: state_hash.clone(),
-                state: state.clone(),
-                answer: probabilities.clone(),
-                verdict: outcome.clone(),
-                endpoint: name.into(),
-            });
+            let fresh = if cached {
+                Vec::new()
+            } else {
+                vec![NewDecision {
+                    spec: spec.map(Into::into),
+                    question: stored_question(question).to_string(),
+                    question_hash,
+                    calibration_id,
+                    state_hash: state_hash.clone(),
+                    state: state.clone(),
+                    answer: probabilities.clone(),
+                    verdict: outcome.clone(),
+                    endpoint: name.into(),
+                }]
+            };
             let decision = Decision {
                 id,
-                question: question.id.clone(),
-                question_type: question.kind.type_name().into(),
                 verdict: outcome,
                 confidence: verdict::confidence(&question.kind, &probabilities),
                 score: matches!(question.kind, Kind::Score { .. })
@@ -1149,19 +1326,157 @@ impl Service {
                     .collect(),
                 calibrated,
                 cached,
-                report: false,
-                explored: false,
                 remembered,
+                ..Decision::unsure(question)
             };
             judgments.push(Judgment {
                 decision,
+                endpoint: name.into(),
                 fresh,
                 explore_draw,
                 learnable,
             });
         }
 
+        Ok((judgments, state))
+    }
+
+    /// The switches of one request. Its `unsure` answers go to the escalation endpoint unless the request, else the
+    /// spec, turns that off, or the request already runs on that endpoint.
+    fn pass<'a>(
+        &'a self,
+        spec: Option<&'a str>,
+        endpoint: &'a str,
+        learn: bool,
+        escalate: Option<bool>,
+        request: &'static str,
+        limit: Duration,
+    ) -> Pass<'a> {
+        let escalation = self.config.escalation.as_ref().filter(|escalation| {
+            escalation.endpoint != endpoint
+                && escalate
+                    .or_else(|| spec.and_then(|name| self.config.specs.get(name)?.escalate))
+                    .unwrap_or(true)
+        });
+
+        Pass {
+            spec,
+            endpoint,
+            remember: learn && self.config.learning.remember,
+            escalation,
+            deadline: tokio::time::Instant::now() + limit,
+            request,
+            passed: format!("{request} deadline of {limit:?} passed"),
+        }
+    }
+
+    /// Judges before the deadline, then re-asks the `unsure` answers under the same deadline. A primary answer that
+    /// misses it fails; an escalation that misses it keeps the primary `unsure`.
+    async fn judge_escalating(
+        &self,
+        state: &str,
+        questions: &[Question],
+        pass: &Pass<'_>,
+    ) -> Result<Vec<Judgment>, ServiceError> {
+        let (mut judgments, state) = within(
+            pass.deadline,
+            self.judge(state, pass.spec, questions, pass.endpoint, pass.remember),
+            || self.backend_error(pass.endpoint, backend::BackendError(pass.passed.clone())),
+        )
+        .await?;
+        if let Some(escalation) = pass.escalation {
+            let escalated = self.escalate(&state, questions, escalation, pass, &mut judgments);
+            if tokio::time::timeout_at(pass.deadline, escalated)
+                .await
+                .is_err()
+            {
+                tracing::warn!(
+                    "escalation missed the {} deadline; keeping the unsure answer",
+                    pass.request
+                );
+            }
+        }
+
         Ok(judgments)
+    }
+
+    /// Re-asks `unsure` answers on the escalation endpoint, about `state` as the primary endpoint saw it, so both
+    /// stored rows share a state hash and one label serves both. Fails open: an error or a spent budget keeps the
+    /// primary answer. It changes `judgments` only after its last await, so a deadline can cancel it safely.
+    async fn escalate(
+        &self,
+        state: &str,
+        questions: &[Question],
+        escalation: &Escalation,
+        pass: &Pass<'_>,
+        judgments: &mut [Judgment],
+    ) {
+        let name = escalation.endpoint.as_str();
+        let mut unsure: Vec<usize> = judgments
+            .iter()
+            .enumerate()
+            .filter(|(_, judgment)| {
+                let decision = &judgment.decision;
+                decision.verdict == "unsure" && !decision.remembered && decision.error.is_none()
+            })
+            .map(|(index, _)| index)
+            .collect();
+        let (granted, granted_in) = {
+            let mut window = self.escalations.lock().expect("escalation budget");
+            let granted = grant(
+                &mut window,
+                Instant::now(),
+                escalation.per_minute,
+                unsure.len(),
+            );
+            (granted, window.0)
+        };
+        if granted < unsure.len() {
+            self.metrics
+                .record_escalation(name, "budget", unsure.len() - granted);
+        }
+        unsure.truncate(granted);
+        if unsure.is_empty() {
+            return;
+        }
+        let asked: Vec<Question> = unsure
+            .iter()
+            .map(|&index| questions[index].clone())
+            .collect();
+        let escalated = match self
+            .judge(state, pass.spec, &asked, name, pass.remember)
+            .await
+        {
+            Ok((escalated, _)) => escalated,
+            Err(error) => {
+                tracing::warn!(%error, "escalation failed; keeping the unsure answer");
+                self.metrics.record_escalation(name, "error", unsure.len());
+                return;
+            }
+        };
+        // A cached answer made no model call, so it gives its grant back.
+        let cached = escalated
+            .iter()
+            .filter(|judgment| judgment.decision.cached)
+            .count();
+        refund(
+            &mut self.escalations.lock().expect("escalation budget"),
+            granted_in,
+            cached,
+        );
+        for (&index, mut judgment) in unsure.iter().zip(escalated) {
+            let outcome = if judgment.decision.verdict == "unsure" {
+                "unsure"
+            } else {
+                "decided"
+            };
+            self.metrics.record_escalation(name, outcome, 1);
+            judgment.decision.escalated = true;
+            judgment
+                .fresh
+                .splice(0..0, std::mem::take(&mut judgments[index].fresh));
+            judgments[index] = judgment;
+        }
     }
 
     /// Reads what the store knows about one question and state, before the model call:
@@ -1231,28 +1546,37 @@ impl Service {
     async fn persist(
         &self,
         mut judgments: Vec<Judgment>,
-        endpoint: &str,
         spec: Option<&str>,
     ) -> Result<Vec<Decision>, ServiceError> {
-        let fresh = judgments
+        let counts: Vec<usize> = judgments
+            .iter()
+            .map(|judgment| judgment.fresh.len())
+            .collect();
+        let rows: Vec<NewDecision> = judgments
             .iter_mut()
-            .filter_map(|judgment| judgment.fresh.take())
-            .collect::<Vec<_>>();
-        let ids = if fresh.is_empty() {
+            .flat_map(|judgment| std::mem::take(&mut judgment.fresh))
+            .collect();
+        let ids = if rows.is_empty() {
             Vec::new()
         } else {
-            self.store.insert_many(fresh).await?
+            self.store.insert_many(rows).await?
         };
         let mut ids = ids.into_iter();
 
         Ok(judgments
             .into_iter()
-            .map(|mut judgment| {
-                if !judgment.decision.cached {
-                    judgment.decision.id = ids.next().expect("id for each fresh decision");
+            .zip(counts)
+            .map(|(mut judgment, count)| {
+                // The last row is the returned decision, unless the decision came from the cache.
+                if let Some(id) = ids.by_ref().take(count).last()
+                    && !judgment.decision.cached
+                {
+                    judgment.decision.id = id;
                 }
-                self.metrics
-                    .record_decision(endpoint, spec, &judgment.decision);
+                if judgment.decision.error.is_none() {
+                    self.metrics
+                        .record_decision(&judgment.endpoint, spec, &judgment.decision);
+                }
 
                 judgment.decision
             })
@@ -1268,6 +1592,26 @@ fn list_limit(limit: Option<usize>) -> Result<u32, ServiceError> {
     }
 }
 
+/// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
+// ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
+// that ever matters.
+/// Gives `count` back to the window that granted it; a window that has since rolled over keeps its count.
+fn refund(window: &mut (Instant, usize), granted_in: Instant, count: usize) {
+    if window.0 == granted_in {
+        window.1 = window.1.saturating_sub(count);
+    }
+}
+
+fn grant(window: &mut (Instant, usize), now: Instant, per_minute: usize, wanted: usize) -> usize {
+    if now.duration_since(window.0) >= Duration::from_secs(60) {
+        *window = (now, 0);
+    }
+    let granted = per_minute.saturating_sub(window.1).min(wanted);
+    window.1 += granted;
+
+    granted
+}
+
 /// The stored form of a question: its JSON without the caller's id, which is not part of the hash.
 fn stored_question(question: &Question) -> Value {
     let mut value = serde_json::to_value(question).expect("question serializes");
@@ -1277,4 +1621,34 @@ fn stored_question(question: &Question) -> Value {
         .remove("id");
 
     value
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn refund_only_returns_to_the_window_that_granted() {
+        let start = std::time::Instant::now();
+        let mut window = (start, 0);
+        assert_eq!(super::grant(&mut window, start, 3, 3), 3);
+        super::refund(&mut window, start, 2);
+        assert_eq!(window.1, 1);
+        let later = start + std::time::Duration::from_secs(61);
+        assert_eq!(super::grant(&mut window, later, 3, 3), 3);
+        super::refund(&mut window, start, 3);
+        assert_eq!(
+            window.1, 3,
+            "a refund from an old window must not free the new one"
+        );
+    }
+
+    #[test]
+    fn grant_spends_then_refills_after_a_minute() {
+        let start = std::time::Instant::now();
+        let mut window = (start, 0);
+        assert_eq!(super::grant(&mut window, start, 3, 2), 2);
+        assert_eq!(super::grant(&mut window, start, 3, 2), 1);
+        assert_eq!(super::grant(&mut window, start, 3, 1), 0);
+        let later = start + std::time::Duration::from_secs(60);
+        assert_eq!(super::grant(&mut window, later, 3, 5), 3);
+    }
 }

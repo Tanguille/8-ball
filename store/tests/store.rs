@@ -386,7 +386,7 @@ async fn remembered_finds_the_newest_label_under_any_model() {
 }
 
 #[tokio::test]
-async fn labelled_count_and_rows_are_scoped_by_spec() {
+async fn labelled_states_and_rows_are_scoped_by_spec() {
     let (_directory, _, store) = opened().await;
     let first = insert(&store, decision("one")).await;
     let second = insert(&store, decision("two")).await;
@@ -394,30 +394,99 @@ async fn labelled_count_and_rows_are_scoped_by_spec() {
     let mut anonymous = decision("one");
     anonymous.spec = None;
     let ad_hoc = insert(&store, anonymous).await;
-    for id in [first, second, ad_hoc] {
+    let other_model = insert(
+        &store,
+        NewDecision {
+            calibration_id: "other-model".into(),
+            ..decision("four")
+        },
+    )
+    .await;
+    for id in [first, second, ad_hoc, other_model] {
         store.set_label(id, "yes").await.unwrap();
     }
-    assert_eq!(
-        store
-            .labelled_count(Some("greeting"), "question")
-            .await
-            .unwrap(),
-        2
-    );
-    assert_eq!(store.labelled_count(None, "question").await.unwrap(), 1);
+    let count = |spec, calibration_id| {
+        let store = store.clone();
+        async move {
+            store
+                .labelled_states(spec, "question", calibration_id)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(count(Some("greeting"), "model-question").await, 2);
+    assert_eq!(count(None, "model-question").await, 1);
+    assert_eq!(count(Some("greeting"), "other-model").await, 1);
     let rows = store.labelled(None, "question").await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, ad_hoc);
 }
 
 #[tokio::test]
-async fn metadata_returns_spec_question_and_endpoint() {
+async fn metadata_returns_spec_question_and_state() {
     let (_directory, _, store) = opened().await;
     let id = insert(&store, decision("one")).await;
     assert_eq!(
         store.metadata(id).await.unwrap(),
-        Some((Some("greeting".into()), "question".into(), "d3".into()))
+        Some((Some("greeting".into()), "question".into(), "one".into()))
     );
+}
+
+#[tokio::test]
+async fn endpoints_lists_who_answered_a_state_once() {
+    let (_directory, _, store) = opened().await;
+    for endpoint in ["d3", "big", "d3"] {
+        insert(
+            &store,
+            NewDecision {
+                endpoint: endpoint.into(),
+                ..decision("a")
+            },
+        )
+        .await;
+    }
+    insert(&store, decision("b")).await;
+    assert_eq!(
+        store
+            .endpoints(Some("greeting"), "question", "a")
+            .await
+            .unwrap(),
+        ["d3", "big"]
+    );
+}
+
+#[tokio::test]
+async fn unlabelled_lists_one_row_per_state() {
+    let (_directory, _, store) = opened().await;
+    let primary = insert(&store, decision("a")).await;
+    let escalated = insert(
+        &store,
+        NewDecision {
+            endpoint: "big".into(),
+            ..decision("a")
+        },
+    )
+    .await;
+    let other = insert(&store, decision("b")).await;
+    let listed = |unlabelled| {
+        let store = store.clone();
+        async move {
+            store
+                .decisions(Some("greeting"), "question", unlabelled, 10)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| (row.id, row.endpoint))
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(
+        listed(true).await,
+        [(other, "d3".to_owned()), (escalated, "big".to_owned())]
+    );
+    store.set_label(primary, "yes").await.unwrap();
+    assert_eq!(listed(true).await, [(other, "d3".to_owned())]);
+    assert_eq!(listed(false).await.len(), 3);
 }
 
 /// sqlx refuses to open a database whose applied migration text changed, so a shipped migration must stay

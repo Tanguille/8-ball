@@ -1,4 +1,4 @@
-use std::process::Stdio;
+use std::{process::Stdio, time::Duration};
 
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
@@ -8,11 +8,19 @@ use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers};
 mod common;
 
 async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::TempDir) {
+    app_with(embed, "", Duration::ZERO).await
+}
+/// `endpoint` holds extra `[endpoints.d3]` lines; `delay` slows every model answer.
+async fn app_with(
+    embed: Option<bool>,
+    endpoint: &str,
+    delay: Duration,
+) -> (String, MockServer, MockServer, tempfile::TempDir) {
     let model = MockServer::start().await;
     let embedding = MockServer::start().await;
     Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/systemone"))
-        .respond_with(|request: &Request| {
+        .respond_with(move |request: &Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap();
             let probabilities = match body["state"].as_str().unwrap() {
                 "bad" => return ResponseTemplate::new(500),
@@ -27,7 +35,9 @@ async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::
                 .map(|id| (id.clone(), json!({"type":"noul","noul":probabilities})))
                 .collect();
 
-            ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"answers":answers}))
+                .set_delay(delay)
         })
         .mount(&model)
         .await;
@@ -67,7 +77,7 @@ async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::
         String::new()
     };
     let config: domain::config::Config = toml::from_str(&format!(
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n{extra}\n[specs.relevant]\ntype='noul'\ninstructions='Is this relevant?'",
+        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n{endpoint}\n{extra}\n[specs.relevant]\ntype='noul'\ninstructions='Is this relevant?'",
         model.uri()
     ))
     .unwrap();
@@ -224,13 +234,55 @@ async fn top_k_requires_embedder() {
     assert_eq!(triage(&url, &body).await.status(), 400);
 }
 #[tokio::test]
-async fn one_failed_judgment_fails_whole_triage() {
+async fn one_failed_judgment_fails_open_to_unsure() {
     let (url, _model, _embedding, _dir) = app(None).await;
-    assert_eq!(
-        triage(&url, &request(&json!(["yes1", "bad"])))
-            .await
-            .status(),
-        502
+    let response = triage(&url, &request(&json!(["yes1", "bad"]))).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["kept"][0]["index"], 0);
+    let failed = &body["unsure"][0];
+    assert_eq!(failed["index"], 1);
+    assert_eq!(failed["decision"]["id"], 0);
+    assert_eq!(failed["decision"]["verdict"], "unsure");
+    assert!(
+        failed["decision"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("HTTP 500")
+    );
+    assert_eq!(failed["decision"]["report"], false);
+    assert!(
+        body["warning"]
+            .as_str()
+            .unwrap()
+            .starts_with("1 of 2 items failed and are unsure: ")
+    );
+}
+#[tokio::test]
+async fn every_failed_judgment_fails_the_triage() {
+    let (url, _model, _embedding, _dir) = app(None).await;
+    assert_eq!(triage(&url, &request(&json!(["bad"]))).await.status(), 502);
+}
+#[tokio::test]
+async fn sixty_four_items_on_one_slot_all_answer() {
+    // 64 calls of 50 ms on one slot take 3.2 s, longer than the 1 s call timeout.
+    let (url, _model, _embedding, _dir) = app_with(
+        None,
+        "concurrency = 1\ntimeout_secs = 1",
+        Duration::from_millis(50),
+    )
+    .await;
+    let items: Vec<_> = (0..64).map(|i| format!("yes{i}")).collect();
+    let response = triage(&url, &request(&json!(items))).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    let groups = ["kept", "unsure", "rejected"].map(|key| body[key].as_array().unwrap());
+    assert_eq!(groups.iter().map(|group| group.len()).sum::<usize>(), 64);
+    assert!(
+        groups
+            .iter()
+            .flat_map(|group| group.iter())
+            .all(|item| item["decision"].get("error").is_none())
     );
 }
 #[tokio::test]

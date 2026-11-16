@@ -53,7 +53,10 @@ jobs:
       - run: dev/models.sh up
       # One test at a time: on the runner's 4 CPUs, parallel tests queue on the same model servers past the
       # 20 s decision timeout.
+      # The 64-item triage test needs about 125 s on these CPUs, so it gets 240 s instead of the production 90 s.
       - run: cargo nextest run --test live --run-ignored only -j 1 --no-fail-fast
+        env:
+          EIGHTBALL_TEST_TRIAGE_DEADLINE_SECS: "240"
       - run: cargo build --release -p cli -p bench
       # Fails when a task gets worse than bench/baseline.json by more than 1% of its cases. A PR that changes
       # verdicts on purpose updates the baseline from this job's summary.json artifact. Qwen3.5 0.8B only reports:

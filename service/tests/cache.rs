@@ -136,6 +136,7 @@ async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
             questions: vec![question],
             endpoint: None,
             learn: true,
+            escalate: None,
         },
     )
     .await;
