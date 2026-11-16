@@ -33,7 +33,7 @@ jobs:
         include:
           - name: shell
             tool: aqua:ewhauser/shuck aqua:mvdan/sh
-            run: git ls-files -z '*.sh' | xargs -0 shuck check && git ls-files -z '*.sh' | xargs -0 shfmt -d
+            run: git ls-files -z '*.sh' | xargs -0 shuck check && git ls-files -z '*.sh' | xargs -0 shfmt -d && dev/test-publish-bench.sh
           - name: hadolint
             tool: aqua:hadolint/hadolint
             run: hadolint Dockerfile
