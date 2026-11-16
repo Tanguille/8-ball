@@ -24,7 +24,7 @@ fi
   printf 'Run on %s, 8-ball commit %s, [run](%s/%s/actions/runs/%s).\n\n' \
     "$(date -u +%F)" "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
   if [ -n "$drop" ]; then
-    printf 'Excluded, with errors on more than 1%% of their cases: %s.\n\n' "$(printf '%s\n' "$drop" | paste -sd, | sed 's/,/, /g')"
+    printf 'Excluded, with errors on more than 1%% of their cases: %s.\n\n' "$(printf '%s\n' "$drop" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
   fi
   # Leave the rows of excluded methods out of every table (the label is the first cell).
   awk -v drop="$drop" 'BEGIN { n = split(drop, names, "\n") }
