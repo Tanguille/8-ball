@@ -78,7 +78,7 @@ The tables above come from one run by hand. CI runs the benchmark again and save
 | [27b](https://github.com/Tanguille/8-ball/blob/bench-results/27b.md) | d3, Qwen3.8 27B, the cascade | d3 on the runner, the 27B at a hosted provider | Every night but Sunday |
 | [matrix](https://github.com/Tanguille/8-ball/blob/bench-results/matrix.md) | d3 and every hosted model that can answer a decision question | d3 on the runner, the others at a hosted provider | Sunday |
 
-Compare accuracy between pages only when the cases per side are the same. Do not compare time between a hosted model and a local model, because the hosted time includes the network. A run where a model has errors on more than 1% of its cases does not replace a page, so a page can be older than the last run. The history of the branch has the earlier results.
+Compare accuracy between pages only when the cases per side are the same. Do not compare time between a hosted model and a local model, because the hosted time includes the network. A model with errors on more than 1% of its cases is left off the page, and the page names it at the top. A page is not replaced when d3 is excluded or fewer than 2 methods remain, so a page can be older than the last run. The history of the branch has the earlier results.
 
 ## CI
 
@@ -90,6 +90,6 @@ Compare accuracy between pages only when the cases per side are the same. Do not
 
 The PR benchmark fails when a task of d3 or the reranker gets worse than `bench/baseline.json` by more than 1% of its cases. CPU and GPU builds can flip a borderline verdict, so 1% is allowed. On the same 600 cases, d3 gave the same verdicts on CPU and GPU, and Qwen3.5 0.8B gave 20 other verdicts. So Qwen3.5 0.8B changes are shown, but do not fail the run. When a pull request changes verdicts on purpose, copy `summary.json` from the job's `bench` artifact to `bench/baseline.json` in the same pull request.
 
-The hosted runs need the `HOSTED_API_KEY` repository secret and the `HOSTED_URL` repository variable. The optional `HOSTED_SKIP` variable is a regex for model ids to leave out. They compare with the last saved run of the same kind. The 27B run fails when it gets worse, and the weekly run only warns. After an intended change, run the workflow by hand with `accept` to save a new baseline. Pull requests never get the secret. `dev/hosted.sh` prints the hosted endpoints that a run uses.
+The hosted runs need the `HOSTED_API_KEY` repository secret and the `HOSTED_URL` repository variable. The optional `HOSTED_SKIP` variable is a regex for model ids to leave out. Its default, `^8ball$|/`, skips our own joke model and router ids that contain a slash. The report counts the models that cannot answer and does not name them. They compare with the last saved run of the same kind. The 27B run fails when it gets worse, and the weekly run only warns. After an intended change, run the workflow by hand with `accept` to save a new baseline. Pull requests never get the secret. `dev/hosted.sh` prints the hosted endpoints that a run uses.
 
 The `publish` job of each workflow writes the pages. It runs only for pushes to `main` and for schedules, never for a pull request, and it has no secret. Create the `bench-results` branch once, with `git switch --orphan bench-results && git commit --allow-empty -m "chore: start" && git push origin bench-results`.

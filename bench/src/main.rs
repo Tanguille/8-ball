@@ -237,6 +237,7 @@ fn doctor_endpoint<'a>(doctor: &'a Value, name: &str) -> Option<&'a Value> {
 /// access) fails here, before hundreds of cases; `--skip-unavailable` drops it with a note instead.
 fn available(args: &Args, doctor: &Value) -> Result<Vec<String>> {
     let mut kept = Vec::new();
+    let mut skipped = 0_usize;
     for name in &args.endpoints {
         let endpoint = doctor_endpoint(doctor, name)
             .with_context(|| format!("endpoint {name} is not configured"))?;
@@ -245,9 +246,13 @@ fn available(args: &Args, doctor: &Value) -> Result<Vec<String>> {
             .find(|error| !error.is_null());
         match error {
             None => kept.push(name.clone()),
-            Some(_) if args.skip_unavailable => println!("Skipped {name}.\n"),
+            Some(_) if args.skip_unavailable => skipped += 1,
             Some(error) => bail!("endpoint {name} failed its doctor probe: {error}"),
         }
+    }
+    // Only the count: the names of unavailable catalog entries do not belong on a public page.
+    if skipped > 0 {
+        println!("Skipped {skipped} endpoint(s) that cannot answer.\n");
     }
     ensure!(!kept.is_empty(), "no endpoint passed its doctor probe");
 

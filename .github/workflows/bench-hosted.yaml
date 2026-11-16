@@ -48,7 +48,8 @@ jobs:
     env:
       HOSTED_API_KEY: ${{ secrets.HOSTED_API_KEY }}
       HOSTED_URL: ${{ vars.HOSTED_URL }}
-      HOSTED_SKIP: ${{ vars.HOSTED_SKIP }}
+      # Our own joke model and router ids (they contain a slash) cannot answer a decision question. The variable replaces this.
+      HOSTED_SKIP: ${{ vars.HOSTED_SKIP || '^8ball$|/' }}
       MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
       ACCEPT: ${{ inputs.accept == true }}
     steps:
