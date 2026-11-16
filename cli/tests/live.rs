@@ -450,6 +450,15 @@ async fn live_unsure_answer_escalates_to_chat() {
 async fn live_triage_of_64_items_answers_every_item() {
     require(9931).await;
     let (service, _directory) = calibration_service(dev_config()).await;
+    // The 90 s triage deadline fits a GPU. The 4-CPU CI runner needs about 125 s for 64 items, so CI sets a longer
+    // one here; without the variable the test keeps the production deadline.
+    let service = match std::env::var("EIGHTBALL_TEST_TRIAGE_DEADLINE_SECS") {
+        Ok(secs) => service.with_deadlines(
+            std::time::Duration::from_secs(secs.parse().expect("seconds")),
+            std::time::Duration::from_secs(20),
+        ),
+        Err(_) => service,
+    };
     let items: Vec<String> = (0..64)
         .map(|i| {
             if i % 2 == 0 {
