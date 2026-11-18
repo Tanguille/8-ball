@@ -2,13 +2,13 @@
 
 All models ran on the CPU of the GitHub runner.
 
-Run on 2026-11-17, 8-ball commit c596c13fb431ac7c8f7aa003181de85c856195d6, [run](https://github.com/Tanguille/8-ball/actions/runs/44162941364).
+Run on 2026-11-18, 8-ball commit c8e5dadd12aabcd4d25dd50f2f1215bd8d27ebf8, [run](https://github.com/Tanguille/8-ball/actions/runs/44419158482).
 
 | Method | Decided | Wrong | Accuracy of decided | Correct of all | Correct vs d3 (95% CI) | Accuracy at 90% coverage | Mean time | Speed vs d3 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| d3 (vllm-d3-nano-Q8_0.gguf) | 90% | 10 | 98.2% | 88.8% | reference | 98.3% | 881 ms | 1.0x |
-| rerank (bge-reranker-v2-m3-Q8_0.gguf) | 0% | 0 | - | 0.0% | -88.8 (-91.3 to -86.3) | 55.4% | 134 ms | 6.6x |
-| chat (Qwen3.5-0.8B-Q8_0.gguf) | 35% | 31 | 85.2% | 29.7% | -59.2 (-63.7 to -54.3) | 56.3% | 506 ms | 1.7x |
+| d3 (vllm-d3-nano-Q8_0.gguf) | 90% | 10 | 98.2% | 88.8% | reference | 98.3% | 829 ms | 1.0x |
+| rerank (bge-reranker-v2-m3-Q8_0.gguf) | 0% | 0 | - | 0.0% | -88.8 (-91.3 to -86.3) | 55.4% | 127 ms | 6.5x |
+| chat (Qwen3.5-0.8B-Q8_0.gguf) | 35% | 31 | 85.2% | 29.7% | -59.2 (-63.7 to -54.3) | 56.3% | 351 ms | 2.4x |
 
 Per task, accuracy of decided (decided share):
 
@@ -18,7 +18,7 @@ Per task, accuracy of decided (decided share):
 | rerank (bge-reranker-v2-m3-Q8_0.gguf) | - (0%) | - (0%) | - (0%) |
 | chat (Qwen3.5-0.8B-Q8_0.gguf) | 90.0% (10%) | 76.1% (56%) | 97.4% (38%) |
 
-600 cases per method (yes/no: spam 100/100, positive 100/100, lost-card 100/100), 0 errors. Hardware: Intel(R) Xeon(R) 6973P-C, no GPU, CPU only.
+600 cases per method (yes/no: spam 100/100, positive 100/100, lost-card 100/100), 0 errors. Hardware: Intel(R) Xeon(R) 6975P-C, Intel Corporation 82371AB/EB/MB PIIX4 ACPI (rev 08); Amazon.com, Inc. Device 1111, GPU offload all layers.
 
 Compared with the baseline (decided, wrong):
 
