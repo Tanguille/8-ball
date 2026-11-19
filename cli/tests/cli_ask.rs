@@ -1,59 +1,19 @@
-use std::{io::BufRead, process::Command};
+use std::process::Command;
 
 use serde_json::{Value, json};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 #[path = "../../service/tests/common.rs"]
 mod common;
+mod server;
 
-struct Server {
-    child: std::process::Child,
-    _db: tempfile::TempDir,
-    url: String,
-}
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-fn serve(mock: &MockServer) -> Server {
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let database_path = directory.path().join("db.sqlite");
-    let child = Command::new(env!("CARGO_BIN_EXE_8ball"))
-        .args([
-            "serve",
-            "--db",
-            database_path.to_str().unwrap(),
-            "--config-toml",
-            &format!(
-                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[learning]\nexplore=0.0",
-                mock.uri()
-            ),
-            "--listen",
-            "127.0.0.1:0",
-        ])
-        // A config path from the developer's shell would conflict with --config-toml.
-        .env_remove("EIGHTBALL_CONFIG")
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut server = Server {
-        child,
-        _db: directory,
-        url: String::new(),
-    };
-    let stderr = server.child.stderr.take().unwrap();
-    for line in std::io::BufReader::new(stderr).lines() {
-        let line = line.unwrap();
-        if let Some((_, address)) = line.split_once("listening on ") {
-            server.url = format!("http://{}", address.trim());
+fn serve(mock: &MockServer) -> server::Server {
+    let config = format!(
+        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[learning]\nexplore=0.0",
+        mock.uri()
+    );
 
-            return server;
-        }
-    }
-
-    panic!("server exited before logging listening address");
+    server::serve(&["--config-toml", &config], None)
 }
 #[tokio::test]
 async fn noul_exit_codes() {
