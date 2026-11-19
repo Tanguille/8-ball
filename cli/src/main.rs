@@ -163,7 +163,7 @@ impl Remote {
     }
 }
 
-/// Where `serve` and `mcp` read their configuration.
+/// Where `serve` and `mcp` read their configuration and keep their database.
 #[derive(Args)]
 struct ConfigArgs {
     #[arg(long, env = "EIGHTBALL_CONFIG")]
@@ -176,14 +176,24 @@ struct ConfigArgs {
         hide_env_values = true
     )]
     config_toml: Option<String>,
+    #[arg(long, env = "EIGHTBALL_DB")]
+    db: Option<PathBuf>,
 }
 
 impl ConfigArgs {
-    fn load(self) -> Result<Config> {
-        Ok(match self.config_toml {
+    async fn service(self) -> Result<Arc<Service>> {
+        let config = match self.config_toml {
             Some(text) => Config::parse(&text, "EIGHTBALL_CONFIG_TOML")?,
             None => Config::load(&self.config.unwrap_or_else(config::default_config_path))?,
-        })
+        };
+        let store = store::Store::open(&self.db.unwrap_or_else(|| {
+            config::xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
+        }))
+        .await?;
+        let pruned = store.prune(config.retention_days).await?;
+        info!("pruned {pruned} old decisions");
+
+        Ok(Arc::new(Service::new(config, store)))
     }
 }
 
@@ -195,8 +205,6 @@ enum Command {
         config: ConfigArgs,
         #[arg(long, env = "EIGHTBALL_LISTEN", default_value = "127.0.0.1:8080")]
         listen: String,
-        #[arg(long, env = "EIGHTBALL_DB")]
-        db: Option<PathBuf>,
         #[arg(
             long,
             env = "EIGHTBALL_API_KEY",
@@ -206,13 +214,8 @@ enum Command {
         api_key: Option<String>,
     },
     /// Run MCP over stdin and stdout.
-    Mcp {
-        #[command(flatten)]
-        config: ConfigArgs,
-        #[arg(long, env = "EIGHTBALL_DB")]
-        db: Option<PathBuf>,
-    },
-    /// Ask an ad-hoc question (state from --state or stdin).
+    Mcp(ConfigArgs),
+    /// Ask an ad-hoc question or a --spec (state from --state or stdin).
     Ask(AskArgs),
     /// Judge a JSON array from stdin.
     Triage(TriageArgs),
@@ -301,15 +304,14 @@ async fn run() -> Result<i32> {
         Command::Serve {
             config,
             listen,
-            db,
             api_key,
         } => {
-            serve(config, listen, db, api_key).await?;
+            serve(config, listen, api_key).await?;
 
             Ok(0)
         }
-        Command::Mcp { config, db } => {
-            let server = service::mcp::Mcp::new(build_service(config, db).await?)
+        Command::Mcp(config) => {
+            let server = service::mcp::Mcp::new(config.service().await?)
                 .serve(rmcp::transport::stdio())
                 .await?;
             server.waiting().await?;
@@ -376,13 +378,8 @@ async fn shutdown() {
     }
 }
 
-async fn serve(
-    config: ConfigArgs,
-    listen: String,
-    db: Option<PathBuf>,
-    api_key: Option<String>,
-) -> Result<()> {
-    let service = build_service(config, db).await?;
+async fn serve(config: ConfigArgs, listen: String, api_key: Option<String>) -> Result<()> {
+    let service = config.service().await?;
     let cancellation_token = tokio_util::sync::CancellationToken::new();
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     let address = listener.local_addr()?;
@@ -474,19 +471,6 @@ async fn ask(
     })
 }
 
-async fn build_service(config: ConfigArgs, db: Option<PathBuf>) -> Result<Arc<Service>> {
-    let config = config.load()?;
-    let store =
-        store::Store::open(&db.unwrap_or_else(|| {
-            config::xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
-        }))
-        .await?;
-    let pruned = store.prune(config.retention_days).await?;
-    info!("pruned {pruned} old decisions");
-
-    Ok(Arc::new(Service::new(config, store)))
-}
-
 async fn doctor(remote: &Remote) -> Result<i32> {
     let report = remote
         .send(remote.client()?.get(remote.at("/v1/doctor")))
@@ -534,19 +518,15 @@ async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
     let mut observations = Vec::with_capacity(cases.len());
     for case in cases {
         let start = Instant::now();
-        let response = async {
-            let body = args
-                .remote
-                .send(client.post(args.remote.at("/v1/triage")).json(
-                    &json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
-                    "items":[case.item],"context":case.context,"learn":false}),
-                ))
-                .await?;
-
-            Ok::<_, anyhow::Error>(serde_json::from_value::<service::TriageResponse>(body)?)
-        }
-        .await
-        .map_err(|e| format!("{e:#}"));
+        let response = args
+            .remote
+            .send(client.post(args.remote.at("/v1/triage")).json(
+                &json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
+                "items":[case.item],"context":case.context,"learn":false}),
+            ))
+            .await
+            .and_then(|body| Ok(serde_json::from_value::<service::TriageResponse>(body)?))
+            .map_err(|e| format!("{e:#}"));
         observations.push(evaluate::Observation::new(case, start.elapsed(), response));
     }
     let report = evaluate::Report::from_observations(&observations);
