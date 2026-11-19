@@ -4,8 +4,9 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers};
 
-use common::{indices, requests};
 use service::TriageResponse;
+
+use common::{indices, requests};
 
 #[path = "../../service/tests/common.rs"]
 mod common;

@@ -40,6 +40,12 @@ const MIN_RETRY: Duration = Duration::from_secs(1);
 #[error("{0}")]
 pub struct BackendError(pub String);
 
+impl From<Error> for BackendError {
+    fn from(error: Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
 /// llama.cpp answers 503 while it loads a model, and a proxy or hosted gateway answers 502 while its upstream restarts.
 /// Both serve the request soon.
 const fn answers_soon(status: StatusCode) -> bool {
@@ -47,12 +53,6 @@ const fn answers_soon(status: StatusCode) -> bool {
         status,
         StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE
     )
-}
-
-impl From<Error> for BackendError {
-    fn from(error: Error) -> Self {
-        Self(error.to_string())
-    }
 }
 
 impl Endpoint {

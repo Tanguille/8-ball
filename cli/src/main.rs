@@ -533,7 +533,7 @@ async fn triage(args: TriageArgs) -> Result<i32> {
 }
 
 /// Appends the response for the chunk whose first index is `start`. It takes every field by name, so a new field
-/// fails to compile here instead of keeping only the first chunk's value.
+/// fails to compile here instead of staying at its default.
 fn merge(
     merged: &mut TriageResponse,
     warnings: &mut Vec<String>,

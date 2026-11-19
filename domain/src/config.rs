@@ -1,8 +1,4 @@
-use std::{
-    env,
-    num::{NonZeroU64, NonZeroUsize},
-    path::PathBuf,
-};
+use std::{env, num::NonZeroUsize, path::PathBuf};
 
 use indexmap::IndexMap;
 use serde::Deserialize;
@@ -78,7 +74,7 @@ pub struct EndpointConfig {
     /// Spaces requests evenly to stay under a hosted provider's rate limit.
     pub requests_per_minute: Option<std::num::NonZeroU32>,
     /// Seconds one HTTP attempt may take once it has a slot; default 20. Waiting for a slot is not counted, and a retry gets its own budget.
-    pub timeout_secs: Option<NonZeroU64>,
+    pub timeout_secs: Option<std::num::NonZeroU64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]

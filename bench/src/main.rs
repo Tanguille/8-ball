@@ -910,6 +910,10 @@ mod tests {
         assert!(!compare(&run(180, 7), &[]).unwrap());
         assert!(!compare(&run(177, 4), &[]).unwrap());
         assert!(compare(&run(180, 7), &["d3".into()]).unwrap());
+        // The page render leaves an excluded method out, regression included.
+        let mut page = String::new();
+        assert!(super::compare(&mut page, &run(180, 7), &baseline, &[], &["d3".into()]).unwrap());
+        assert!(!page.contains("| d3 |"));
         let other_size = json!({"per_side": 200, "split": "test", "methods": {}});
         assert!(compare(&other_size, &[]).is_err());
     }
