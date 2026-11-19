@@ -513,38 +513,56 @@ async fn triage(args: TriageArgs) -> Result<i32> {
     });
     // ponytail: chunks go one at a time, and top_k and duplicate sharing work per chunk; send them in parallel or
     // split on the server if large arrays need that.
-    let mut chunks = items.chunks(MAX_TRIAGE_ITEMS);
     // An empty array still makes one request, so the server checks the question.
-    body["items"] = json!(chunks.next().unwrap_or_default());
-    let mut merged: TriageResponse =
-        serde_json::from_value(args.remote.post("/v1/triage", &body).await?)?;
-    for (start, chunk) in (MAX_TRIAGE_ITEMS..).step_by(MAX_TRIAGE_ITEMS).zip(chunks) {
+    let chunks = items
+        .chunks(MAX_TRIAGE_ITEMS)
+        .chain(items.is_empty().then_some(&[][..]));
+    let client = args.remote.client()?;
+    let mut merged = TriageResponse::default();
+    let mut warnings = Vec::new();
+    for (start, chunk) in (0..).step_by(MAX_TRIAGE_ITEMS).zip(chunks) {
         body["items"] = json!(chunk);
-        let mut response: TriageResponse =
-            serde_json::from_value(args.remote.post("/v1/triage", &body).await?)?;
-        for item in response
-            .kept
-            .iter_mut()
-            .chain(&mut response.unsure)
-            .chain(&mut response.rejected)
-        {
-            item.index += start;
-        }
-        merged.kept.append(&mut response.kept);
-        merged.unsure.append(&mut response.unsure);
-        merged.rejected.append(&mut response.rejected);
-        merged
-            .prefiltered
-            .extend(response.prefiltered.iter().map(|index| index + start));
-        merged.dropped += response.dropped;
-        merged.warning = [merged.warning.take(), response.warning]
-            .into_iter()
-            .flatten()
-            .reduce(|first, second| format!("{first}; {second}"));
+        let request = client.post(args.remote.at("/v1/triage")).json(&body);
+        let response = serde_json::from_value(args.remote.send(request).await?)?;
+        merge(&mut merged, &mut warnings, response, start);
     }
+    merged.warning = (!warnings.is_empty()).then(|| warnings.join("; "));
     println!("{}", json!(merged));
 
     Ok(0)
+}
+
+/// Appends the response for the chunk whose first index is `start`. It takes every field by name, so a new field
+/// fails to compile here instead of keeping only the first chunk's value.
+fn merge(
+    merged: &mut TriageResponse,
+    warnings: &mut Vec<String>,
+    response: TriageResponse,
+    start: usize,
+) {
+    let TriageResponse {
+        kept,
+        unsure,
+        dropped,
+        rejected,
+        prefiltered,
+        warning,
+    } = response;
+    for (all, items) in [
+        (&mut merged.kept, kept),
+        (&mut merged.unsure, unsure),
+        (&mut merged.rejected, rejected),
+    ] {
+        all.extend(items.into_iter().map(|mut item| {
+            item.index += start;
+            item
+        }));
+    }
+    merged
+        .prefiltered
+        .extend(prefiltered.into_iter().map(|index| index + start));
+    merged.dropped += dropped;
+    warnings.extend(warning);
 }
 
 async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {

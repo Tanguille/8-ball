@@ -140,7 +140,7 @@ const fn learn_default() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct TriageResponse {
     pub kept: Vec<TriageItem>,
     pub unsure: Vec<TriageItem>,
