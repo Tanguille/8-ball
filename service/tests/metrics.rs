@@ -1,5 +1,5 @@
-use serde_json::{Map, Value, json};
-use wiremock::{MockServer, ResponseTemplate, matchers};
+use serde_json::json;
+use wiremock::MockServer;
 
 use service::AskRequest;
 
@@ -11,41 +11,7 @@ async fn app() -> (
     MockServer,
     tempfile::TempDir,
 ) {
-    let mock = MockServer::start().await;
-    wiremock::Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(|request: &wiremock::Request| {
-            let body: Value = serde_json::from_slice(&request.body).unwrap();
-            if body["state"] == "fail" {
-                return ResponseTemplate::new(500);
-            }
-            let answers: Map<String, Value> = body["questions"]
-                .as_object()
-                .unwrap()
-                .iter()
-                .map(|(id, question)| {
-                    let answer = if question["type"] == "choice" {
-                        let names = question["criteria"].as_object().unwrap();
-                        let probabilities: Map<String, Value> = names
-                            .keys()
-                            .enumerate()
-                            .map(|(i, name)| {
-                                (name.clone(), json!(if i == 0 { 0.99 } else { 0.01 }))
-                            })
-                            .collect();
-                        json!({"type":"choice","probabilities":probabilities})
-                    } else {
-                        json!({"type":"noul","noul":0.97})
-                    };
-
-                    (id.clone(), answer)
-                })
-                .collect();
-
-            ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
-        })
-        .mount(&mock)
-        .await;
+    let mock = common::systemone().await;
     let config: domain::config::Config =
         toml::from_str(
             &format!(

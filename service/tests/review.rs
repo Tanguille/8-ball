@@ -1,33 +1,18 @@
 use serde_json::{Value, json};
-use wiremock::{MockServer, matchers};
+use wiremock::MockServer;
 
 use service::{DecisionsRequest, QuestionsRequest, ReviewRequest, Service};
 
 mod common;
 
-/// A systemone mock that answers P(yes) = 0.97 for every noul question.
+/// `common::systemone` as endpoint `d3`.
 async fn app() -> (
     std::sync::Arc<Service>,
     String,
     MockServer,
     tempfile::TempDir,
 ) {
-    let mock = MockServer::start().await;
-    wiremock::Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(|request: &wiremock::Request| {
-            let body: Value = serde_json::from_slice(&request.body).unwrap();
-            let answers: serde_json::Map<String, Value> = body["questions"]
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(|id| (id.clone(), json!({"type":"noul","noul":0.97})))
-                .collect();
-
-            wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
-        })
-        .mount(&mock)
-        .await;
+    let mock = common::systemone().await;
     let config = toml::from_str(&format!(
         "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc=false",
         mock.uri(),

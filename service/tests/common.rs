@@ -5,7 +5,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sqlx::Connection;
 use wiremock::{MockServer, matchers};
 
@@ -48,8 +48,8 @@ pub async fn serve(service: Arc<Service>, api_key: Option<&str>) -> String {
     url
 }
 
-/// A systemone mock that answers noul by state (`yes-*` 0.97, `no-*` 0.03, else 0.5, `slow-*` after 5 s) and
-/// choices with option `a`.
+/// A systemone mock that answers noul by state (`no-*` 0.03, `maybe-*` 0.5, else 0.97, `slow-*` after 5 s) and
+/// choices with their first option. State `fail` gets a 500.
 pub async fn systemone() -> MockServer {
     let mock = MockServer::start().await;
     wiremock::Mock::given(matchers::method("POST"))
@@ -57,20 +57,32 @@ pub async fn systemone() -> MockServer {
         .respond_with(|request: &wiremock::Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap();
             let state = body["state"].as_str().unwrap();
-            let noul = if state.starts_with("yes-") {
-                0.97
-            } else if state.starts_with("no-") {
+            if state == "fail" {
+                return wiremock::ResponseTemplate::new(500);
+            }
+            let noul = if state.starts_with("no-") {
                 0.03
-            } else {
+            } else if state.starts_with("maybe-") {
                 0.5
+            } else {
+                0.97
             };
-            let answers: serde_json::Map<String, Value> = body["questions"]
+            let answers: Map<String, Value> = body["questions"]
                 .as_object()
                 .unwrap()
                 .iter()
                 .map(|(id, question)| {
                     let answer = if question["type"] == "choice" {
-                        json!({"type":"choice","probabilities":{"a":0.99,"b":0.01}})
+                        let probabilities: Map<String, Value> = question["criteria"]
+                            .as_object()
+                            .unwrap()
+                            .keys()
+                            .enumerate()
+                            .map(|(i, name)| {
+                                (name.clone(), json!(if i == 0 { 0.99 } else { 0.01 }))
+                            })
+                            .collect();
+                        json!({"type":"choice","probabilities":probabilities})
                     } else {
                         json!({"type":"noul","noul":noul})
                     };
