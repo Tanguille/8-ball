@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use domain::{question::Question, verdict};
+use domain::verdict;
 use service::{AskRequest, Service};
 
 mod common;
@@ -13,18 +13,10 @@ async fn fixture(
     wiremock::MockServer,
     tempfile::TempDir,
 ) {
-    let mock = common::systemone().await;
-    let config: domain::config::Config =
-        toml::from_str(
-            &format!(
-                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc={ad_hoc}",
-                mock.uri(),
-            ),
-        )
-        .unwrap();
-    let (service, store, directory) = common::service(config).await;
-
-    (service, store, mock, directory)
+    common::d3(&format!(
+        "max_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc={ad_hoc}"
+    ))
+    .await
 }
 fn request(state: &str) -> AskRequest {
     serde_json::from_value(json!({"spec":"greeting","state":state})).unwrap()
@@ -80,8 +72,7 @@ async fn ad_hoc_question_with_a_spec_text_keeps_its_own_calibration() {
 }
 async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
     let (service, store, mock, _dir) = fixture(learning_ad_hoc).await;
-    let question: Question =
-        serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
+    let question = common::greeting();
     let calibration_id = verdict::calibration_id(
         &verdict::question_hash(&question),
         domain::config::BackendKind::Systemone,
@@ -150,9 +141,7 @@ async fn cache_ids_and_labels_stay_in_the_requested_scope() {
     let again = ask_one(&service, copy_request).await;
     assert!(again.cached);
     assert_eq!(again.id, copy.id);
-    let question: Question =
-        serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
-    let question_hash = verdict::question_hash(&question);
+    let question_hash = verdict::question_hash(&common::greeting());
     assert_eq!(
         store
             .labelled(Some("greeting"), &question_hash)

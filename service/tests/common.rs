@@ -33,6 +33,20 @@ pub async fn service(config: domain::config::Config) -> (Arc<Service>, Store, te
     )
 }
 
+/// A service with `systemone` as the default endpoint `d3`. `extra` is TOML that goes after the endpoint
+/// table, so it can add endpoint keys before its own tables.
+pub async fn d3(extra: &str) -> (Arc<Service>, Store, MockServer, tempfile::TempDir) {
+    let mock = systemone().await;
+    let config = toml::from_str(&format!(
+        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n{extra}",
+        mock.uri()
+    ))
+    .unwrap();
+    let (service, store, directory) = service(config).await;
+
+    (service, store, mock, directory)
+}
+
 /// Serves the REST and MCP router on a free local port and returns its base URL.
 pub async fn serve(service: Arc<Service>, api_key: Option<&str>) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

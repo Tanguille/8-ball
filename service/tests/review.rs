@@ -11,13 +11,10 @@ async fn app() -> (
     wiremock::MockServer,
     tempfile::TempDir,
 ) {
-    let mock = common::systemone().await;
-    let config = toml::from_str(&format!(
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc=false",
-        mock.uri(),
-    ))
-    .unwrap();
-    let (service, _, directory) = common::service(config).await;
+    let (service, _, mock, directory) = common::d3(
+        "[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc=false",
+    )
+    .await;
     let url = common::serve(service.clone(), None).await;
 
     (service, url, mock, directory)

@@ -17,13 +17,10 @@ struct App {
 
 /// `common::systemone` as endpoint `d3`.
 async fn fixture(learning: &str) -> App {
-    let mock = common::systemone().await;
-    let config = toml::from_str(&format!(
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.bucket]\ntype='choice'\ninstructions='Bucket?'\ncriteria={{a='',b=''}}\n[learning]\n{learning}",
-        mock.uri(),
+    let (service, store, mock, directory) = common::d3(&format!(
+        "[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.bucket]\ntype='choice'\ninstructions='Bucket?'\ncriteria={{a='',b=''}}\n[learning]\n{learning}"
     ))
-    .unwrap();
-    let (service, store, directory) = common::service(config).await;
+    .await;
 
     App {
         service,
