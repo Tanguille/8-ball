@@ -1084,7 +1084,7 @@ impl Service {
         context: Option<&str>,
     ) -> Result<(Vec<(usize, String)>, Vec<usize>), ServiceError> {
         let mut unique = IndexMap::new();
-        let mut firsts = Vec::with_capacity(items.len());
+        let mut firsts = Vec::new();
         for (index, item) in items.into_iter().enumerate() {
             let text = match (&context, item) {
                 (Some(context), item) => json!({"context":context,"item":item}).to_string(),
