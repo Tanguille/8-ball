@@ -4,6 +4,8 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers};
 
+use common::requests;
+
 #[path = "../../service/tests/common.rs"]
 mod common;
 
@@ -77,7 +79,7 @@ async fn app_with(
         String::new()
     };
     let config: domain::config::Config = toml::from_str(&format!(
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n{endpoint}\n{extra}\n[specs.relevant]\ntype='noul'\ninstructions='Is this relevant?'",
+        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n{endpoint}\n{extra}\n[specs.relevant]\ntype='noul'\ninstructions='Is this relevant?'\n[learning]\nexplore=0.0",
         model.uri()
     ))
     .unwrap();
@@ -96,15 +98,6 @@ async fn triage(url: &str, body: &Value) -> reqwest::Response {
         .send()
         .await
         .unwrap()
-}
-async fn posts(model: &MockServer) -> usize {
-    model
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .filter(|request| request.method == "POST")
-        .count()
 }
 async fn cli_triage(args: &[&str], items: &[u8]) -> std::process::Output {
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
@@ -141,7 +134,7 @@ async fn dedupes_and_partitions_verdicts() {
     assert_eq!(body["kept"][0]["index"], 0);
     assert_eq!(body["kept"][1]["index"], 1);
     assert_eq!(body["kept"][2]["index"], 4);
-    assert_eq!(posts(&model).await, 4);
+    assert_eq!(requests(&model).await.len(), 4);
 }
 #[tokio::test]
 async fn sixty_five_items_rejected() {
@@ -190,7 +183,7 @@ async fn invalid_keep_is_rejected_before_model_requests() {
         assert_eq!(response.status(), 400, "keep={keep}");
         assert!(response.text().await.unwrap().contains("keep"));
     }
-    assert_eq!(posts(&model).await, 0);
+    assert_eq!(requests(&model).await.len(), 0);
 }
 #[tokio::test]
 async fn prefilter_judges_only_closest_items() {
@@ -206,7 +199,7 @@ async fn prefilter_judges_only_closest_items() {
     assert_eq!(body["prefiltered"], json!([0, 1, 4]));
     assert_eq!(body["dropped"], 3);
     assert!(body.get("warning").is_none());
-    assert_eq!(posts(&model).await, 2);
+    assert_eq!(requests(&model).await.len(), 2);
 }
 #[tokio::test]
 async fn named_spec_triage_uses_the_spec_question_id() {
@@ -232,7 +225,7 @@ async fn failed_embedder_judges_every_item_with_warning() {
             .unwrap()
             .starts_with("prefilter skipped")
     );
-    assert_eq!(posts(&model).await, 4);
+    assert_eq!(requests(&model).await.len(), 4);
 }
 #[tokio::test]
 async fn top_k_requires_embedder() {
@@ -326,12 +319,7 @@ async fn context_is_model_data_and_part_of_cache_identity() {
         first["kept"][0]["decision"]["id"],
         changed["kept"][0]["decision"]["id"]
     );
-    let requests = model.received_requests().await.unwrap();
-    let calls: Vec<Value> = requests
-        .iter()
-        .filter(|request| request.method == "POST")
-        .map(|request| serde_json::from_slice(&request.body).unwrap())
-        .collect();
+    let calls = requests(&model).await;
     assert_eq!(calls.len(), 3);
     let state: Value = serde_json::from_str(calls[0]["state"].as_str().unwrap()).unwrap();
     assert_eq!(
@@ -360,7 +348,7 @@ async fn oversized_contextual_batch_is_rejected_before_any_judgment() {
         }
     }
     assert!(embedding.received_requests().await.unwrap().is_empty());
-    assert_eq!(posts(&model).await, 0);
+    assert_eq!(requests(&model).await.len(), 0);
 }
 
 #[tokio::test]
@@ -383,7 +371,7 @@ async fn serialized_object_order_is_preserved_with_and_without_context() {
             .collect();
         assert_eq!(indices, [0, 1, 2]);
     }
-    assert_eq!(posts(&model).await, 4);
+    assert_eq!(requests(&model).await.len(), 4);
 }
 
 #[tokio::test]
@@ -422,12 +410,7 @@ async fn cli_supports_named_spec_and_context_file() {
         br#"["backup change"]"#,
     )
     .await;
-    let requests = model.received_requests().await.unwrap();
-    let call = requests
-        .iter()
-        .find(|request| request.method == "POST")
-        .unwrap();
-    let body: Value = serde_json::from_slice(&call.body).unwrap();
+    let body = &requests(&model).await[0];
     let state: Value = serde_json::from_str(body["state"].as_str().unwrap()).unwrap();
     assert_eq!(state["context"], "uses kopiur");
     assert!(body["questions"].get("relevant").is_some());
