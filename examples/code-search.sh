@@ -35,5 +35,6 @@ result=$(jq -c 'map(.code)' <<<"$blocks" | 8ball triage --no-learn "Does this co
 jq -c --slurpfile b <(printf '%s' "$blocks") '
     ((.kept[] | {verdict: "match", index, c: .decision.confidence}),
      (.unsure[] | {verdict: "check", index, c: .decision.confidence}))
-    | {verdict, file: $b[0][.index].file, lines: "\($b[0][.index].start)-\($b[0][.index].end)", confidence: (.c * 100 | round / 100)}' <<<"$result"
+    | $b[0][.index] as $block
+    | {verdict, file: $block.file, lines: "\($block.start)-\($block.end)", confidence: (.c * 100 | round / 100)}' <<<"$result"
 jq -r --argjson n "$count" '"\($n) blocks: \(.kept | length) match, \(.unsure | length) check, \(.rejected | length) no"' <<<"$result" >&2
