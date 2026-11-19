@@ -92,10 +92,10 @@ impl Store {
             .await?;
         // Lock so concurrent first opens cannot both run the migrator.
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
-        let migration = |version, description: &str, sql: &'static str| {
+        let migration = |version, description: &'static str, sql: &'static str| {
             sqlx::migrate::Migration::new(
                 version,
-                description.to_owned().into(),
+                description.into(),
                 sqlx::migrate::MigrationType::Simple,
                 sql.into_sql_str(),
                 false,
@@ -335,7 +335,6 @@ impl Store {
     }
 
     pub async fn questions(&self, limit: u32) -> Result<Vec<QuestionRow>, StoreError> {
-        // spec, question_hash, question, decisions, unsure, labelled, last_at
         type Row = (
             Option<String>,
             String,
@@ -390,7 +389,6 @@ impl Store {
         unlabelled: bool,
         limit: u32,
     ) -> Result<Vec<DecisionRow>, StoreError> {
-        // id, ts, verdict, answer, state, label, endpoint
         type Row = (i64, String, String, String, String, Option<String>, String);
         let rows: Vec<Row> = sqlx::query_as(
             "SELECT id,ts,verdict,answer,state,label,endpoint FROM decisions d \

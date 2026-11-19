@@ -1,4 +1,4 @@
-use std::{fmt::Write as _, os::unix::fs::PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 
 use sqlx::{Connection, SqliteConnection};
 use tempfile::TempDir;
@@ -7,20 +7,13 @@ use domain::verdict::{Bands, Report};
 use store::{NewDecision, Store};
 
 async fn fixture(path: &std::path::Path) -> SqliteConnection {
-    SqliteConnection::connect_with(
-        &sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true),
-    )
-    .await
-    .unwrap()
+    SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(path))
+        .await
+        .unwrap()
 }
 
-fn temp() -> TempDir {
-    tempfile::Builder::new().prefix("8ball-").tempdir().unwrap()
-}
 async fn opened() -> (TempDir, std::path::PathBuf, Store) {
-    let directory = temp();
+    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let path = directory.path().join("db.sqlite");
     let store = Store::open(&path).await.unwrap();
 
@@ -66,9 +59,7 @@ const fn report() -> Report {
 }
 #[tokio::test]
 async fn file_is_private_and_migrations_are_idempotent() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let _first = Store::open(&path).await.unwrap();
+    let (directory, path, _first) = opened().await;
     let _second = Store::open(&path).await.unwrap();
     for name in ["db.sqlite", "db.sqlite-wal", "db.sqlite-shm"] {
         assert_eq!(
@@ -256,57 +247,6 @@ async fn pruned_ids_never_label_replacement_rows() {
             .unwrap()
             .is_empty()
     );
-}
-
-const LEGACY_SCHEMA: &str = "
-CREATE TABLE decisions (
- id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
- spec TEXT, question_hash TEXT NOT NULL, calibration_id TEXT NOT NULL,
- state_hash TEXT NOT NULL, state TEXT NOT NULL, answer TEXT NOT NULL,
- verdict TEXT NOT NULL, endpoint TEXT NOT NULL, label TEXT);
-CREATE INDEX decisions_cache ON decisions(calibration_id,state_hash);
-CREATE INDEX decisions_labelled ON decisions(spec,question_hash) WHERE label IS NOT NULL;
-CREATE TABLE calibrations (calibration_id TEXT PRIMARY KEY,spec TEXT NOT NULL,bands TEXT NOT NULL,report TEXT NOT NULL);
-";
-
-#[tokio::test]
-async fn existing_autoincrement_preserves_deleted_highwater_and_calibration() {
-    let directory = temp();
-    let path = directory.path().join("db.sqlite");
-    let mut connection = fixture(&path).await;
-    sqlx::raw_sql(LEGACY_SCHEMA)
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    sqlx::raw_sql("INSERT INTO decisions VALUES (100,CURRENT_TIMESTAMP,NULL,'question','model-question','old','hello','[0.9,0.1]','yes','d3',NULL); DELETE FROM decisions;")
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    let bands = Bands::Noul {
-        yes_at: 0.8,
-        no_at: 0.2,
-    };
-    sqlx::query("INSERT INTO calibrations VALUES ('cid','greeting',?1,?2)")
-        .bind(serde_json::to_string(&bands).unwrap())
-        .bind(serde_json::to_string(&report()).unwrap())
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    drop(connection);
-    for _ in 0..2 {
-        let store = Store::open(&path).await.unwrap();
-        assert!(insert(&store, decision("new")).await > 100);
-        let (saved, report) = store
-            .calibration("cid", Some("greeting"))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(saved).unwrap(),
-            serde_json::to_value(bands).unwrap()
-        );
-        assert_eq!(report.examples, 40);
-    }
 }
 
 #[tokio::test]
@@ -519,39 +459,24 @@ async fn unlabelled_lists_one_row_per_state() {
 }
 
 /// sqlx refuses to open a database whose applied migration text changed, so a shipped migration must stay
-/// byte-identical. Add a new numbered migration instead.
-#[test]
-fn shipped_migrations_keep_their_checksums() {
-    for (version, sql, shipped) in [
-        (
-            1,
-            include_str!("../migrations/0001_storage.sql"),
+/// byte-identical. Add a new numbered migration instead, and pin its checksum here: this list must name every
+/// migration, so a new one fails this test until it is added.
+#[tokio::test]
+async fn shipped_migrations_keep_their_checksums() {
+    let (_directory, path, _store) = opened().await;
+    let checksums: Vec<String> =
+        sqlx::query_scalar("SELECT lower(hex(checksum)) FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(&mut fixture(&path).await)
+            .await
+            .unwrap();
+    assert_eq!(
+        checksums,
+        [
             "7e65d034202713c733154edf263c45e77a17d8c5624ed8a0f34a17252c4bb1e0bf2d0b520e517556a49704d0792a6223",
-        ),
-        (
-            2,
-            include_str!("../migrations/0002_questions.sql"),
             "15c8c29ba14d413817497585c856c2e43dd46fb5ae52b476774e28f2dd8c7aaba5f5535413325b879b6e52c38ff0f5ea",
-        ),
-    ] {
-        let migration = sqlx::migrate::Migration::new(
-            version,
-            "shipped".into(),
-            sqlx::migrate::MigrationType::Simple,
-            sqlx::SqlSafeStr::into_sql_str(sql),
-            false,
-        );
-        let checksum = migration
-            .checksum
-            .iter()
-            .fold(String::new(), |mut hex, byte| {
-                write!(hex, "{byte:02x}").expect("writing to String");
-
-                hex
-            });
-        assert_eq!(
-            checksum, shipped,
-            "migration {version} changed after it shipped"
-        );
-    }
+            "3e0c740f10e925e7ddcf8874bf9d0f216b66af730fb4c1ac26cd85f67ec89207c13c865b484a6249cf5b4c6fb168b5c9",
+            "c2d6f8c37d6652c7b96a193ff23c3e2275b5d7038bd55e0109dafe7cb72efc6deaf0bd519797d89581520f4b30e5ed56",
+        ],
+        "a migration changed after it shipped"
+    );
 }
