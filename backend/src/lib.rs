@@ -178,12 +178,12 @@ impl Endpoint {
 
     /// Waits for this request's turn under `requests_per_minute`.
     async fn pace(&self) {
-        let Some(per_minute) = self.config.requests_per_minute.filter(|n| *n > 0) else {
+        let Some(per_minute) = self.config.requests_per_minute else {
             return;
         };
         let mut next = self.next_request.lock().await;
         let start = (*next).max(Instant::now());
-        *next = start + Duration::from_secs(60) / per_minute;
+        *next = start + Duration::from_secs(60) / per_minute.get();
         drop(next);
         tokio::time::sleep_until(start).await;
     }

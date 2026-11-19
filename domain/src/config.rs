@@ -72,7 +72,7 @@ pub struct EndpointConfig {
     pub max_state_chars: Option<usize>,
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
     /// Spaces requests evenly to stay under a hosted provider's rate limit.
-    pub requests_per_minute: Option<u32>,
+    pub requests_per_minute: Option<std::num::NonZeroU32>,
     /// Seconds one HTTP attempt may take once it has a slot; default 20. Waiting for a slot is not counted, and a retry gets its own budget.
     pub timeout_secs: Option<u64>,
 }

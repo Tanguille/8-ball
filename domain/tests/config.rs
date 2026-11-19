@@ -134,6 +134,16 @@ fn zero_timeout_rejected() {
     );
 }
 
+#[test]
+fn zero_requests_per_minute_rejected() {
+    assert!(
+        Config::parse(&format!("{MINIMAL}requests_per_minute = 0\n"), "test")
+            .unwrap_err()
+            .to_string()
+            .contains("nonzero")
+    );
+}
+
 /// The CLI prints errors with `{e:#}`, which appends the source; the message must not repeat it.
 #[test]
 fn read_error_prints_the_io_error_once() {
