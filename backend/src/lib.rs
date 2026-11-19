@@ -260,6 +260,7 @@ impl Endpoint {
             .or_else(|| {
                 properties["total_slots"]
                     .as_u64()
+                    .filter(|slots| *slots > 0)
                     .and_then(|value| usize::try_from(value).ok())
             })
             .unwrap_or(2);

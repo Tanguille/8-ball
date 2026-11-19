@@ -102,6 +102,19 @@ async fn first_detection_fails_while_the_server_is_down_or_loading() {
     assert!(endpoint.info().await.is_err());
     assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/a.gguf");
 }
+/// A semaphore with no permits would hold every request until its deadline.
+#[tokio::test]
+async fn zero_slots_use_the_default_concurrency() {
+    let server = MockServer::start().await;
+    Mock::given(matchers::method("GET"))
+        .and(matchers::path("/props"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"total_slots":0})))
+        .mount(&server)
+        .await;
+    let config = endpoint_config(&server.uri(), "kind='systemone'");
+    let endpoint = Endpoint::new("d3", &config, None);
+    assert_eq!(endpoint.info().await.unwrap().concurrency, 2);
+}
 #[tokio::test]
 async fn text_architecture_and_model_detect_logprob() {
     let server = MockServer::start().await;
