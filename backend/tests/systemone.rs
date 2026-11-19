@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    num::NonZero,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use serde_json::{Value, json};
@@ -178,7 +181,7 @@ async fn concurrency_one_serializes() {
             axum::serve(listener, router).await.unwrap();
         });
         let mut config = endpoint_config(&url);
-        config.concurrency = Some(concurrency);
+        config.concurrency = NonZero::new(concurrency);
         let endpoint = Endpoint::new("d3", &config, None);
         let test_questions = [question()];
         let (first, second) = tokio::join!(
@@ -231,7 +234,7 @@ async fn slow_call_times_out_after_timeout_secs() {
     )
     .await;
     let mut config = endpoint_config(&server.uri());
-    config.timeout_secs = Some(1);
+    config.timeout_secs = NonZero::new(1);
     let endpoint = Endpoint::new("d3", &config, None);
     let error = endpoint.ask("hi", &[question()]).await.unwrap_err();
     assert_eq!(error.0, "timed out after 1s");
@@ -249,8 +252,8 @@ async fn queued_calls_do_not_count_the_queue_wait() {
     )
     .await;
     let mut config = endpoint_config(&server.uri());
-    config.concurrency = Some(1);
-    config.timeout_secs = Some(1);
+    config.concurrency = NonZero::new(1);
+    config.timeout_secs = NonZero::new(1);
     let endpoint = Endpoint::new("d3", &config, None);
     let question = question();
     let results = futures::future::join_all(

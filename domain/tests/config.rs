@@ -130,7 +130,7 @@ fn zero_timeout_rejected() {
         Config::parse(&format!("{MINIMAL}timeout_secs = 0\n"), "test")
             .unwrap_err()
             .to_string()
-            .contains("timeout_secs must be positive")
+            .contains("nonzero")
     );
 }
 
@@ -173,7 +173,7 @@ fn escalation_parses_with_default_budget() {
     .unwrap();
     let escalation = config.escalation.unwrap();
     assert_eq!(escalation.endpoint, "big");
-    assert_eq!(escalation.per_minute, 30);
+    assert_eq!(escalation.per_minute.get(), 30);
 }
 
 #[test]
@@ -188,10 +188,7 @@ fn escalation_to_default_rejected() {
 
 #[test]
 fn escalation_zero_budget_rejected() {
-    assert!(
-        escalation_error("endpoint = 'big'\nper_minute = 0\n")
-            .contains("per_minute must be positive")
-    );
+    assert!(escalation_error("endpoint = 'big'\nper_minute = 0\n").contains("nonzero"));
 }
 
 #[test]

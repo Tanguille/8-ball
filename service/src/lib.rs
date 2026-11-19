@@ -1417,7 +1417,7 @@ impl Service {
             let granted = grant(
                 &mut window,
                 Instant::now(),
-                escalation.per_minute,
+                escalation.per_minute.get(),
                 unsure.len(),
             );
             (granted, window.0)

@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
 use reqwest::{Client, Error, RequestBuilder, StatusCode};
 use serde_json::Value;
@@ -119,7 +119,7 @@ impl Endpoint {
         let timeout = self
             .config
             .timeout_secs
-            .map_or(DECISION_TIMEOUT, Duration::from_secs);
+            .map_or(DECISION_TIMEOUT, |secs| Duration::from_secs(secs.get()));
         let timed_out = |error: Error| {
             if error.is_timeout() {
                 BackendError(format!("timed out after {timeout:?}"))
@@ -260,10 +260,10 @@ impl Endpoint {
             .or_else(|| {
                 properties["total_slots"]
                     .as_u64()
-                    .filter(|slots| *slots > 0)
                     .and_then(|value| usize::try_from(value).ok())
+                    .and_then(NonZeroUsize::new)
             })
-            .unwrap_or(2);
+            .map_or(2, NonZeroUsize::get);
 
         Ok(Info {
             kind,
