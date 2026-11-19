@@ -1,13 +1,11 @@
 use rmcp::ServiceExt;
 use serde_json::json;
 use tempfile::Builder;
-use tokio_util::sync::CancellationToken;
-use wiremock::{MockServer, matchers};
+use wiremock::MockServer;
 
-async fn serve(
-    mock: &MockServer,
-    database_path: &std::path::Path,
-) -> (String, CancellationToken, tokio::task::JoinHandle<()>) {
+mod common;
+
+async fn serve(mock: &MockServer, database_path: &std::path::Path) -> String {
     let config: domain::config::Config =
         toml::from_str(
             &format!(
@@ -16,35 +14,17 @@ async fn serve(
             ),
         )
         .unwrap();
-    let service = std::sync::Arc::new(service::Service::new(
-        config,
-        store::Store::open(database_path).await.unwrap(),
-    ));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    let token = CancellationToken::new();
-    let app = service::http::router(service, Some("k"), &token);
-    let task = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let service = service::Service::new(config, store::Store::open(database_path).await.unwrap());
 
-    (url, token, task)
+    common::serve(std::sync::Arc::new(service), Some("k")).await
 }
 #[tokio::test]
-async fn authenticated_http_client_survives_server_restart() {
-    let mock = MockServer::start().await;
-    wiremock::Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(
-            wiremock::ResponseTemplate::new(200)
-                .set_body_json(json!({"answers":{"greeting":{"type":"noul","noul":0.97}}})),
-        )
-        .mount(&mock)
-        .await;
+async fn mcp_over_http_with_key_reads_cache_after_restart() {
+    let mock = common::systemone().await;
     let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
     let database_path = directory.path().join("db.sqlite");
     for restart in [false, true] {
-        let (url, token, task) = serve(&mock, &database_path).await;
+        let url = serve(&mock, &database_path).await;
         let client = ()
             .serve(rmcp::transport::StreamableHttpClientTransport::from_config(
                 rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(format!("{url}/mcp"))
@@ -64,15 +44,13 @@ async fn authenticated_http_client_survives_server_restart() {
         assert_eq!(body["results"][0]["verdict"], "yes");
         assert_eq!(body["results"][0]["cached"], restart);
         client.cancel().await.unwrap();
-        token.cancel();
-        task.abort();
     }
 }
 #[tokio::test]
 async fn bearer_allows_non_loopback_host_header() {
     let mock = MockServer::start().await;
     let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
-    let (url, ..) = serve(&mock, &directory.path().join("db.sqlite")).await;
+    let url = serve(&mock, &directory.path().join("db.sqlite")).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/mcp"))
         .header("Host", "8ball.example")
@@ -88,7 +66,7 @@ async fn bearer_allows_non_loopback_host_header() {
 async fn bearer_scheme_is_case_insensitive() {
     let mock = MockServer::start().await;
     let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
-    let (url, ..) = serve(&mock, &directory.path().join("db.sqlite")).await;
+    let url = serve(&mock, &directory.path().join("db.sqlite")).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/v1/questions"))
         .header("Authorization", "bearer k")
