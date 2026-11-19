@@ -934,10 +934,9 @@ impl Service {
                 "invalid keep value: {keep}"
             )));
         }
-        let mut items = self
+        let (mut items, firsts) = self
             .triage_items(&endpoint, request.items, request.context.as_deref())
             .await?;
-        let unique_count = items.len();
         let spec = request.spec.as_deref();
         let pass = self.pass(
             spec,
@@ -947,10 +946,10 @@ impl Service {
             "triage",
             self.triage_deadline,
         );
-        let (prefiltered, warning) = if let Some(top_k) = request.top_k {
+        let warning = if let Some(top_k) = request.top_k {
             self.prefilter(&question, &mut items, top_k, &pass).await?
         } else {
-            (Vec::new(), None)
+            None
         };
         let (mut decisions, failures) = self.judge_items(items, &question, &pass).await?;
         let warning = [warning, failures]
@@ -983,12 +982,22 @@ impl Service {
                 self.learn(judgment, &action);
             }
         }
+        let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
+        let decisions: IndexMap<_, _> = indices
+            .into_iter()
+            .zip(self.persist(judgments, spec).await?)
+            .collect();
         let mut kept = Vec::new();
         let mut unsure = Vec::new();
         let mut rejected = Vec::new();
-        let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
-        let decisions = self.persist(judgments, spec).await?;
-        for (index, decision) in indices.into_iter().zip(decisions) {
+        let mut prefiltered = Vec::new();
+        // A duplicate shares the decision of its first copy; a first copy without one was prefiltered.
+        for (index, first) in firsts.into_iter().enumerate() {
+            let Some(decision) = decisions.get(&first).cloned() else {
+                prefiltered.push(index);
+
+                continue;
+            };
             let item = TriageItem { index, decision };
             if item.decision.verdict == "unsure" {
                 unsure.push(item);
@@ -1000,7 +1009,7 @@ impl Service {
         }
 
         Ok(TriageResponse {
-            dropped: unique_count - kept.len() - unsure.len(),
+            dropped: rejected.len() + prefiltered.len(),
             kept,
             unsure,
             warning,
@@ -1049,20 +1058,22 @@ impl Service {
         Ok((decisions, warning))
     }
 
+    /// The distinct item states with the index of their first copy, and for every item the index of its first copy.
     async fn triage_items(
         &self,
         endpoint: &str,
         items: Vec<Value>,
         context: Option<&str>,
-    ) -> Result<Vec<(usize, String)>, ServiceError> {
+    ) -> Result<(Vec<(usize, String)>, Vec<usize>), ServiceError> {
         let mut unique = IndexMap::new();
+        let mut firsts = Vec::with_capacity(items.len());
         for (index, item) in items.into_iter().enumerate() {
             let text = match (&context, item) {
                 (Some(context), item) => json!({"context":context,"item":item}).to_string(),
                 (None, Value::String(text)) => text,
                 (None, other) => other.to_string(),
             };
-            unique.entry(text).or_insert(index);
+            firsts.push(*unique.entry(text).or_insert(index));
         }
         let items: Vec<_> = unique
             .into_iter()
@@ -1084,22 +1095,23 @@ impl Service {
             }
         }
 
-        Ok(items)
+        Ok((items, firsts))
     }
 
+    /// Keeps the `top_k` items most similar to the question, or all of them with a warning if embedding fails.
     async fn prefilter(
         &self,
         question: &Question,
         items: &mut Vec<(usize, String)>,
         top_k: usize,
         pass: &Pass<'_>,
-    ) -> Result<(Vec<usize>, Option<String>), ServiceError> {
+    ) -> Result<Option<String>, ServiceError> {
         let embedder = self
             .embedder
             .as_ref()
             .ok_or_else(|| ServiceError::BadRequest("top_k needs [embedder] in config".into()))?;
         if top_k >= items.len() {
-            return Ok((Vec::new(), None));
+            return Ok(None);
         }
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
@@ -1107,7 +1119,7 @@ impl Service {
         let passed = || backend::BackendError(pass.passed.clone());
         let vectors = match within(pass.deadline, embedder.embed(&texts), passed).await {
             Ok(vectors) => vectors,
-            Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
+            Err(e) => return Ok(Some(format!("prefilter skipped: {e}"))),
         };
         let mut ranked: Vec<_> = items
             .drain(..)
@@ -1126,18 +1138,13 @@ impl Service {
                 .total_cmp(&left.2)
                 .then_with(|| left.0.cmp(&right.0))
         });
-        let mut prefiltered: Vec<_> = ranked
-            .split_off(top_k)
-            .into_iter()
-            .map(|(index, _, _)| index)
-            .collect();
-        prefiltered.sort_unstable();
         *items = ranked
             .into_iter()
+            .take(top_k)
             .map(|(index, text, _)| (index, text))
             .collect();
 
-        Ok((prefiltered, None))
+        Ok(None)
     }
 
     pub async fn ask(&self, request: AskRequest) -> Result<AskResponse, ServiceError> {

@@ -135,11 +135,12 @@ async fn dedupes_and_partitions_verdicts() {
     .await;
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["kept"].as_array().unwrap().len(), 2);
+    assert_eq!(body["kept"].as_array().unwrap().len(), 3);
     assert_eq!(body["unsure"].as_array().unwrap().len(), 1);
     assert_eq!(body["dropped"], 1);
     assert_eq!(body["kept"][0]["index"], 0);
     assert_eq!(body["kept"][1]["index"], 1);
+    assert_eq!(body["kept"][2]["index"], 4);
     assert_eq!(posts(&model).await, 4);
 }
 #[tokio::test]
@@ -194,13 +195,16 @@ async fn invalid_keep_is_rejected_before_model_requests() {
 #[tokio::test]
 async fn prefilter_judges_only_closest_items() {
     let (url, model, _embedding, _dir) = app(Some(true)).await;
-    let mut body = request(&json!(["one", "two", "three", "four"]));
+    let mut body = request(&json!(["one", "two", "three", "four", "one", "three"]));
     body["top_k"] = json!(2);
     let response = triage(&url, &body).await;
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["kept"][0]["index"], 2);
     assert_eq!(body["kept"][1]["index"], 3);
+    assert_eq!(body["kept"][2]["index"], 5);
+    assert_eq!(body["prefiltered"], json!([0, 1, 4]));
+    assert_eq!(body["dropped"], 3);
     assert!(body.get("warning").is_none());
     assert_eq!(posts(&model).await, 2);
 }
@@ -377,7 +381,7 @@ async fn serialized_object_order_is_preserved_with_and_without_context() {
             .iter()
             .map(|item| item["index"].as_u64().unwrap())
             .collect();
-        assert_eq!(indices, [0, 1]);
+        assert_eq!(indices, [0, 1, 2]);
     }
     assert_eq!(posts(&model).await, 4);
 }

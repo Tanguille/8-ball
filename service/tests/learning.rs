@@ -318,3 +318,19 @@ async fn ad_hoc_questions_learn_by_their_stored_text() {
         "{error}"
     );
 }
+
+#[tokio::test]
+async fn triage_lists_duplicates_under_their_first_decision() {
+    let app = fixture("explore = 0.0").await;
+    let response = triage(
+        &app,
+        json!({"spec":"greeting","items":["yes-1","no-1","yes-1","maybe-1","no-1"]}),
+    )
+    .await;
+    assert_eq!(indices(&response.kept), [0, 2]);
+    assert_eq!(indices(&response.rejected), [1, 4]);
+    assert_eq!(indices(&response.unsure), [3]);
+    assert_eq!(response.dropped, 2);
+    assert_eq!(response.kept[0].decision.id, response.kept[1].decision.id);
+    assert_eq!(requests(&app.mock).await.len(), 3);
+}
