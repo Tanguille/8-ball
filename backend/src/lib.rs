@@ -40,6 +40,15 @@ const MIN_RETRY: Duration = Duration::from_secs(1);
 #[error("{0}")]
 pub struct BackendError(pub String);
 
+/// llama.cpp answers 503 while it loads a model, and a proxy or hosted gateway answers 502 while its upstream restarts.
+/// Both serve the request soon.
+const fn answers_soon(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE
+    )
+}
+
 impl From<Error> for BackendError {
     fn from(error: Error) -> Self {
         Self(error.to_string())
@@ -145,7 +154,7 @@ impl Endpoint {
                 StatusCode::TOO_MANY_REQUESTS if retry_after <= MAX_RETRY_AFTER => {
                     Some(retry_after)
                 }
-                StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE => Some(MIN_RETRY),
+                status if answers_soon(status) => Some(MIN_RETRY),
                 _ => None,
             };
             match wait {
@@ -186,11 +195,12 @@ impl Endpoint {
         let properties = match self.get_info_json("/props").await {
             Ok(properties) => properties,
             // Without /props the fingerprint falls back to the model id, which would switch caches; keep the old one. A
-            // server that is down or still loading (llama.cpp answers 503) serves /props soon, so do not cache the fallback.
+            // server that is down, slow or still loading serves /props soon, so do not cache the fallback.
             Err(e)
                 if refresh
                     || e.is_connect()
-                    || e.status() == Some(StatusCode::SERVICE_UNAVAILABLE) =>
+                    || e.is_timeout()
+                    || e.status().is_some_and(answers_soon) =>
             {
                 return Err(e.into());
             }

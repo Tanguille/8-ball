@@ -84,8 +84,8 @@ async fn first_detection_fails_while_the_server_is_down_or_loading() {
     let config = common::config(&format!("http://{closed}"), "kind='systemone'");
     assert!(Endpoint::new("d3", &config, None).info().await.is_err());
     let server = MockServer::start().await;
-    // llama.cpp answers 503 on /props while it loads the model.
-    for status in [503, 200] {
+    // llama.cpp answers 503 on /props while it loads the model, and a proxy answers 502 while llama.cpp restarts.
+    for status in [502, 503, 200] {
         Mock::given(matchers::method("GET"))
             .and(matchers::path("/props"))
             .respond_with(
@@ -98,6 +98,7 @@ async fn first_detection_fails_while_the_server_is_down_or_loading() {
     }
     let config = common::config(&server.uri(), "kind='systemone'");
     let endpoint = Endpoint::new("d3", &config, None);
+    assert!(endpoint.info().await.is_err());
     assert!(endpoint.info().await.is_err());
     assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/a.gguf");
 }
