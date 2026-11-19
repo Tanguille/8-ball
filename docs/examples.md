@@ -16,13 +16,17 @@ Ask a spec. Each command prints one JSON line, and `jq` formats it:
       "question": "greeting",
       "type": "noul",
       "verdict": "yes",
-      "confidence": 0.994583630474132,
+      "confidence": 0.9945411770492965,
       "probabilities": {
-        "yes": 0.997291815237066,
-        "no": 0.002708184762933996
+        "yes": 0.9972705885246482,
+        "no": 0.002729411475351773
       },
       "calibrated": false,
-      "cached": false
+      "cached": false,
+      "report": true,
+      "explored": false,
+      "remembered": false,
+      "escalated": false
     }
   ]
 }
