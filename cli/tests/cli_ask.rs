@@ -13,7 +13,7 @@ fn serve(mock: &MockServer) -> server::Server {
         mock.uri()
     );
 
-    server::serve(&["--config-toml", &config], None)
+    server::serve(&["--config-toml", &config])
 }
 #[tokio::test]
 async fn noul_exit_codes() {

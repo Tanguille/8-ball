@@ -23,24 +23,22 @@ impl Drop for Server {
     }
 }
 
-/// Starts `8ball serve` on a free local port. `config` is `["--config", path]` or `["--config-toml", text]`.
+/// Starts `8ball serve` on a free local port. `args` holds the config, `["--config", path]` or
+/// `["--config-toml", text]`, and any other flags such as `["--api-key", key]`.
 #[must_use]
-pub fn serve(config: &[&str], key: Option<&str>) -> Server {
+pub fn serve(args: &[&str]) -> Server {
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"));
     command
         .arg("serve")
-        .args(config)
+        .args(args)
         .arg("--db")
         .arg(directory.path().join("db.sqlite"))
         .args(["--listen", "127.0.0.1:0"])
-        // Config variables from the developer's shell would conflict with `config`.
+        // Config variables from the developer's shell would conflict with the config in `args`.
         .env_remove("EIGHTBALL_CONFIG")
         .env_remove("EIGHTBALL_CONFIG_TOML")
         .stderr(std::process::Stdio::piped());
-    if let Some(key) = key {
-        command.args(["--api-key", key]);
-    }
     let mut server = Server {
         child: command.spawn().unwrap(),
         url: String::new(),

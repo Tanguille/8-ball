@@ -173,7 +173,7 @@ async fn live_systemone_long_state_fits() {
 async fn live_cli_ask() {
     require(9931).await;
     let config = dev_config_path();
-    let server = server::serve(&["--config", config.to_str().unwrap()], None);
+    let server = server::serve(&["--config", config.to_str().unwrap()]);
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
@@ -364,14 +364,7 @@ async fn live_triage_with_prefilter() {
     ],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5})).unwrap();
     let result = service.triage(request).await.unwrap();
     eprintln!("prefilter triage: {result:?}");
-    assert_eq!(
-        result
-            .kept
-            .iter()
-            .map(|item| item.index)
-            .collect::<Vec<_>>(),
-        [0, 1, 2]
-    );
+    assert_eq!(common::indices(&result.kept), [0, 1, 2]);
     assert!(result.warning.is_none());
 }
 
@@ -698,7 +691,7 @@ async fn live_mcp_http_triage() {
     require(9931).await;
     require(9932).await;
     let config = dev_config_path();
-    let server = server::serve(&["--config", config.to_str().unwrap()], Some("k"));
+    let server = server::serve(&["--config", config.to_str().unwrap(), "--api-key", "k"]);
     let transport = rmcp::transport::StreamableHttpClientTransport::from_config(
         rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
             format!("{}/mcp", server.url),
