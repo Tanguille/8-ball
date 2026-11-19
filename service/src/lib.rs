@@ -929,13 +929,7 @@ impl Service {
         )?;
         let question = questions.into_iter().next().expect("one triage question");
         let keep = request.keep.as_deref().unwrap_or("yes");
-        let valid_keep = match &question.kind {
-            Kind::Score { criteria } => keep
-                .parse::<usize>()
-                .is_ok_and(|minimum| minimum < criteria.len()),
-            _ => question.kind.labels().iter().any(|label| label == keep),
-        };
-        if !valid_keep {
+        if !question.kind.labels().iter().any(|label| label == keep) {
             return Err(ServiceError::BadRequest(format!(
                 "invalid keep value: {keep}"
             )));

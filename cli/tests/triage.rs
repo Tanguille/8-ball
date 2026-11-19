@@ -176,6 +176,10 @@ async fn invalid_keep_is_rejected_before_model_requests() {
             json!({"id":"q","type":"score","instructions":"Urgent?","criteria":["low","high"]}),
             "-1",
         ),
+        (
+            json!({"id":"q","type":"score","instructions":"Urgent?","criteria":["low","high"]}),
+            "01",
+        ),
     ] {
         let response = triage(
             &url,
