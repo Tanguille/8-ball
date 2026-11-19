@@ -145,6 +145,35 @@ async fn pruning_preserves_labelled_rows() {
     assert!(store.question("question").await.unwrap().is_some());
     assert!(store.question("old-question").await.unwrap().is_none());
 }
+/// An escalated state is labelled on the big endpoint's row; the default endpoint's row must stay so its refit still
+/// counts the state.
+#[tokio::test]
+async fn pruning_keeps_other_rows_of_a_labelled_state() {
+    let (_directory, path, store) = opened().await;
+    insert(&store, decision("a")).await;
+    let escalated = insert(
+        &store,
+        NewDecision {
+            calibration_id: "big-question".into(),
+            endpoint: "big".into(),
+            ..decision("a")
+        },
+    )
+    .await;
+    store.set_label(escalated, "yes").await.unwrap();
+    sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
+        .execute(&mut fixture(&path).await)
+        .await
+        .unwrap();
+    assert_eq!(store.prune(0).await.unwrap(), 0);
+    assert_eq!(
+        store
+            .labelled_states(Some("greeting"), "question", "model-question")
+            .await
+            .unwrap(),
+        1
+    );
+}
 #[tokio::test]
 async fn calibration_upsert_keeps_latest_bands() {
     let (_directory, path, store) = opened().await;

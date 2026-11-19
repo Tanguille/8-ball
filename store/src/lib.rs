@@ -313,12 +313,18 @@ impl Store {
         .transpose()
     }
 
+    /// Deletes old unlabelled rows, but keeps every row of a labelled state: each endpoint that answered it refits
+    /// from its own row.
     pub async fn prune(&self, retention_days: u32) -> Result<usize, StoreError> {
-        let result =
-            sqlx::query("DELETE FROM decisions WHERE label IS NULL AND ts < datetime('now',?1)")
-                .bind(format!("-{retention_days} days"))
-                .execute(&self.pool)
-                .await?;
+        let result = sqlx::query(
+            "DELETE FROM decisions WHERE label IS NULL AND ts < datetime('now',?1) \
+             AND NOT EXISTS (SELECT 1 FROM decisions l \
+               WHERE l.spec IS decisions.spec AND l.question_hash=decisions.question_hash \
+                 AND l.state_hash=decisions.state_hash AND l.label IS NOT NULL)",
+        )
+        .bind(format!("-{retention_days} days"))
+        .execute(&self.pool)
+        .await?;
         sqlx::query(
             "DELETE FROM questions WHERE question_hash NOT IN (SELECT question_hash FROM decisions)",
         )
