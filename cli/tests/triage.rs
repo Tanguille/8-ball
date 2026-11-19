@@ -303,6 +303,51 @@ async fn cli_no_learn_sends_learn_false() {
     assert_eq!(requests(&server).await[0]["learn"], false);
 }
 #[tokio::test]
+async fn cli_splits_large_arrays_and_keeps_input_indices() {
+    let (url, _model, _embedding, _dir) = app(Some(true)).await;
+    let indices = |body: &Value, key: &str| -> Vec<u64> {
+        body[key]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["index"].as_u64().unwrap())
+            .collect()
+    };
+    let mut items: Vec<_> = (0..130).map(|i| format!("yes{i}")).collect();
+    items[65] = "no".into();
+    items[70] = "bad".into();
+    items[129] = "bad".into();
+    let items = json!(items).to_string();
+    let output = cli_triage(&["Is this relevant?", "--url", &url], items.as_bytes()).await;
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let kept: Vec<u64> = (0..130)
+        .filter(|index| ![65, 70, 129].contains(index))
+        .collect();
+    assert_eq!(indices(&body, "kept"), kept);
+    assert_eq!(indices(&body, "rejected"), [65]);
+    assert_eq!(indices(&body, "unsure"), [70, 129]);
+    assert_eq!(body["dropped"], 1);
+    let warning = body["warning"].as_str().unwrap();
+    assert!(
+        warning.starts_with("1 of 64 items failed") && warning.contains("; 1 of 2 items failed"),
+        "{warning}"
+    );
+    // Each request keeps its own top_k closest items: "three" in the first, "four" in the second.
+    let mut items: Vec<_> = (0..66).map(|i| format!("other{i}")).collect();
+    items[0] = "three".into();
+    items[65] = "four".into();
+    let items = json!(items).to_string();
+    let output = cli_triage(
+        &["Is this relevant?", "--top-k", "1", "--url", &url],
+        items.as_bytes(),
+    )
+    .await;
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(indices(&body, "kept"), [0, 65]);
+    assert_eq!(body["prefiltered"], json!((1..65).collect::<Vec<_>>()));
+    assert_eq!(body["dropped"], 64);
+}
+#[tokio::test]
 async fn cli_reads_json_items_from_stdin() {
     let (url, _model, _embedding, _dir) = app(None).await;
     let output = cli_triage(&["Is this relevant?", "--url", &url], br#"["yes1","no"]"#).await;

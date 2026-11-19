@@ -18,9 +18,12 @@ use domain::{
     config::{self, Config},
     question::{Kind, Question},
 };
-use service::Service;
+use service::{Service, TriageResponse};
 
 mod evaluate;
+
+/// The most items the server judges in one triage request.
+const TRIAGE_ITEMS: usize = 64;
 
 #[derive(Parser)]
 #[command(
@@ -507,17 +510,44 @@ async fn triage(args: TriageArgs) -> Result<i32> {
         .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
     let context = args.context_file.map(fs::read_to_string).transpose()?;
     let items: Vec<Value> = serde_json::from_str(&io::read_to_string(io::stdin())?)?;
+    let mut body = json!({
+        "context":context, "spec":args.spec, "question":question, "keep":args.keep,
+        "top_k":args.top_k, "endpoint":args.endpoint, "learn":!args.no_learn
+    });
+    // ponytail: chunks go one at a time, and top_k and duplicate sharing work per chunk; send them in parallel or
+    // split on the server if large arrays need that.
+    let mut chunks = items.chunks(TRIAGE_ITEMS);
+    // An empty array still makes one request, so the server checks the question.
+    body["items"] = json!(chunks.next().unwrap_or_default());
+    let mut merged: TriageResponse =
+        serde_json::from_value(args.remote.post("/v1/triage", &body).await?)?;
+    for (start, chunk) in (TRIAGE_ITEMS..).step_by(TRIAGE_ITEMS).zip(chunks) {
+        body["items"] = json!(chunk);
+        let mut response: TriageResponse =
+            serde_json::from_value(args.remote.post("/v1/triage", &body).await?)?;
+        for item in response
+            .kept
+            .iter_mut()
+            .chain(&mut response.unsure)
+            .chain(&mut response.rejected)
+        {
+            item.index += start;
+        }
+        merged.kept.append(&mut response.kept);
+        merged.unsure.append(&mut response.unsure);
+        merged.rejected.append(&mut response.rejected);
+        merged
+            .prefiltered
+            .extend(response.prefiltered.iter().map(|index| index + start));
+        merged.dropped += response.dropped;
+        merged.warning = [merged.warning.take(), response.warning]
+            .into_iter()
+            .flatten()
+            .reduce(|first, second| format!("{first}; {second}"));
+    }
+    println!("{}", json!(merged));
 
-    args.remote
-        .print(
-            "/v1/triage",
-            &json!({
-                "items":items, "context":context, "spec":args.spec,
-                "question":question, "keep":args.keep, "top_k":args.top_k, "endpoint":args.endpoint,
-                "learn":!args.no_learn
-            }),
-        )
-        .await
+    Ok(0)
 }
 
 async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
@@ -534,7 +564,7 @@ async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
                 "items":[case.item],"context":case.context,"learn":false}),
             ))
             .await
-            .and_then(|body| Ok(serde_json::from_value::<service::TriageResponse>(body)?))
+            .and_then(|body| Ok(serde_json::from_value::<TriageResponse>(body)?))
             .map_err(|e| format!("{e:#}"));
         observations.push(evaluate::Observation::new(case, start.elapsed(), response));
     }
@@ -558,7 +588,7 @@ async fn observe(mut args: ObserveArgs) -> Result<i32> {
             snapshot["context"].is_string()
                 && snapshot["items"]
                     .as_array()
-                    .is_some_and(|items| items.len() <= 64),
+                    .is_some_and(|items| items.len() <= TRIAGE_ITEMS),
             "snapshot requires context text and an items array of at most 64 candidates"
         );
 
