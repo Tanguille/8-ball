@@ -72,6 +72,10 @@ impl Question {
             Kind::Choice { criteria } if criteria.len() < 2 => {
                 Err(QuestionError("choice needs at least 2 options".into()))
             }
+            // Every caller reads an `unsure` verdict as the sentinel, not as an option.
+            Kind::Choice { criteria } if criteria.contains_key("unsure") => {
+                Err(QuestionError("choice option unsure is reserved".into()))
+            }
             Kind::Score { criteria } if !(2..=10).contains(&criteria.len()) => {
                 Err(QuestionError("score needs 2 to 10 levels".into()))
             }
