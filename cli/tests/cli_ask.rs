@@ -3,6 +3,9 @@ use std::{io::BufRead, process::Command};
 use serde_json::{Value, json};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
+#[path = "../../service/tests/common.rs"]
+mod common;
+
 struct Server {
     child: std::process::Child,
     _db: tempfile::TempDir,
@@ -24,7 +27,7 @@ fn serve(mock: &MockServer) -> Server {
             database_path.to_str().unwrap(),
             "--config-toml",
             &format!(
-                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'",
+                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[learning]\nexplore=0.0",
                 mock.uri()
             ),
             "--listen",
@@ -52,31 +55,22 @@ fn serve(mock: &MockServer) -> Server {
 
     panic!("server exited before logging listening address");
 }
-async fn mock(probabilities: f64) -> MockServer {
-    let mock = MockServer::start().await;
-    Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"answers":{"q":{"type":"noul","noul":probabilities}}})),
-        )
-        .mount(&mock)
-        .await;
-
-    mock
-}
 #[tokio::test]
 async fn noul_exit_codes() {
-    for (probabilities, code, want) in [(0.97, 0, "yes"), (0.02, 1, "no"), (0.5, 3, "unsure")] {
-        let mock = mock(probabilities).await;
-        let server = serve(&mock);
+    let mock = common::systemone().await;
+    let server = serve(&mock);
+    for (state, code, want) in [
+        ("yes-1", 0, "yes"),
+        ("no-1", 1, "no"),
+        ("maybe-1", 3, "unsure"),
+    ] {
         let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args([
                 "ask",
                 "noul",
                 "Is this a greeting?",
                 "--state",
-                "hi",
+                state,
                 "--exit-code",
                 "--url",
                 &server.url,
@@ -103,7 +97,6 @@ async fn spec_exit_codes_do_not_probe_doctor() {
                 ResponseTemplate::new(200)
                     .set_body_json(json!({"results":[{"type":kind,"verdict":"no"}]})),
             )
-            .expect(1)
             .mount(&mock)
             .await;
         let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
@@ -131,12 +124,7 @@ async fn spec_exit_codes_do_not_probe_doctor() {
 }
 #[tokio::test]
 async fn choice_prints_billing() {
-    let mock = MockServer::start().await;
-    Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"answers":{"q":{"type":"choice","probabilities":{"billing":0.9,"shipping":0.1}}}})))
-        .mount(&mock)
-        .await;
+    let mock = common::systemone().await;
     let server = serve(&mock);
     let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([

@@ -1,4 +1,4 @@
-use wiremock::{MockServer, matchers};
+use wiremock::MockServer;
 
 #[path = "../../service/tests/common.rs"]
 mod common;
@@ -10,16 +10,7 @@ async fn service(
     MockServer,
     tempfile::TempDir,
 ) {
-    let mock = MockServer::start().await;
-    wiremock::Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(
-            wiremock::ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"answers":{"probe":{"type":"noul","noul":0.97}}}),
-            ),
-        )
-        .mount(&mock)
-        .await;
+    let mock = common::systemone().await;
     let unused = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dead = unused.local_addr().unwrap();
     drop(unused);
