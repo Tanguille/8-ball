@@ -364,8 +364,9 @@ pub struct Service {
     embedder: Option<Embedder>,
     store: Store,
     metrics: Metrics,
-    /// Held during an automatic refit, so concurrent labels skip theirs.
-    refit: Mutex<()>,
+    /// The labelled count of each calibration id at its last automatic refit, in memory only. Its lock is held during
+    /// a refit, so concurrent labels skip theirs.
+    refits: Mutex<std::collections::HashMap<String, usize>>,
     /// The escalation budget window: its start and the escalations granted in it. A std mutex, held for a few
     /// instructions and never across an await.
     escalations: std::sync::Mutex<(Instant, usize)>,
@@ -398,7 +399,7 @@ impl Service {
             embedder,
             store,
             metrics: Metrics::default(),
-            refit: Mutex::new(()),
+            refits: Mutex::default(),
             escalations: std::sync::Mutex::new((Instant::now(), 0)),
             triage_deadline: TRIAGE_DEADLINE,
             ask_deadline: ASK_DEADLINE,
@@ -526,13 +527,18 @@ impl Service {
         if count < every {
             return Ok(());
         }
-        let Ok(_refit) = self.refit.try_lock() else {
+        let Ok(mut refits) = self.refits.try_lock() else {
             return Ok(());
         };
         let stored = self.store.calibration(&calibration_id, spec).await?;
-        // Refit once the count has crossed a multiple since the last fit, so a refit that a failed probe or a busy
-        // lock skipped runs at the next label instead of the next multiple.
-        let fitted = stored.as_ref().map_or(0, |(_, report)| report.examples);
+        // Refit once the count has crossed a multiple since the last refit, so a refit that a failed probe or a busy
+        // lock skipped runs at the next label instead of the next multiple. The count in memory also covers a refit
+        // that stored nothing and states that conflicting labels leave out of the fit. After a restart, the examples
+        // of the stored report stand in, which can cost one extra refit.
+        let fitted = refits
+            .get(&calibration_id)
+            .copied()
+            .unwrap_or_else(|| stored.as_ref().map_or(0, |(_, report)| report.examples));
         if count / every <= fitted / every {
             return Ok(());
         }
@@ -544,12 +550,13 @@ impl Service {
         let response = self
             .calibrate_question(spec, question, endpoint, None, false, Some(previous))
             .await?;
-        // A refit that keeps the bands still records its example count, else every later label refits again.
+        // A refit that keeps the bands still stores its report, so the report shows the latest examples and warnings.
         if calibrated && !response.stored {
             self.store
                 .put_calibration(&calibration_id, spec, &response.bands, &response.report)
                 .await?;
         }
+        refits.insert(calibration_id, count);
 
         Ok(())
     }
