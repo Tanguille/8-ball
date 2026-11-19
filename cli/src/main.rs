@@ -151,15 +151,15 @@ impl Remote {
             .send()
             .await?;
         let status = response.status();
-        let body: Value = response.json().await?;
         if !status.is_success() {
+            let body: Value = response.json().await.unwrap_or_default();
             bail!(
                 "HTTP {status}: {}",
                 body["error"].as_str().unwrap_or("request failed")
             );
         }
 
-        Ok(body)
+        Ok(response.json().await?)
     }
 }
 
