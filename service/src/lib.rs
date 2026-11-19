@@ -282,6 +282,9 @@ pub struct DoctorEndpoint {
     pub error: Option<String>,
 }
 
+/// The most items that one triage request may hold. The CLI splits a longer list into requests of this size.
+pub const MAX_TRIAGE_ITEMS: usize = 64;
+
 // ponytail: one deadline for the whole triage, prefilter included; items still unjudged when it passes fail open
 // to `unsure`. At 64 items, 2 slots and the 2.7 s p90 call this leaves room; a request field if callers need another
 // value.
@@ -922,8 +925,9 @@ impl Service {
     }
 
     pub async fn triage(&self, request: TriageRequest) -> Result<TriageResponse, ServiceError> {
-        if request.items.len() > 64 {
-            return Err(ServiceError::BadRequest("at most 64 items".into()));
+        if request.items.len() > MAX_TRIAGE_ITEMS {
+            let message = format!("at most {MAX_TRIAGE_ITEMS} items");
+            return Err(ServiceError::BadRequest(message));
         }
         if request.spec.is_some() == request.question.is_some() {
             return Err(ServiceError::BadRequest(
@@ -954,10 +958,9 @@ impl Service {
             "triage",
             self.triage_deadline,
         );
-        let warning = if let Some(top_k) = request.top_k {
-            self.prefilter(&question, &mut items, top_k, &pass).await?
-        } else {
-            None
+        let warning = match request.top_k {
+            Some(top_k) => self.prefilter(&question, &mut items, top_k, &pass).await?,
+            None => None,
         };
         let (mut decisions, failures) = self.judge_items(items, &question, &pass).await?;
         let warning = [warning, failures]

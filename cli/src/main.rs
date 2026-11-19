@@ -18,12 +18,9 @@ use domain::{
     config::{self, Config},
     question::{Kind, Question},
 };
-use service::{Service, TriageResponse};
+use service::{MAX_TRIAGE_ITEMS, Service, TriageResponse};
 
 mod evaluate;
-
-/// The most items the server judges in one triage request.
-const TRIAGE_ITEMS: usize = 64;
 
 #[derive(Parser)]
 #[command(
@@ -516,12 +513,12 @@ async fn triage(args: TriageArgs) -> Result<i32> {
     });
     // ponytail: chunks go one at a time, and top_k and duplicate sharing work per chunk; send them in parallel or
     // split on the server if large arrays need that.
-    let mut chunks = items.chunks(TRIAGE_ITEMS);
+    let mut chunks = items.chunks(MAX_TRIAGE_ITEMS);
     // An empty array still makes one request, so the server checks the question.
     body["items"] = json!(chunks.next().unwrap_or_default());
     let mut merged: TriageResponse =
         serde_json::from_value(args.remote.post("/v1/triage", &body).await?)?;
-    for (start, chunk) in (TRIAGE_ITEMS..).step_by(TRIAGE_ITEMS).zip(chunks) {
+    for (start, chunk) in (MAX_TRIAGE_ITEMS..).step_by(MAX_TRIAGE_ITEMS).zip(chunks) {
         body["items"] = json!(chunk);
         let mut response: TriageResponse =
             serde_json::from_value(args.remote.post("/v1/triage", &body).await?)?;
@@ -588,8 +585,8 @@ async fn observe(mut args: ObserveArgs) -> Result<i32> {
             snapshot["context"].is_string()
                 && snapshot["items"]
                     .as_array()
-                    .is_some_and(|items| items.len() <= TRIAGE_ITEMS),
-            "snapshot requires context text and an items array of at most 64 candidates"
+                    .is_some_and(|items| items.len() <= MAX_TRIAGE_ITEMS),
+            "snapshot requires context text and an items array of at most {MAX_TRIAGE_ITEMS} candidates"
         );
 
         Ok(snapshot)
