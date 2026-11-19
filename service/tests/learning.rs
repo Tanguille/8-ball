@@ -334,3 +334,30 @@ async fn triage_lists_duplicates_under_their_first_decision() {
     assert_eq!(response.kept[0].decision.id, response.kept[1].decision.id);
     assert_eq!(requests(&app.mock).await.len(), 3);
 }
+
+#[tokio::test]
+async fn a_refit_that_keeps_the_bands_stores_its_report() {
+    let app = fixture("recalibrate_after = 20").await;
+    let calibration_id = verdict::calibration_id(
+        &verdict::question_hash(&greeting()),
+        domain::config::BackendKind::Systemone,
+        &app.mock.uri(),
+    );
+    // Labels set straight in the store skip the refit; the 20th and the 40th, through the service, run it. Both
+    // fits give the same bands.
+    for i in 1..=40 {
+        let id = spec(&app, &format!("yes-{i}")).await.id;
+        if i % 20 == 0 {
+            app.service.label(id, "yes".into()).await.unwrap();
+        } else {
+            app.store.set_label(id, "yes").await.unwrap();
+        }
+    }
+    let (_, report) = app
+        .store
+        .calibration(&calibration_id, Some("greeting"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.examples, 40);
+}

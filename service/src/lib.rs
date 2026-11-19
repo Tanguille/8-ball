@@ -533,12 +533,20 @@ impl Service {
         if count / every <= fitted / every {
             return Ok(());
         }
+        let calibrated = stored.is_some();
         let previous = stored.map_or_else(
             || Bands::default_for(&question.kind, backend),
             |(bands, _)| bands,
         );
-        self.calibrate_question(spec, question, endpoint, None, false, Some(previous))
+        let response = self
+            .calibrate_question(spec, question, endpoint, None, false, Some(previous))
             .await?;
+        // A refit that keeps the bands still records its example count, else every later label refits again.
+        if calibrated && !response.stored {
+            self.store
+                .put_calibration(&calibration_id, spec, &response.bands, &response.report)
+                .await?;
+        }
 
         Ok(())
     }
