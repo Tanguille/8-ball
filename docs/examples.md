@@ -58,19 +58,7 @@ A score verdict is the index of the level, lowest first. More results, with the 
 | The score above | Certificate expires in 20 days | `unsure` | 0.34 |
 | The score above | Weekly report is ready | `0` (can wait) | 0.61 |
 
-Triage a list with one spec. The output keeps the original indices:
-
-```sh
-echo '["Primary database is down, all writes fail", "Weekly report is ready", "Backups have failed for the last 4 nights", "New comment on your blog post"]' \
-  | 8ball triage --spec storage-risk \
-  | jq -c '{kept: [.kept[].index], rejected: [.rejected[].index], unsure: [.unsure[].index]}'
-```
-
-```json
-{"kept":[0,2],"rejected":[1,3],"unsure":[]}
-```
-
-Item 2 came from the answer cache, because the table above asked the same spec and state.
+To triage a list with one spec, see the [README](../README.md#skip-the-alerts-that-do-not-matter).
 
 Gate a shell script with `--exit-code`:
 
@@ -92,15 +80,16 @@ examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|
 
 ```json
 {"verdict":"match","file":"service/src/http.rs","lines":"4-58","confidence":0.96}
-{"verdict":"match","file":"service/src/http.rs","lines":"160-184","confidence":0.99}
-{"verdict":"check","file":"service/src/http.rs","lines":"128-152","confidence":0.06}
-{"verdict":"check","file":"service/src/lib.rs","lines":"273-305","confidence":0.42}
+{"verdict":"match","file":"service/src/http.rs","lines":"128-182","confidence":0.98}
+{"verdict":"check","file":"service/src/lib.rs","lines":"370-402","confidence":0.02}
 ```
 
-Lines 160 to 184 hold the bearer key check. `check` means `unsure`, so read those blocks yourself. This run took 0.9 seconds with an empty database.
+Lines 128 to 182 hold the bearer key check. `check` means `unsure`, so read those blocks yourself. On stderr, the script prints `3 blocks: 2 match, 1 check, 0 no`. This run took 0.9 seconds with an empty database.
+
+After the pattern, you can give more paths and ripgrep flags, for example `service/src cli/src -g '!**/tests/**'`. The default is the current directory. The script uses `8ball triage --no-learn`, so exploration never turns a `no` into `check`.
 
 Limits:
 
-- 8-ball judges only the blocks that ripgrep finds. If the keywords miss the code, 8-ball misses it too. For "remove the middle of a state that is too long", `max_state_chars|trim` in `backend/src/lib.rs` found only the caller, as `check` (0.67). The `fit` function cuts the state, but has neither keyword. With `'fn fit'`, it is a `match` (0.97).
-- `triage` takes at most 64 blocks. If ripgrep finds more, the script stops with an error, so use narrow keywords or a path.
+- 8-ball judges only the blocks that ripgrep finds. If the keywords miss the code, 8-ball misses it too. For "remove the middle of a state that is too long", `max_state_chars|trim` in `backend/src/lib.rs` found the caller, as `check` (0.6), but not `fit`, the function that cuts the state: it has neither keyword. With `'fn fit'`, `fit` is a `match` (0.97).
+- `8ball triage` sends 64 blocks per request, one request after another. So many blocks take longer, and narrow keywords or paths make the search faster.
 - A block is the match with 12 lines before and after it, not a full function. The model can see only part of a long function.

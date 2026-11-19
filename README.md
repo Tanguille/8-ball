@@ -55,8 +55,9 @@ examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|
 ```
 
 ```json
-{"verdict":"match","file":"service/src/http.rs","lines":"160-184","confidence":0.99}
-{"verdict":"check","file":"service/src/lib.rs","lines":"273-305","confidence":0.42}
+{"verdict":"match","file":"service/src/http.rs","lines":"4-58","confidence":0.96}
+{"verdict":"match","file":"service/src/http.rs","lines":"128-182","confidence":0.98}
+{"verdict":"check","file":"service/src/lib.rs","lines":"370-402","confidence":0.02}
 ```
 
 Why it pays: the agent reads the matching blocks, not every file that has a keyword. You need no index. [More about the limits](docs/examples.md#search-code-by-behavior).
@@ -115,7 +116,7 @@ For a shared server, set `EIGHTBALL_URL` and `EIGHTBALL_API_KEY`, then run `8bal
 
 | Page | What it covers |
 | --- | --- |
-| [Examples](docs/examples.md) | JSON output, choice and score questions, triage, exit codes, code search |
+| [Examples](docs/examples.md) | JSON output, choice and score questions, exit codes, code search |
 | [Benchmark](docs/benchmark.md) | Accuracy and speed against a 27B model, how to repeat it, and the CI benchmark runs |
 | [CLI](docs/cli.md) | Commands, flags, exit codes |
 | [HTTP and MCP API](docs/http-api.md) | Routes, authentication, MCP tools |
