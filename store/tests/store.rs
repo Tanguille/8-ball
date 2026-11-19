@@ -463,19 +463,24 @@ async fn unlabelled_lists_one_row_per_state() {
 #[tokio::test]
 async fn shipped_migrations_keep_their_checksums() {
     let (_directory, path, _store) = opened().await;
-    let checksums: Vec<String> =
-        sqlx::query_scalar("SELECT lower(hex(checksum)) FROM _sqlx_migrations ORDER BY version")
-            .fetch_all(&mut fixture(&path).await)
-            .await
-            .unwrap();
+    // Version and checksum together, so a failure names the migration that changed.
+    let checksums: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT version,lower(hex(checksum)) FROM _sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(&mut fixture(&path).await)
+    .await
+    .unwrap();
+    let pinned = [
+        "7e65d034202713c733154edf263c45e77a17d8c5624ed8a0f34a17252c4bb1e0bf2d0b520e517556a49704d0792a6223",
+        "15c8c29ba14d413817497585c856c2e43dd46fb5ae52b476774e28f2dd8c7aaba5f5535413325b879b6e52c38ff0f5ea",
+        "3e0c740f10e925e7ddcf8874bf9d0f216b66af730fb4c1ac26cd85f67ec89207c13c865b484a6249cf5b4c6fb168b5c9",
+        "c2d6f8c37d6652c7b96a193ff23c3e2275b5d7038bd55e0109dafe7cb72efc6deaf0bd519797d89581520f4b30e5ed56",
+    ];
     assert_eq!(
         checksums,
-        [
-            "7e65d034202713c733154edf263c45e77a17d8c5624ed8a0f34a17252c4bb1e0bf2d0b520e517556a49704d0792a6223",
-            "15c8c29ba14d413817497585c856c2e43dd46fb5ae52b476774e28f2dd8c7aaba5f5535413325b879b6e52c38ff0f5ea",
-            "3e0c740f10e925e7ddcf8874bf9d0f216b66af730fb4c1ac26cd85f67ec89207c13c865b484a6249cf5b4c6fb168b5c9",
-            "c2d6f8c37d6652c7b96a193ff23c3e2275b5d7038bd55e0109dafe7cb72efc6deaf0bd519797d89581520f4b30e5ed56",
-        ],
+        (1..)
+            .zip(pinned.map(String::from))
+            .collect::<Vec<(i64, String)>>(),
         "a migration changed after it shipped"
     );
 }

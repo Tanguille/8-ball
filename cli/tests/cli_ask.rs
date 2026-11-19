@@ -86,6 +86,7 @@ async fn spec_exit_codes_do_not_probe_doctor() {
 async fn no_learn_sends_learn_false() {
     let mock = MockServer::start().await;
     Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/ask"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results":[]})))
         .mount(&mock)
         .await;
