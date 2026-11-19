@@ -2,13 +2,13 @@
 
 All models ran on the CPU of the GitHub runner.
 
-Run on 2026-11-18, 8-ball commit c8e5dadd12aabcd4d25dd50f2f1215bd8d27ebf8, [run](https://github.com/Tanguille/8-ball/actions/runs/44419158482).
+Run on 2026-11-19, 8-ball commit d8eea3bb23142b142c08e46e6e0c129b67d8e45e, [run](https://github.com/Tanguille/8-ball/actions/runs/44589922912).
 
 | Method | Decided | Wrong | Accuracy of decided | Correct of all | Correct vs d3 (95% CI) | Accuracy at 90% coverage | Mean time | Speed vs d3 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| d3 (vllm-d3-nano-Q8_0.gguf) | 90% | 10 | 98.2% | 88.8% | reference | 98.3% | 829 ms | 1.0x |
-| rerank (bge-reranker-v2-m3-Q8_0.gguf) | 0% | 0 | - | 0.0% | -88.8 (-91.3 to -86.3) | 55.4% | 127 ms | 6.5x |
-| chat (Qwen3.5-0.8B-Q8_0.gguf) | 35% | 31 | 85.2% | 29.7% | -59.2 (-63.7 to -54.3) | 56.3% | 351 ms | 2.4x |
+| d3 (vllm-d3-nano-Q8_0.gguf) | 90% | 10 | 98.2% | 88.8% | reference | 98.3% | 1629 ms | 1.0x |
+| rerank (bge-reranker-v2-m3-Q8_0.gguf) | 0% | 0 | - | 0.0% | -88.8 (-91.3 to -86.3) | 55.4% | 169 ms | 9.6x |
+| chat (Qwen3.5-0.8B-Q8_0.gguf) | 36% | 31 | 85.5% | 30.5% | -58.3 (-63.0 to -53.8) | 56.1% | 604 ms | 2.7x |
 
 Per task, accuracy of decided (decided share):
 
@@ -16,9 +16,9 @@ Per task, accuracy of decided (decided share):
 | --- | --- | --- | --- |
 | d3 (vllm-d3-nano-Q8_0.gguf) | 100.0% (98%) | 93.8% (81%) | 100.0% (92%) |
 | rerank (bge-reranker-v2-m3-Q8_0.gguf) | - (0%) | - (0%) | - (0%) |
-| chat (Qwen3.5-0.8B-Q8_0.gguf) | 90.0% (10%) | 76.1% (56%) | 97.4% (38%) |
+| chat (Qwen3.5-0.8B-Q8_0.gguf) | 90.5% (10%) | 77.0% (56%) | 96.2% (40%) |
 
-600 cases per method (yes/no: spam 100/100, positive 100/100, lost-card 100/100), 0 errors. Hardware: Intel(R) Xeon(R) 6975P-C, Intel Corporation 82371AB/EB/MB PIIX4 ACPI (rev 08); Amazon.com, Inc. Device 1111, GPU offload all layers.
+600 cases per method (yes/no: spam 100/100, positive 100/100, lost-card 100/100), 0 errors. Hardware: AMD EPYC 9V74 80-Core Processor, no GPU, CPU only.
 
 Compared with the baseline (decided, wrong):
 
@@ -30,6 +30,6 @@ Compared with the baseline (decided, wrong):
 | rerank | spam | 0 (+0) | 0 (+0) | same |
 | rerank | positive | 0 (+0) | 0 (+0) | same |
 | rerank | lost-card | 0 (+0) | 0 (+0) | same |
-| chat | spam | 20 (+2) | 2 (+1) | same |
-| chat | positive | 113 (-3) | 27 (-2) | worse (report only) |
-| chat | lost-card | 76 (-5) | 2 (+0) | worse (report only) |
+| chat | spam | 21 (+3) | 2 (+1) | improved |
+| chat | positive | 113 (-3) | 26 (-3) | worse (report only) |
+| chat | lost-card | 80 (-1) | 3 (+1) | same |
