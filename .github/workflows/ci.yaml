@@ -68,16 +68,14 @@ jobs:
       - name: Benchmark
         run: |
           set -o pipefail
-          mkdir -p target/bench
           cargo run --release -p bench -- --endpoints d3,rerank,chat --reference d3 --per-side 100 --report-only chat \
-            --baseline bench/baseline.json | tee target/bench/report.md | tee -a "$GITHUB_STEP_SUMMARY"
+            --baseline bench/baseline.json | tee -a "$GITHUB_STEP_SUMMARY"
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench
           path: |
             target/bench/*.json
-            target/bench/report.md
             target/bench/page.md
 
   # Saves the tables of a main push on the bench-results branch (see docs/benchmark.md). The job has no secret and

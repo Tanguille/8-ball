@@ -95,7 +95,7 @@ jobs:
           restore-keys: hosted-${{ env.MODE }}-
       - name: Benchmark
         run: |
-          # The default shell has no pipefail: without it, the status of the last tee would hide a bench failure.
+          # The default shell has no pipefail: without it, the status of tee would hide a bench failure.
           set -o pipefail
           args=(--endpoints "$ENDPOINTS" --cascade "d3,hosted-qwen-3-8-27b" --per-side "$PER_SIDE" --config hosted.toml)
           # The matrix compares with d3, which always runs; a model that cannot answer this week is skipped.
@@ -108,8 +108,7 @@ jobs:
             args+=(--baseline baseline/summary.json)
           fi
           status=0
-          mkdir -p target/bench
-          cargo run --release -p bench -- "${args[@]}" | tee target/bench/report.md | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+          cargo run --release -p bench -- "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
           mkdir -p baseline && cp target/bench/summary.json baseline/
           if [ "$status" != 0 ] && [ "$MODE" = matrix ]; then
             echo "::warning::A hosted model got worse than last week; see the job summary."
@@ -128,7 +127,6 @@ jobs:
           name: bench-${{ env.MODE }}
           path: |
             target/bench/*.json
-            target/bench/report.md
             target/bench/page.md
 
   # Saves the tables on the bench-results branch (see docs/benchmark.md). The job has no secret. A failing 27b run
