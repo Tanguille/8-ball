@@ -84,3 +84,17 @@ async fn bearer_allows_non_loopback_host_header() {
         .unwrap();
     assert!(response.status().is_success(), "{}", response.status());
 }
+#[tokio::test]
+async fn bearer_scheme_is_case_insensitive() {
+    let mock = MockServer::start().await;
+    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
+    let (url, ..) = serve(&mock, &directory.path().join("db.sqlite")).await;
+    let response = reqwest::Client::new()
+        .post(format!("{url}/v1/questions"))
+        .header("Authorization", "bearer k")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+}
