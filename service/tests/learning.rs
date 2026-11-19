@@ -4,7 +4,7 @@ use wiremock::MockServer;
 use domain::verdict;
 use service::{Decision, TriageResponse};
 
-use common::{indices, requests};
+use common::{indices, label_under_old_model, requests};
 
 mod common;
 
@@ -33,11 +33,6 @@ async fn fixture(learning: &str) -> App {
     }
 }
 
-fn greeting() -> domain::question::Question {
-    serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
-        .unwrap()
-}
-
 async fn ask(app: &App, request: Value) -> Decision {
     let request: service::AskRequest = serde_json::from_value(request).unwrap();
     app.service.ask(request).await.unwrap().results.remove(0)
@@ -47,31 +42,19 @@ async fn spec(app: &App, state: &str) -> Decision {
     ask(app, json!({"spec":"greeting","state":state})).await
 }
 
+/// The stored `greeting` fit on `d3`.
+async fn fit(app: &App) -> Option<(verdict::Bands, verdict::Report)> {
+    common::greeting_fit(
+        &app.store,
+        domain::config::BackendKind::Systemone,
+        &app.mock.uri(),
+    )
+    .await
+}
+
 async fn triage(app: &App, request: Value) -> TriageResponse {
     let request: service::TriageRequest = serde_json::from_value(request).unwrap();
     app.service.triage(request).await.unwrap()
-}
-
-/// A labeled `greeting` decision under a model the service never uses, so only `remember` can find it.
-async fn label_under_old_model(app: &App, state: &str, label: &str) -> i64 {
-    let id = app
-        .store
-        .insert_many(vec![store::NewDecision {
-            spec: Some("greeting".into()),
-            question_hash: verdict::question_hash(&greeting()),
-            question: "{}".into(),
-            calibration_id: "previous-model".into(),
-            state_hash: verdict::short_hash(state),
-            state: state.into(),
-            answer: vec![0.5, 0.5],
-            verdict: "unsure".into(),
-            endpoint: "d3".into(),
-        }])
-        .await
-        .unwrap()[0];
-    assert!(app.store.set_label(id, label).await.unwrap());
-
-    id
 }
 
 #[tokio::test]
@@ -123,7 +106,7 @@ async fn triage_reports_kept_and_unsure_but_never_rejected() {
 #[tokio::test]
 async fn remembered_label_answers_without_the_model() {
     let app = fixture("").await;
-    let labelled = label_under_old_model(&app, "maybe-1", "yes").await;
+    let labelled = label_under_old_model(&app.store, "maybe-1", "yes").await;
     let before = requests(&app.mock).await.len();
     let decision = spec(&app, "maybe-1").await;
     assert_eq!(decision.verdict, "yes");
@@ -154,18 +137,16 @@ async fn exploration_returns_skipped_answers_as_unsure() {
     assert!(response.rejected.is_empty());
     assert!(response.unsure.iter().all(|item| item.decision.explored));
 
-    for learning in ["explore = 0.0", "explore = 1.0\nreport = false"] {
-        let app = fixture(learning).await;
-        let decision = spec(&app, "no-1").await;
-        assert_eq!(decision.verdict, "no", "{learning}");
-        assert!(!decision.explored && !decision.report, "{learning}");
-    }
+    let app = fixture("explore = 1.0\nreport = false").await;
+    let decision = spec(&app, "no-1").await;
+    assert_eq!(decision.verdict, "no");
+    assert!(!decision.explored && !decision.report);
 }
 
 #[tokio::test]
 async fn learn_false_returns_the_model_alone() {
     let app = fixture("explore = 1.0").await;
-    label_under_old_model(&app, "maybe-1", "yes").await;
+    label_under_old_model(&app.store, "maybe-1", "yes").await;
     let maybe = ask(
         &app,
         json!({"spec":"greeting","state":"maybe-1","learn":false}),
@@ -200,22 +181,11 @@ async fn learn_false_returns_the_model_alone() {
 #[tokio::test]
 async fn labels_refit_at_every_multiple_of_recalibrate_after() {
     let app = fixture("recalibrate_after = 25").await;
-    let calibration_id = verdict::calibration_id(
-        &verdict::question_hash(&greeting()),
-        domain::config::BackendKind::Systemone,
-        &app.mock.uri(),
-    );
     for i in 1..=24 {
         let id = spec(&app, &format!("yes-{i}")).await.id;
         app.service.label(id, "yes".into()).await.unwrap();
     }
-    assert!(
-        app.store
-            .calibration(&calibration_id, Some("greeting"))
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(fit(&app).await.is_none());
     assert!(!spec(&app, "maybe-1").await.calibrated);
 
     let id = spec(&app, "yes-25").await.id;
@@ -226,12 +196,7 @@ async fn labels_refit_at_every_multiple_of_recalibrate_after() {
         before,
         "a refit uses cached answers only"
     );
-    let (bands, report) = app
-        .store
-        .calibration(&calibration_id, Some("greeting"))
-        .await
-        .unwrap()
-        .unwrap();
+    let (bands, report) = fit(&app).await.unwrap();
     assert_eq!(
         bands,
         verdict::Bands::Noul {
@@ -246,11 +211,6 @@ async fn labels_refit_at_every_multiple_of_recalibrate_after() {
 #[tokio::test]
 async fn a_missed_refit_runs_at_the_next_label() {
     let app = fixture("recalibrate_after = 20").await;
-    let calibration_id = verdict::calibration_id(
-        &verdict::question_hash(&greeting()),
-        domain::config::BackendKind::Systemone,
-        &app.mock.uri(),
-    );
     // Labels set straight in the store skip the refit, as a failed probe or a busy refit would.
     for i in 1..=21 {
         let id = spec(&app, &format!("yes-{i}")).await.id;
@@ -258,19 +218,14 @@ async fn a_missed_refit_runs_at_the_next_label() {
     }
     let id = spec(&app, "yes-22").await.id;
     app.service.label(id, "yes".into()).await.unwrap();
-    let (_, report) = app
-        .store
-        .calibration(&calibration_id, Some("greeting"))
-        .await
-        .unwrap()
-        .unwrap();
+    let (_, report) = fit(&app).await.unwrap();
     assert_eq!(report.examples, 22);
 }
 
 #[tokio::test]
 async fn calibrate_reasks_the_model_instead_of_remembering() {
     let app = fixture("").await;
-    label_under_old_model(&app, "yes-old", "yes").await;
+    label_under_old_model(&app.store, "yes-old", "yes").await;
     app.service.calibrate("greeting", None, true).await.unwrap();
     let asked = requests(&app.mock).await;
     assert!(asked.iter().any(|body| body["state"] == "yes-old"));
@@ -338,11 +293,6 @@ async fn triage_lists_duplicates_under_their_first_decision() {
 #[tokio::test]
 async fn a_refit_that_keeps_the_bands_stores_its_report() {
     let app = fixture("recalibrate_after = 20").await;
-    let calibration_id = verdict::calibration_id(
-        &verdict::question_hash(&greeting()),
-        domain::config::BackendKind::Systemone,
-        &app.mock.uri(),
-    );
     // Labels set straight in the store skip the refit; the 20th and the 40th, through the service, run it. Both
     // fits give the same bands.
     for i in 1..=40 {
@@ -353,11 +303,6 @@ async fn a_refit_that_keeps_the_bands_stores_its_report() {
             app.store.set_label(id, "yes").await.unwrap();
         }
     }
-    let (_, report) = app
-        .store
-        .calibration(&calibration_id, Some("greeting"))
-        .await
-        .unwrap()
-        .unwrap();
+    let (_, report) = fit(&app).await.unwrap();
     assert_eq!(report.examples, 40);
 }

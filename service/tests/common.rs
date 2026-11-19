@@ -9,6 +9,7 @@ use serde_json::{Map, Value, json};
 use sqlx::Connection;
 use wiremock::{MockServer, matchers};
 
+use domain::{config::BackendKind, question::Question, verdict};
 use service::Service;
 use store::Store;
 
@@ -113,6 +114,48 @@ pub async fn requests(mock: &MockServer) -> Vec<Value> {
         .filter(|request| request.method == "POST")
         .map(|request| serde_json::from_slice(&request.body).unwrap())
         .collect()
+}
+
+#[must_use]
+pub fn greeting() -> Question {
+    serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
+        .unwrap()
+}
+
+/// The stored fit of the `greeting` spec on an endpoint of `kind` with `fingerprint`.
+pub async fn greeting_fit(
+    store: &Store,
+    kind: BackendKind,
+    fingerprint: &str,
+) -> Option<(verdict::Bands, verdict::Report)> {
+    let calibration_id =
+        verdict::calibration_id(&verdict::question_hash(&greeting()), kind, fingerprint);
+
+    store
+        .calibration(&calibration_id, Some("greeting"))
+        .await
+        .unwrap()
+}
+
+/// A labelled `greeting` decision under a model the service never uses, so only `remember` can find it.
+pub async fn label_under_old_model(store: &Store, state: &str, label: &str) -> i64 {
+    let id = store
+        .insert_many(vec![store::NewDecision {
+            spec: Some("greeting".into()),
+            question_hash: verdict::question_hash(&greeting()),
+            question: "{}".into(),
+            calibration_id: "previous-model".into(),
+            state_hash: verdict::short_hash(state),
+            state: state.into(),
+            answer: vec![0.5, 0.5],
+            verdict: "unsure".into(),
+            endpoint: "d3".into(),
+        }])
+        .await
+        .unwrap()[0];
+    assert!(store.set_label(id, label).await.unwrap());
+
+    id
 }
 
 #[must_use]

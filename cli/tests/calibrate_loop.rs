@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use tokio::process::Command;
 use wiremock::{MockServer, matchers};
 
-use domain::{config::Config, verdict};
+use domain::config::Config;
 use service::Service;
 use store::Store;
 
@@ -225,25 +225,7 @@ async fn conflicting_labels_are_excluded() {
     let state = "hello conflict";
     let id = ask(&app.service, "greeting", state).await.id;
     app.service.label(id, "yes".into()).await.unwrap();
-    let question: domain::question::Question =
-        serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
-            .unwrap();
-    let other = app
-        .store
-        .insert_many(vec![store::NewDecision {
-            spec: Some("greeting".into()),
-            question_hash: verdict::question_hash(&question),
-            question: "{}".into(),
-            calibration_id: "previous-model".into(),
-            state_hash: verdict::short_hash(state),
-            state: state.into(),
-            answer: vec![0.9, 0.1],
-            verdict: "yes".into(),
-            endpoint: "d3".into(),
-        }])
-        .await
-        .unwrap()[0];
-    app.service.label(other, "no".into()).await.unwrap();
+    common::label_under_old_model(&app.store, state, "no").await;
     let result = app
         .service
         .calibrate("greeting", Some(0.95), true)

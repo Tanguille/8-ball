@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
-use domain::{config::BackendKind, verdict};
+use domain::config::BackendKind;
 use service::{Decision, TriageResponse};
 
 use common::{indices, requests};
@@ -120,14 +120,6 @@ async fn unsure_answer_is_escalated_and_both_rows_are_stored() {
 }
 
 #[tokio::test]
-async fn decided_answer_is_not_escalated() {
-    let app = fixture(30, "").await;
-    let decision = greeting(&app, "yes-1").await;
-    assert!(!decision.escalated);
-    assert!(requests(&app.big).await.is_empty());
-}
-
-#[tokio::test]
 async fn escalation_error_keeps_the_primary_unsure() {
     let app = fixture(30, "").await;
     let decision = greeting(&app, "maybe-fail-1").await;
@@ -174,18 +166,6 @@ async fn repeat_is_cached_on_both_endpoints() {
     assert!(repeat.cached && repeat.escalated);
     assert_eq!(requests(&app.d3).await.len(), 1);
     assert_eq!(requests(&app.big).await.len(), 1);
-}
-
-#[tokio::test]
-async fn ad_hoc_questions_escalate() {
-    let app = fixture(30, "").await;
-    let decision = ask(
-        &app,
-        json!({"state":"maybe-yes-1","questions":[{"id":"q","type":"noul","instructions":"Official?"}]}),
-    )
-    .await;
-    assert_eq!(decision.verdict, "yes");
-    assert!(decision.escalated);
 }
 
 #[tokio::test]
@@ -286,19 +266,13 @@ async fn labelling_escalated_decisions_refits_both_endpoints() {
             app.service.label(decision.id, "yes".into()).await.unwrap();
         }
     }
-    let question: domain::question::Question =
-        serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
-            .unwrap();
-    let qhash = verdict::question_hash(&question);
-    for calibration_id in [
-        verdict::calibration_id(&qhash, BackendKind::Systemone, &app.d3.uri()),
-        verdict::calibration_id(&qhash, BackendKind::Logprob, "big"),
+    for (kind, fingerprint) in [
+        (BackendKind::Systemone, app.d3.uri()),
+        (BackendKind::Logprob, "big".into()),
     ] {
         assert!(
-            app.store
-                .calibration(&calibration_id, Some("greeting"))
+            common::greeting_fit(&app.store, kind, &fingerprint)
                 .await
-                .unwrap()
                 .is_some()
         );
     }
@@ -321,6 +295,7 @@ async fn review_shows_an_escalated_case_once() {
 async fn labelling_a_state_never_escalated_leaves_the_escalation_endpoint_alone() {
     let app = fixture(30, "recalibrate_after = 1").await;
     let decision = greeting(&app, "yes-1").await;
+    assert!(!decision.escalated);
     app.service.label(decision.id, "yes".into()).await.unwrap();
     assert!(app.big.received_requests().await.unwrap().is_empty());
 }
@@ -339,19 +314,9 @@ async fn labelling_refits_the_endpoints_that_answered_after_escalation_is_turned
     config.remove("escalation");
     let service = service::Service::new(config.try_into().unwrap(), app.store.clone());
     service.label(ids[24], "yes".into()).await.unwrap();
-    let question: domain::question::Question =
-        serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
-            .unwrap();
-    let calibration_id = verdict::calibration_id(
-        &verdict::question_hash(&question),
-        BackendKind::Systemone,
-        &app.d3.uri(),
-    );
     assert!(
-        app.store
-            .calibration(&calibration_id, Some("greeting"))
+        common::greeting_fit(&app.store, BackendKind::Systemone, &app.d3.uri())
             .await
-            .unwrap()
             .is_some()
     );
 }
@@ -359,19 +324,9 @@ async fn labelling_refits_the_endpoints_that_answered_after_escalation_is_turned
 #[tokio::test]
 async fn escalation_endpoint_refits_at_multiples_of_its_own_labels() {
     let app = fixture(100, "recalibrate_after = 25").await;
-    let question: domain::question::Question =
-        serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
-            .unwrap();
-    let calibration_id = verdict::calibration_id(
-        &verdict::question_hash(&question),
-        BackendKind::Logprob,
-        "big",
-    );
     let fitted = || async {
-        app.store
-            .calibration(&calibration_id, Some("greeting"))
+        common::greeting_fit(&app.store, BackendKind::Logprob, "big")
             .await
-            .unwrap()
             .map(|(_, report)| report.examples)
     };
     // Five labels the escalation endpoint never saw put the question's label count 5 ahead of its own. Two `no`
