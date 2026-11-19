@@ -1377,14 +1377,8 @@ impl Service {
         )
         .await?;
         if let Some(escalation) = pass.escalation {
-            let escalated = self.escalate(&state, questions, escalation, pass, &mut judgments);
-            if tokio::time::timeout_at(pass.deadline, escalated)
-                .await
-                .is_err()
-            {
-                self.metrics.record_backend_error(&escalation.endpoint);
-                tracing::warn!("escalation: {}; keeping the unsure answer", pass.passed);
-            }
+            self.escalate(&state, questions, escalation, pass, &mut judgments)
+                .await;
         }
 
         Ok(judgments)
@@ -1392,9 +1386,8 @@ impl Service {
 
     /// Re-asks `unsure` answers on the escalation endpoint, about `state` as the primary endpoint saw it, so both
     /// stored rows share a state hash and one label serves both. That needs a state limit on the escalation endpoint
-    /// at least as large as the primary's, because a smaller one trims `state` again. Fails open: an error or a spent
-    /// budget keeps the primary answer. It changes `judgments` only after its last await, so a deadline can cancel it
-    /// safely.
+    /// at least as large as the primary's, because a smaller one trims `state` again. Fails open: an error, a missed
+    /// deadline or a spent budget keeps the primary answer.
     async fn escalate(
         &self,
         state: &str,
@@ -1434,9 +1427,12 @@ impl Service {
             .iter()
             .map(|&index| questions[index].clone())
             .collect();
-        let escalated = match self
-            .judge(state, pass.spec, &asked, name, pass.remember)
-            .await
+        let escalated = match within(
+            pass.deadline,
+            self.judge(state, pass.spec, &asked, name, pass.remember),
+            || self.backend_error(name, backend::BackendError(pass.passed.clone())),
+        )
+        .await
         {
             Ok((escalated, _)) => escalated,
             Err(error) => {

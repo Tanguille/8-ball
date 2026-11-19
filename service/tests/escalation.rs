@@ -236,6 +236,10 @@ async fn ask_deadline_keeps_the_primary_unsure() {
         metrics.contains(r#"eightball_backend_errors_total{endpoint="big"} 1"#),
         "{metrics}"
     );
+    assert!(
+        metrics.contains(r#"eightball_escalations_total{endpoint="big",outcome="error"} 1"#),
+        "{metrics}"
+    );
 }
 
 #[tokio::test]
