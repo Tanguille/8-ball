@@ -177,19 +177,17 @@ async fn main() -> Result<()> {
         serde_json::to_string_pretty(&summary)?,
     )?;
     report(&mut text, &methods, &runs)?;
-    let ok = match &args.baseline {
-        Some(path) => {
-            let baseline: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
-            compare(&mut text, &summary, &baseline, &args.report_only)?
-        }
-        None => true,
-    };
+    // A baseline error comes after the tables are printed and the page is written, so the run still reports.
+    let ok = args.baseline.as_ref().map_or(Ok(true), |path| {
+        let baseline: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+        compare(&mut text, &summary, &baseline, &args.report_only)
+    });
     print!("{text}");
     fs::write(
         args.out.join("page.md"),
         page(&text, &excluded(&methods, &runs)),
     )?;
-    if !ok {
+    if !ok? {
         std::process::exit(1);
     }
 
