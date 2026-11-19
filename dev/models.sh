@@ -18,6 +18,12 @@ if [ ! -e /dev/dri ] || { command -v lspci >/dev/null && ! lspci | grep -iE "$gp
   export COMPOSE_FILE=compose.yaml:compose.cpu.yaml EIGHTBALL_DEV_NGL="${EIGHTBALL_DEV_NGL:-0}"
 fi
 mkdir -p "$HOME/.cache/8ball-models"
+# CI restores the cache of an older compose.yaml, so delete the models that this one no longer names.
+if [ "${1:-status}" = up ] || [ "${1:-status}" = bench ]; then
+  for file in "$HOME"/.cache/8ball-models/*; do
+    grep -qF "/cache/$(basename "${file%.etag}" .lock)\"" compose.yaml || rm -f "$file"
+  done
+fi
 case "${1:-status}" in
   up) docker compose up -d --wait ;;
   bench) docker compose --profile bench up -d --wait big ;;
