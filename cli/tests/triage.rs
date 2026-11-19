@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers};
 
-use common::requests;
+use common::{indices, requests};
+use service::TriageResponse;
 
 #[path = "../../service/tests/common.rs"]
 mod common;
@@ -305,29 +306,21 @@ async fn cli_no_learn_sends_learn_false() {
 #[tokio::test]
 async fn cli_splits_large_arrays_and_keeps_input_indices() {
     let (url, _model, _embedding, _dir) = app(Some(true)).await;
-    let indices = |body: &Value, key: &str| -> Vec<u64> {
-        body[key]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|item| item["index"].as_u64().unwrap())
-            .collect()
-    };
     let mut items: Vec<_> = (0..130).map(|i| format!("yes{i}")).collect();
     items[65] = "no".into();
     items[70] = "bad".into();
     items[129] = "bad".into();
     let items = json!(items).to_string();
     let output = cli_triage(&["Is this relevant?", "--url", &url], items.as_bytes()).await;
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let kept: Vec<u64> = (0..130)
+    let body: TriageResponse = serde_json::from_slice(&output.stdout).unwrap();
+    let kept: Vec<usize> = (0..130)
         .filter(|index| ![65, 70, 129].contains(index))
         .collect();
-    assert_eq!(indices(&body, "kept"), kept);
-    assert_eq!(indices(&body, "rejected"), [65]);
-    assert_eq!(indices(&body, "unsure"), [70, 129]);
-    assert_eq!(body["dropped"], 1);
-    let warning = body["warning"].as_str().unwrap();
+    assert_eq!(indices(&body.kept), kept);
+    assert_eq!(indices(&body.rejected), [65]);
+    assert_eq!(indices(&body.unsure), [70, 129]);
+    assert_eq!(body.dropped, 1);
+    let warning = body.warning.unwrap();
     assert!(
         warning.starts_with("1 of 64 items failed") && warning.contains("; 1 of 2 items failed"),
         "{warning}"
@@ -342,10 +335,10 @@ async fn cli_splits_large_arrays_and_keeps_input_indices() {
         items.as_bytes(),
     )
     .await;
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(indices(&body, "kept"), [0, 65]);
-    assert_eq!(body["prefiltered"], json!((1..65).collect::<Vec<_>>()));
-    assert_eq!(body["dropped"], 64);
+    let body: TriageResponse = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(indices(&body.kept), [0, 65]);
+    assert_eq!(body.prefiltered, (1..65).collect::<Vec<_>>());
+    assert_eq!(body.dropped, 64);
 }
 #[tokio::test]
 async fn cli_reads_json_items_from_stdin() {
@@ -423,14 +416,8 @@ async fn serialized_object_order_is_preserved_with_and_without_context() {
         let body = json!({"items":items,"spec":"relevant","context":context});
         let response = triage(&url, &body).await;
         assert_eq!(response.status(), 200);
-        let response: Value = response.json().await.unwrap();
-        let indices: Vec<_> = response["kept"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|item| item["index"].as_u64().unwrap())
-            .collect();
-        assert_eq!(indices, [0, 1, 2]);
+        let response: TriageResponse = response.json().await.unwrap();
+        assert_eq!(indices(&response.kept), [0, 1, 2]);
     }
     assert_eq!(requests(&model).await.len(), 4);
 }
