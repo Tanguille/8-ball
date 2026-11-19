@@ -40,6 +40,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
 
 jobs:
   bench:
@@ -50,7 +51,6 @@ jobs:
       HOSTED_URL: ${{ vars.HOSTED_URL }}
       # Our own joke model and router ids (they contain a slash) cannot answer a decision question. The variable replaces this.
       HOSTED_SKIP: ${{ vars.HOSTED_SKIP || '^8ball$|/' }}
-      MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
       ACCEPT: ${{ inputs.accept == true }}
     steps:
       - name: Check the key
@@ -67,6 +67,7 @@ jobs:
         with:
           path: ~/.cache/8ball-models
           key: models-${{ hashFiles('dev/compose.yaml') }}
+          restore-keys: models-
       - run: cargo build --release -p cli -p bench
       - run: dev/models.sh up
       # A provider's free tier can allow 1,000 requests an hour: the 27b run takes about 560 at 30 a minute, the matrix
@@ -137,7 +138,6 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

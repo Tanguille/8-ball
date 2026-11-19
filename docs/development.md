@@ -11,7 +11,7 @@ cargo nextest run
 dev/models.sh up
 cargo nextest run --test live --run-ignored only --no-capture
 docker build -t 8ball:dev .
-bash dev/image-smoke.sh 8ball:dev
+dev/image-smoke.sh 8ball:dev
 claude plugin validate plugin --strict
 ```
 
