@@ -4,18 +4,18 @@ The default path is `$XDG_CONFIG_HOME/8ball/config.toml`, otherwise `$HOME/.conf
 
 ```toml
 default = "d3"            # required: name of the endpoint used when none is given
-retention_days = 90       # optional (default 90): unlabelled decisions older than this are deleted at startup
+retention_days = 90       # optional (default 90): unlabelled decisions older than this are deleted at startup, unless the same question and state has a label
 
 [endpoints.d3]
 url = "http://127.0.0.1:9931"   # required: server root. A trailing "/v1" or "/" is removed.
 kind = "systemone"              # optional: "systemone" | "decisions" | "logprob" | "rerank". Omitted = auto-detect.
-concurrency = 1                 # optional: max parallel requests. Omitted = /props total_slots, else 2.
+concurrency = 1                 # optional: max parallel requests. Omitted = /props total_slots if positive, else 2.
 model = "qwen-3.8-fast"         # optional: sent as "model". Required for kind logprob.
 api_key_env = "TYPESAFE_KEY"    # optional: NAME of an env var whose value is sent as "Authorization: Bearer <value>"
 max_state_chars = 2000          # optional: default 2000 for systemone, decisions and rerank, no limit for logprob
 timeout_secs = 20               # optional: seconds per HTTP attempt once it has a slot (a retry gets its own); waiting for a slot is not counted
 extra_body = { reasoning_effort = "none" }   # optional: merged into logprob request JSON
-requests_per_minute = 30        # optional: space requests evenly, for a hosted provider's rate limit
+requests_per_minute = 30        # optional: space requests evenly, for a hosted provider's rate limit; must be positive
 
 [embedder]                      # optional table
 url = "http://127.0.0.1:9932"
@@ -25,7 +25,7 @@ model = "embeddinggemma-2"
 type = "noul"
 instructions = "Is this message a greeting?"
 # criteria = { true = "it greets", false = "it does not" }    # noul: optional
-# criteria = { billing = "", shipping = "Parcels" }          # choice: required, ≥2 options, order kept, "" = no description
+# criteria = { billing = "", shipping = "Parcels" }          # choice: required, ≥2 options, order kept, "" = no description, "unsure" is reserved
 # criteria = ["can wait", "today", "now"]                    # score: required, 2..=10 levels, lowest first
 # endpoint = "d3"                                            # optional, else `default`
 
@@ -33,11 +33,11 @@ instructions = "Is this message a greeting?"
 report = true                   # mark decisions whose answer the agent should report with `label`
 remember = true                 # answer with a reported label when the same question and state come back
 explore = 0.05                  # share of skipped decisions returned as `unsure`, so the agent checks them; 0 to 1
-recalibrate_after = 20          # refit a question's bands at every multiple of this many labels; 0 turns it off
+recalibrate_after = 20          # refit an endpoint's bands each time its labelled states pass a multiple of this; 0 turns it off
 ad_hoc = true                   # also learn ad-hoc questions, by their exact text
 ```
 
-`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. A reranker scores how well the state matches the topic of the question, not if the answer is yes. So its answers stay `unsure` until you [calibrate](calibration.md) the question. `decisions` sends System One questions, with `model`, to a hosted `/v1/decisions` API. Auto-detection reads `/props` and `/v1/models`. A hosted catalog that lists each model's `endpoints` selects `decisions` or `logprob` for the configured `model`. 8-ball tries a request once more after a 429 response with a `Retry-After` of 10 seconds or less (it waits at least 1 second), or after a 502 or 503 response. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
+`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. A reranker scores how well the state matches the topic of the question, not if the answer is yes. So its answers stay `unsure` until you [calibrate](calibration.md) the question. `decisions` sends System One questions, with `model`, to a hosted `/v1/decisions` API. Auto-detection reads `/props` and `/v1/models`. If detection cannot reach the server, or `/props` answers 503 while the server loads a model, the request fails, and the next request detects again. A hosted catalog that lists each model's `endpoints` selects `decisions` or `logprob` for the configured `model`. 8-ball tries a request once more after a 429 response with a `Retry-After` of 10 seconds or less (it waits at least 1 second), or after a 502 or 503 response. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
 
 ## Escalation
 
@@ -50,7 +50,7 @@ per_minute = 30                 # optional (default 30): model re-asks per minut
 escalate = false                # optional: keep this spec's `unsure` answers
 ```
 
-When `[escalation]` exists, 8-ball re-asks every `unsure` answer on the escalation endpoint before it returns. A request's `escalate` field wins, then the spec's `escalate`, else escalation is on. Without `[escalation]`, it is always off. A remembered answer does not escalate. The escalation endpoint judges the same trimmed state that the default endpoint saw.
+When `[escalation]` exists, 8-ball re-asks every `unsure` answer on the escalation endpoint before it returns. A request's `escalate` field wins, then the spec's `escalate`, else escalation is on. Without `[escalation]`, it is always off. A remembered answer does not escalate. The escalation endpoint judges the same trimmed state that the default endpoint saw. So give it a `max_state_chars` at least as large as the default endpoint's: a smaller limit trims the state again, and one label no longer serves both endpoints.
 
 An escalation that fails, times out, or goes over `per_minute` keeps the `unsure` answer and logs a warning. The request deadlines also bound it; see [Decisions](http-api.md#decisions).
 
@@ -66,7 +66,7 @@ A flag overrides its variable.
 | `EIGHTBALL_CONFIG_TOML` | `--config-toml` | Configuration TOML text for `serve` and `mcp`, instead of a file. You cannot also set `EIGHTBALL_CONFIG`. |
 | `EIGHTBALL_LISTEN` | `--listen` | `serve` listen address (default `127.0.0.1:8080`, image default `0.0.0.0:8080`) |
 | `EIGHTBALL_DB` | `--db` | SQLite path for `serve` and `mcp` (default `$XDG_STATE_HOME/8ball/8ball.db`, otherwise `$HOME/.local/state/8ball/8ball.db`) |
-| `EIGHTBALL_API_KEY` | `--api-key` | Bearer key for the server and the client |
+| `EIGHTBALL_API_KEY` | `--api-key` | Bearer key for the server and the client. `serve` rejects an empty key. |
 | `EIGHTBALL_URL` | `--url` | CLI server root (default `http://127.0.0.1:8080`) |
 | `RUST_LOG` | None | Filter for the logs on stderr (default `info,rmcp=warn`) |
 
