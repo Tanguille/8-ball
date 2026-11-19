@@ -43,7 +43,7 @@ pub struct Learning {
     pub remember: bool,
     /// Share of skipped decisions (noul `no`, triage `rejected`) returned as `unsure`, so the agent checks them.
     pub explore: f64,
-    /// Refit a question's bands at every multiple of this many labels; 0 turns it off.
+    /// Refit an endpoint's bands each time its labelled states pass a multiple of this; 0 turns it off.
     pub recalibrate_after: usize,
     /// Also learn ad-hoc questions, by their exact text.
     pub ad_hoc: bool,

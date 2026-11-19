@@ -191,19 +191,17 @@ pub fn calibrate(
     let mut warnings = Vec::new();
     let labels = kind.labels();
     let bands = if matches!(kind, Kind::Noul { .. }) {
-        let yes: Vec<_> = examples
-            .iter()
-            .map(|example| (example.probs[0], example.label == "yes"))
-            .collect();
-        let no: Vec<_> = examples
-            .iter()
-            .map(|example| (example.probs[0], example.label == "no"))
-            .collect();
-        let yes_at = threshold(&yes, true, true, target).unwrap_or_else(|| {
+        let side = |label: &str| -> Vec<_> {
+            examples
+                .iter()
+                .map(|example| (example.probs[0], example.label == label))
+                .collect()
+        };
+        let yes_at = threshold(&side("yes"), true, true, target).unwrap_or_else(|| {
             warnings.push("yes side: not enough evidence for the target".into());
             1.01
         });
-        let no_at = threshold(&no, false, true, target).unwrap_or_else(|| {
+        let no_at = threshold(&side("no"), false, true, target).unwrap_or_else(|| {
             warnings.push("no side: not enough evidence for the target".into());
             -0.01
         });
@@ -329,7 +327,7 @@ fn threshold(
     let min_side = (1.0 / (1.0 - target)).ceil();
 
     candidates.into_iter().find(|threshold| {
-        let selected: Vec<_> = data
+        let (selected, correct) = data
             .iter()
             .filter(|(value, _)| {
                 if above {
@@ -338,14 +336,12 @@ fn threshold(
                     value <= threshold
                 }
             })
-            .collect();
-        let count = f64::from(u32::try_from(selected.len()).expect("example count fits u32"));
+            .fold((0, 0), |(selected, correct), (_, is_correct)| {
+                (selected + 1, correct + usize::from(*is_correct))
+            });
+        let count = f64::from(u32::try_from(selected).expect("example count fits u32"));
 
-        count >= min_side
-            && ratio(
-                selected.iter().filter(|(_, correct)| *correct).count(),
-                selected.len(),
-            ) >= target
+        count >= min_side && ratio(correct, selected) >= target
     })
 }
 
