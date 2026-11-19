@@ -75,6 +75,33 @@ async fn info_refreshes_after_a_minute_and_keeps_its_identity_through_a_props_ou
     assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/b.gguf");
     assert_eq!(server.received_requests().await.unwrap().len(), 3);
 }
+/// A fallback fingerprint cached now would change on the next refresh and orphan the answers stored under it.
+#[tokio::test]
+async fn first_detection_fails_while_the_server_is_down_or_loading() {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let config = endpoint_config(&format!("http://{closed}"), "kind='systemone'");
+    assert!(Endpoint::new("d3", &config, None).info().await.is_err());
+    let server = MockServer::start().await;
+    // llama.cpp answers 503 on /props while it loads the model.
+    for status in [503, 200] {
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path("/props"))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .set_body_json(json!({"total_slots":1,"model_path":"/m/a.gguf"})),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+    }
+    let config = endpoint_config(&server.uri(), "kind='systemone'");
+    let endpoint = Endpoint::new("d3", &config, None);
+    assert!(endpoint.info().await.is_err());
+    assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/a.gguf");
+}
 #[tokio::test]
 async fn text_architecture_and_model_detect_logprob() {
     let server = MockServer::start().await;

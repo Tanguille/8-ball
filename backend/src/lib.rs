@@ -83,18 +83,18 @@ impl Endpoint {
         Ok(info)
     }
 
-    async fn get_info_json(&self, path: &str) -> Result<Value, BackendError> {
+    async fn get_info_json(&self, path: &str) -> Result<Value, Error> {
         let request = self
             .client
             .get(format!("{}{path}", self.config.url))
             .timeout(Duration::from_secs(5));
 
-        Ok(authed(request, self.api_key.as_deref())
+        authed(request, self.api_key.as_deref())
             .send()
             .await?
             .error_for_status()?
             .json()
-            .await?)
+            .await
     }
 
     /// Takes the permit from the `info` that `ask` fetched, so each call does not lock `Endpoint::info` again.
@@ -191,8 +191,15 @@ impl Endpoint {
     async fn detect(&self, refresh: bool) -> Result<Info, BackendError> {
         let properties = match self.get_info_json("/props").await {
             Ok(properties) => properties,
-            // Without /props the fingerprint falls back to the model id, which would switch caches; keep the old one.
-            Err(e) if refresh => return Err(e),
+            // Without /props the fingerprint falls back to the model id, which would switch caches; keep the old one. A
+            // server that is down or still loading (llama.cpp answers 503) serves /props soon, so do not cache the fallback.
+            Err(e)
+                if refresh
+                    || e.is_connect()
+                    || e.status() == Some(reqwest::StatusCode::SERVICE_UNAVAILABLE) =>
+            {
+                return Err(e.into());
+            }
             Err(_) => Value::Null,
         };
         let mut models = Value::Null;
