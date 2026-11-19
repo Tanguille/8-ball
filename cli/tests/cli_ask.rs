@@ -83,6 +83,26 @@ async fn spec_exit_codes_do_not_probe_doctor() {
     }
 }
 #[tokio::test]
+async fn no_learn_sends_learn_false() {
+    let mock = MockServer::start().await;
+    Mock::given(matchers::method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results":[]})))
+        .mount(&mock)
+        .await;
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+        .args(["ask", "--spec", "named", "--state", "hi", "--no-learn"])
+        .args(["--url", &mock.uri()])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(common::requests(&mock).await[0]["learn"], false);
+}
+#[tokio::test]
 async fn choice_prints_billing() {
     let mock = common::systemone().await;
     let server = serve(&mock);

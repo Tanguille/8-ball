@@ -287,6 +287,22 @@ async fn sixty_four_items_on_one_slot_all_answer() {
     );
 }
 #[tokio::test]
+async fn cli_no_learn_sends_learn_false() {
+    let server = MockServer::start().await;
+    Mock::given(matchers::method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"kept":[],"unsure":[],"rejected":[],"prefiltered":[],"dropped":0}),
+        ))
+        .mount(&server)
+        .await;
+    cli_triage(
+        &["--spec", "relevant", "--no-learn", "--url", &server.uri()],
+        b"[]",
+    )
+    .await;
+    assert_eq!(requests(&server).await[0]["learn"], false);
+}
+#[tokio::test]
 async fn cli_reads_json_items_from_stdin() {
     let (url, _model, _embedding, _dir) = app(None).await;
     let output = cli_triage(&["Is this relevant?", "--url", &url], br#"["yes1","no"]"#).await;

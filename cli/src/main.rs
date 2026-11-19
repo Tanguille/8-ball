@@ -53,6 +53,9 @@ struct AskArgs {
     /// exit 0 yes / 1 no / 3 unsure (noul); 0 decided / 3 unsure (choice, score)
     #[arg(long)]
     exit_code: bool,
+    /// Turn off remembered labels, exploration and reports, for scripts that never label.
+    #[arg(long)]
+    no_learn: bool,
     #[command(flatten)]
     remote: Remote,
 }
@@ -78,6 +81,9 @@ struct TriageArgs {
     top_k: Option<usize>,
     #[arg(long)]
     endpoint: Option<String>,
+    /// Turn off remembered labels, exploration and reports, for scripts that never label.
+    #[arg(long)]
+    no_learn: bool,
     #[command(flatten)]
     remote: Remote,
 }
@@ -440,6 +446,7 @@ async fn ask(
         state,
         endpoint,
         exit_code,
+        no_learn,
         remote,
     }: AskArgs,
 ) -> Result<i32> {
@@ -456,7 +463,8 @@ async fn ask(
     let body = remote
         .post(
             "/v1/ask",
-            &json!({"state":state,"questions":questions,"spec":spec,"endpoint":endpoint}),
+            &json!({"state":state,"questions":questions,"spec":spec,"endpoint":endpoint,
+            "learn":!no_learn}),
         )
         .await?;
     println!("{body}");
@@ -505,7 +513,8 @@ async fn triage(args: TriageArgs) -> Result<i32> {
             "/v1/triage",
             &json!({
                 "items":items, "context":context, "spec":args.spec,
-                "question":question, "keep":args.keep, "top_k":args.top_k, "endpoint":args.endpoint
+                "question":question, "keep":args.keep, "top_k":args.top_k, "endpoint":args.endpoint,
+                "learn":!args.no_learn
             }),
         )
         .await
