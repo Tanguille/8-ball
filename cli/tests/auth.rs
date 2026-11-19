@@ -1,11 +1,10 @@
 use reqwest::Client;
 use serde_json::{Value, json};
-use wiremock::MockServer;
 
 #[path = "../../service/tests/common.rs"]
 mod common;
 
-async fn app(key: Option<&str>) -> (String, MockServer, tempfile::TempDir) {
+async fn app(key: Option<&str>) -> (String, wiremock::MockServer, tempfile::TempDir) {
     let mock = common::systemone().await;
     let endpoint_config: domain::config::Config = toml::from_str(&format!(
         "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'",

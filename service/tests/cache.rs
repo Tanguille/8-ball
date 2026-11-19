@@ -1,9 +1,7 @@
 use serde_json::json;
-use wiremock::MockServer;
 
 use domain::{question::Question, verdict};
 use service::{AskRequest, Service};
-use store::Store;
 
 mod common;
 
@@ -11,8 +9,8 @@ async fn fixture(
     ad_hoc: bool,
 ) -> (
     std::sync::Arc<Service>,
-    Store,
-    MockServer,
+    store::Store,
+    wiremock::MockServer,
     tempfile::TempDir,
 ) {
     let mock = common::systemone().await;

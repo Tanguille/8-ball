@@ -4,7 +4,6 @@ use wiremock::{MockServer, matchers};
 
 use domain::config::Config;
 use service::Service;
-use store::Store;
 
 use common::requests;
 
@@ -17,7 +16,7 @@ struct App {
     _directory: tempfile::TempDir,
     url: String,
     config: Config,
-    store: Store,
+    store: store::Store,
 }
 async fn app() -> App {
     let model = MockServer::start().await;

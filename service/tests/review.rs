@@ -1,5 +1,4 @@
 use serde_json::{Value, json};
-use wiremock::MockServer;
 
 use service::{DecisionsRequest, QuestionsRequest, ReviewRequest, Service};
 
@@ -9,7 +8,7 @@ mod common;
 async fn app() -> (
     std::sync::Arc<Service>,
     String,
-    MockServer,
+    wiremock::MockServer,
     tempfile::TempDir,
 ) {
     let mock = common::systemone().await;

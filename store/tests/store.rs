@@ -1,7 +1,6 @@
 use std::os::unix::fs::PermissionsExt;
 
 use sqlx::{Connection, SqliteConnection};
-use tempfile::TempDir;
 
 use domain::verdict::{Bands, Report};
 use store::{NewDecision, Store};
@@ -12,7 +11,7 @@ async fn fixture(path: &std::path::Path) -> SqliteConnection {
         .unwrap()
 }
 
-async fn opened() -> (TempDir, std::path::PathBuf, Store) {
+async fn opened() -> (tempfile::TempDir, std::path::PathBuf, Store) {
     let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
     let path = directory.path().join("db.sqlite");
     let store = Store::open(&path).await.unwrap();

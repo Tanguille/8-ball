@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use sqlx::Connection;
 use wiremock::{MockServer, matchers};
 
-use domain::{config::BackendKind, question::Question, verdict};
+use domain::verdict;
 use service::Service;
 use store::Store;
 
@@ -117,7 +117,7 @@ pub async fn requests(mock: &MockServer) -> Vec<Value> {
 }
 
 #[must_use]
-pub fn greeting() -> Question {
+pub fn greeting() -> domain::question::Question {
     serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
         .unwrap()
 }
@@ -125,7 +125,7 @@ pub fn greeting() -> Question {
 /// The stored fit of the `greeting` spec on an endpoint of `kind` with `fingerprint`.
 pub async fn greeting_fit(
     store: &Store,
-    kind: BackendKind,
+    kind: domain::config::BackendKind,
     fingerprint: &str,
 ) -> Option<(verdict::Bands, verdict::Report)> {
     let calibration_id =

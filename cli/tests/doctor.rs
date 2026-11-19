@@ -1,5 +1,3 @@
-use wiremock::MockServer;
-
 #[path = "../../service/tests/common.rs"]
 mod common;
 
@@ -7,7 +5,7 @@ async fn service(
     default: &str,
 ) -> (
     std::sync::Arc<service::Service>,
-    MockServer,
+    wiremock::MockServer,
     tempfile::TempDir,
 ) {
     let mock = common::systemone().await;
