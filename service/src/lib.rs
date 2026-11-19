@@ -974,6 +974,7 @@ impl Service {
             .into_iter()
             .flatten()
             .reduce(|first, second| format!("{first}; {second}"));
+        // Only so that stored row ids follow the item order; the output order comes from the input indices below.
         decisions.sort_by_key(|(index, _)| *index);
         let matches = |verdict: &str| {
             if matches!(question.kind, Kind::Score { .. }) {
@@ -1557,6 +1558,8 @@ impl Service {
             .into_iter()
             .zip(counts)
             .map(|(mut judgment, count)| {
+                // An escalated judgment stores the primary's row, then its own, so the last row is the returned
+                // decision. A cached decision keeps the id of the row that it came from.
                 if let Some(id) = ids.by_ref().take(count).last()
                     && !judgment.decision.cached
                 {
