@@ -9,12 +9,16 @@ use wiremock::{MockServer, ResponseTemplate, matchers};
 use backend::Endpoint;
 use domain::question::Question;
 
+use common::posts;
+
+mod common;
+
 fn question() -> Question {
     serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Is this a greeting?"}))
         .unwrap()
 }
 fn endpoint_config(url: &str) -> domain::config::EndpointConfig {
-    toml::from_str(&format!("url = '{url}'\nkind = 'systemone'\n")).unwrap()
+    common::config(url, "kind='systemone'")
 }
 fn response() -> Value {
     json!({"answers":{"q":{"type":"noul","noul":0.97}}})
@@ -51,13 +55,7 @@ async fn three_questions_one_request() {
             assert!((probability - expected_probability).abs() < 1e-9);
         }
     }
-    let requests: Vec<_> = server
-        .received_requests()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|request| request.method == "POST")
-        .collect();
+    let requests = posts(&server).await;
     assert_eq!(requests.len(), 1);
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["questions"]["q1"]["type"], "noul");
@@ -146,13 +144,7 @@ async fn bearer_only_when_set() {
         .await;
         let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), key.clone());
         endpoint.ask("hi", &[question()]).await.unwrap();
-        let requests: Vec<_> = server
-            .received_requests()
-            .await
-            .unwrap()
-            .into_iter()
-            .filter(|request| request.method == "POST")
-            .collect();
+        let requests = posts(&server).await;
         assert_eq!(
             requests[0]
                 .headers

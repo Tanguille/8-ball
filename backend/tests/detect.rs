@@ -5,9 +5,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 use backend::Endpoint;
 use domain::config::BackendKind;
 
-fn endpoint_config(url: &str, extra: &str) -> domain::config::EndpointConfig {
-    toml::from_str(&format!("url='{url}'\n{extra}")).unwrap()
-}
+mod common;
+
 async fn models(server: &MockServer, body: serde_json::Value) {
     Mock::given(matchers::method("GET"))
         .and(matchers::path("/v1/models"))
@@ -32,7 +31,7 @@ async fn decisions_props_and_fingerprint() {
         )
         .mount(&server)
         .await;
-    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri(), ""), None);
+    let endpoint = Endpoint::new("d3", &common::config(&server.uri(), ""), None);
     let info = endpoint.info().await.unwrap();
     assert_eq!(info.kind, BackendKind::Systemone);
     assert_eq!(info.concurrency, 4);
@@ -63,7 +62,7 @@ async fn info_refreshes_after_a_minute_and_keeps_its_identity_through_a_props_ou
     }
     let endpoint = Endpoint::new(
         "d3",
-        &endpoint_config(&server.uri(), "kind='systemone'"),
+        &common::config(&server.uri(), "kind='systemone'"),
         None,
     );
     assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/a.gguf");
@@ -82,7 +81,7 @@ async fn first_detection_fails_while_the_server_is_down_or_loading() {
         .unwrap()
         .local_addr()
         .unwrap();
-    let config = endpoint_config(&format!("http://{closed}"), "kind='systemone'");
+    let config = common::config(&format!("http://{closed}"), "kind='systemone'");
     assert!(Endpoint::new("d3", &config, None).info().await.is_err());
     let server = MockServer::start().await;
     // llama.cpp answers 503 on /props while it loads the model.
@@ -97,7 +96,7 @@ async fn first_detection_fails_while_the_server_is_down_or_loading() {
             .mount(&server)
             .await;
     }
-    let config = endpoint_config(&server.uri(), "kind='systemone'");
+    let config = common::config(&server.uri(), "kind='systemone'");
     let endpoint = Endpoint::new("d3", &config, None);
     assert!(endpoint.info().await.is_err());
     assert_eq!(endpoint.info().await.unwrap().fingerprint, "/m/a.gguf");
@@ -111,7 +110,7 @@ async fn zero_slots_use_the_default_concurrency() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"total_slots":0})))
         .mount(&server)
         .await;
-    let config = endpoint_config(&server.uri(), "kind='systemone'");
+    let config = common::config(&server.uri(), "kind='systemone'");
     let endpoint = Endpoint::new("d3", &config, None);
     assert_eq!(endpoint.info().await.unwrap().concurrency, 2);
 }
@@ -123,7 +122,7 @@ async fn text_architecture_and_model_detect_logprob() {
         json!({"data":[{"id":"m","architecture":{"output_modalities":["text"]}}]}),
     )
     .await;
-    let endpoint = Endpoint::new("chat", &endpoint_config(&server.uri(), "model='m'"), None);
+    let endpoint = Endpoint::new("chat", &common::config(&server.uri(), "model='m'"), None);
     let info = endpoint.info().await.unwrap();
     assert_eq!(info.kind, BackendKind::Logprob);
     assert_eq!(info.fingerprint, "m");
@@ -132,7 +131,7 @@ async fn text_architecture_and_model_detect_logprob() {
 async fn missing_architecture_requires_explicit_kind() {
     let server = MockServer::start().await;
     models(&server, json!({"data":[{"id":"m"}]})).await;
-    let endpoint = Endpoint::new("old", &endpoint_config(&server.uri(), ""), None);
+    let endpoint = Endpoint::new("old", &common::config(&server.uri(), ""), None);
     assert!(
         endpoint
             .info()
@@ -147,7 +146,7 @@ async fn explicit_kind_skips_models() {
     let server = MockServer::start().await;
     let endpoint = Endpoint::new(
         "rerank",
-        &endpoint_config(&server.uri(), "kind='rerank'\nconcurrency=1"),
+        &common::config(&server.uri(), "kind='rerank'\nconcurrency=1"),
         None,
     );
     let info = endpoint.info().await.unwrap();
@@ -177,7 +176,7 @@ async fn failed_detection_is_not_cached() {
         json!({"data":[{"id":"m","architecture":{"output_modalities":["decisions"]}}]}),
     )
     .await;
-    let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri(), ""), None);
+    let endpoint = Endpoint::new("d3", &common::config(&server.uri(), ""), None);
     assert!(endpoint.info().await.is_err());
     assert_eq!(endpoint.info().await.unwrap().kind, BackendKind::Systemone);
 }
@@ -202,7 +201,7 @@ async fn detection_gets_send_bearer() {
         .await;
     let endpoint = Endpoint::new(
         "d3",
-        &endpoint_config(&server.uri(), ""),
+        &common::config(&server.uri(), ""),
         Some("secret".into()),
     );
     assert_eq!(endpoint.info().await.unwrap().concurrency, 1);
