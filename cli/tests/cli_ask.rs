@@ -130,3 +130,43 @@ fn dead_server_exits_four() {
     assert_eq!(output.status.code(), Some(4));
     assert!(output.stderr.starts_with(b"8ball:"));
 }
+#[test]
+fn invalid_arguments_exit_two() {
+    // A missing config and a closed port make a command that gets past clap exit 4, not hang.
+    let dead = "http://127.0.0.1:9";
+    for args in [
+        &[
+            "serve",
+            "--api-key",
+            "",
+            "--config",
+            "/nonexistent/8ball.toml",
+        ][..],
+        &[
+            "ask",
+            "--spec",
+            "named",
+            "noul",
+            "Greeting?",
+            "--state",
+            "hi",
+            "--url",
+            dead,
+        ],
+        &[
+            "ask", "--spec", "named", "--option", "a", "--state", "hi", "--url", dead,
+        ],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
+            .args(args)
+            .env_remove("EIGHTBALL_CONFIG_TOML")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

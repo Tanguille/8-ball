@@ -38,7 +38,7 @@ struct AskArgs {
     #[arg(value_parser = ["noul", "choice", "score"])]
     kind: Option<String>,
     instructions: Option<String>,
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["kind", "instructions", "options", "levels"])]
     spec: Option<String>,
     /// choice option, repeatable: name or name=description
     #[arg(long = "option")]
@@ -197,7 +197,12 @@ enum Command {
         listen: String,
         #[arg(long, env = "EIGHTBALL_DB")]
         db: Option<PathBuf>,
-        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
+        #[arg(
+            long,
+            env = "EIGHTBALL_API_KEY",
+            hide_env_values = true,
+            value_parser = clap::builder::NonEmptyStringValueParser::new()
+        )]
         api_key: Option<String>,
     },
     /// Run MCP over stdin and stdout.
