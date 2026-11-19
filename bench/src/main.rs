@@ -1,7 +1,4 @@
 //! Benchmark every model of the local stack on fixed public cases. See docs/benchmark.md.
-//!
-//! Usage: `dev/models.sh up && dev/models.sh bench && cargo build --release -p cli -p bench`,
-//! then `cargo run --release -p bench -- [--per-side 200] [--split dev]`.
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -150,7 +147,7 @@ async fn main() -> Result<()> {
         .context("start 8ball serve")?;
     let result = async {
         wait_for_server().await?;
-        let doctor = doctor()?;
+        let doctor = doctor().await?;
         args.endpoints = available(&args, &doctor)?;
         let methods = methods(&args, &doctor)?;
         let runs = run(&args, methods.cascade).await?;
@@ -197,23 +194,24 @@ fn eightball() -> Result<Command> {
         path.display()
     );
     let mut command = Command::new(path);
-    command.env("EIGHTBALL_URL", URL);
+    // The private server needs no key, and doctor() sends none.
+    command
+        .env("EIGHTBALL_URL", URL)
+        .env_remove("EIGHTBALL_API_KEY");
 
     Ok(command)
 }
 
-/// The `8ball doctor` report. Exit code 4 (the default endpoint failed) still prints the report.
-fn doctor() -> Result<Value> {
-    let output = eightball()?
-        .args(["doctor", "--timeout-ms", "120000"])
-        .output()?;
-    ensure!(
-        matches!(output.status.code(), Some(0 | 4)),
-        "8ball doctor failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    serde_json::from_slice(&output.stdout).context("8ball doctor printed no JSON report")
+async fn doctor() -> Result<Value> {
+    Ok(reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()?
+        .get(format!("{URL}/v1/doctor"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
 }
 
 async fn wait_for_server() -> Result<()> {
@@ -458,7 +456,7 @@ fn evaluate(spec: &str, endpoint: &str, lines: &str) -> Result<Vec<Value>> {
     }
 }
 
-/// d3 decides; its unsure cases go to the 27B. The time is the sum of both calls.
+/// The first endpoint decides; its unsure cases go to the second. The time is the sum of both calls.
 /// evaluate keeps the input order, so both lists line up.
 fn cascade(first: &[Value], second: &[Value]) -> Vec<Value> {
     first
@@ -700,12 +698,36 @@ fn summary(methods: &Methods, runs: &[Runs], args: &Args) -> Value {
             (name.clone(), Value::Object(tasks))
         })
         .collect();
-    let split = match args.split {
-        Split::Test => "test",
-        Split::Dev => "dev",
-    };
 
-    json!({"per_side": args.per_side, "split": split, "methods": rows})
+    json!({
+        "per_side": args.per_side,
+        "split": args.split.to_possible_value().expect("no skipped variants").get_name(),
+        "methods": rows,
+        "excluded": excluded(methods, runs),
+    })
+}
+
+/// Methods with errors on more than 1% of their cases, which dev/publish-bench.sh leaves off the page. A cascade
+/// goes when either of its endpoints goes, never for its own errors.
+fn excluded(methods: &Methods, runs: &[Runs]) -> Vec<String> {
+    let mut bad: Vec<bool> = runs[..methods.models.len()]
+        .iter()
+        .map(|by_task| {
+            let score = Score::of(by_task.iter().flatten());
+            score.errors * 100 > score.total
+        })
+        .collect();
+    if let Some((first, second)) = methods.cascade {
+        bad.push(bad[first] || bad[second]);
+    }
+
+    methods
+        .names
+        .iter()
+        .zip(bad)
+        .filter(|(_, bad)| *bad)
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 /// Prints how each method and task changed from `baseline`. A task regresses when its wrong
@@ -845,6 +867,26 @@ mod tests {
         assert!(super::compare(&run(180, 7), &baseline, &["d3".into()]).unwrap());
         let other_size = json!({"per_side": 200, "split": "test", "methods": {}});
         assert!(super::compare(&other_size, &baseline, &[]).is_err());
+    }
+
+    #[test]
+    fn excluded_takes_endpoints_over_one_percent_errors_and_their_cascade() {
+        // One task of 100 cases, of which `errors` failed.
+        let run = |errors: usize| {
+            let case =
+                |i| json!({"decision": {"verdict": "yes"}, "error": (i < errors).then_some("x")});
+            vec![(0..100).map(case).collect()]
+        };
+        let methods = |cascade| super::Methods {
+            names: ["d3", "bad", "edge", "cascade"].map(String::from).to_vec(),
+            models: vec![String::new(); 3],
+            reference: 0,
+            cascade: Some(cascade),
+        };
+        // 1% of errors is allowed, and a cascade never goes for its own errors.
+        let runs = [run(0), run(2), run(1), run(50)];
+        assert_eq!(super::excluded(&methods((0, 2)), &runs), ["bad"]);
+        assert_eq!(super::excluded(&methods((0, 1)), &runs), ["bad", "cascade"]);
     }
 
     #[test]

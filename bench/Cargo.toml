@@ -8,10 +8,6 @@ publish.workspace = true
 [lints]
 workspace = true
 
-[[bin]]
-name = "8ball-bench"
-path = "src/main.rs"
-
 [dependencies]
 domain = { workspace = true }
 
