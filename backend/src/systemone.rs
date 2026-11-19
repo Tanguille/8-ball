@@ -62,7 +62,7 @@ pub async fn ask(
             };
             if probabilities
                 .iter()
-                .any(|probability| !probability.is_finite() || !(0.0..=1.0).contains(probability))
+                .any(|probability| !(0.0..=1.0).contains(probability))
             {
                 return Err(BackendError(
                     "probability must be finite and within [0,1]".into(),
