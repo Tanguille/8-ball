@@ -108,7 +108,8 @@ pub struct SpecConfig {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("cannot read {path}: {source}")]
+    // thiserror makes `source` the error's source, which `{e:#}` prints after this message.
+    #[error("cannot read {path}")]
     Read {
         path: String,
         source: std::io::Error,

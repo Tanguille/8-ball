@@ -134,6 +134,14 @@ fn zero_timeout_rejected() {
     );
 }
 
+/// The CLI prints errors with `{e:#}`, which appends the source; the message must not repeat it.
+#[test]
+fn read_error_prints_the_io_error_once() {
+    let error = Config::load(std::path::Path::new("/nonexistent/8ball.toml")).unwrap_err();
+    assert_eq!(error.to_string(), "cannot read /nonexistent/8ball.toml");
+    assert!(std::error::Error::source(&error).is_some());
+}
+
 const TWO_ENDPOINTS: &str =
     "default = 'd3'\n[endpoints.d3]\nurl = 'http://h:1'\n[endpoints.big]\nurl = 'http://h:2'\n";
 
