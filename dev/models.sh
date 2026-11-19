@@ -21,6 +21,7 @@ mkdir -p "$HOME/.cache/8ball-models"
 # CI restores the cache of an older compose.yaml, so delete the models that this one no longer names.
 if [ "${1:-status}" = up ] || [ "${1:-status}" = bench ]; then
   for file in "$HOME"/.cache/8ball-models/*; do
+    [ -f "$file" ] || continue
     grep -qF "/cache/$(basename "${file%.etag}" .lock)\"" compose.yaml || rm -f "$file"
   done
 fi
