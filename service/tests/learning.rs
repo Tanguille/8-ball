@@ -303,3 +303,32 @@ async fn a_refit_that_keeps_the_bands_stores_its_report() {
     let (_, report) = fit(&app).await.unwrap();
     assert_eq!(report.examples, 40);
 }
+
+#[tokio::test]
+async fn a_spec_refit_does_not_hold_back_its_ad_hoc_twin() {
+    // The ad-hoc question has the spec's text, so the same calibration id, but its own calibration and label count.
+    let app = fixture("recalibrate_after = 20").await;
+    let twin = json!({"id":"q","type":"noul","instructions":"Greeting?"});
+    for i in 1..=20 {
+        let id = spec(&app, &format!("yes-{i}")).await.id;
+        app.service.label(id, "yes".into()).await.unwrap();
+    }
+    for i in 1..=20 {
+        let request = json!({"state":format!("yes-twin-{i}"),"questions":[twin]});
+        let id = ask(&app, request).await.id;
+        app.service.label(id, "yes".into()).await.unwrap();
+    }
+    let calibration_id = verdict::calibration_id(
+        &verdict::question_hash(&common::greeting()),
+        domain::config::BackendKind::Systemone,
+        &app.mock.uri(),
+    );
+    assert!(fit(&app).await.is_some());
+    assert!(
+        app.store
+            .calibration(&calibration_id, None)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}

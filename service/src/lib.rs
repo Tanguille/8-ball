@@ -364,7 +364,7 @@ pub struct Service {
     embedder: Option<Embedder>,
     store: Store,
     metrics: Metrics,
-    /// The labelled count of each calibration id at its last automatic refit, in memory only. Its lock is held during
+    /// The labelled count of each calibration key at its last automatic refit, in memory only. Its lock is held during
     /// a refit, so concurrent labels skip theirs.
     refits: Mutex<std::collections::HashMap<String, usize>>,
     /// The escalation budget window: its start and the escalations granted in it. A std mutex, held for a few
@@ -535,8 +535,9 @@ impl Service {
         // lock skipped runs at the next label instead of the next multiple. The count in memory also covers a refit
         // that stored nothing and states that conflicting labels leave out of the fit. After a restart, the examples
         // of the stored report stand in, which can cost one extra refit.
+        let key = verdict::calibration_key(&calibration_id, spec);
         let fitted = refits
-            .get(&calibration_id)
+            .get(&key)
             .copied()
             .unwrap_or_else(|| stored.as_ref().map_or(0, |(_, report)| report.examples));
         if count / every <= fitted / every {
@@ -556,7 +557,7 @@ impl Service {
                 .put_calibration(&calibration_id, spec, &response.bands, &response.report)
                 .await?;
         }
-        refits.insert(calibration_id, count);
+        refits.insert(key, count);
 
         Ok(())
     }
