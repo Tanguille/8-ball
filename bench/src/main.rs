@@ -98,7 +98,7 @@ struct Args {
     /// A summary.json of an earlier run: exit 1 if a task got worse by more than 1% of its cases.
     #[arg(long)]
     baseline: Option<PathBuf>,
-    /// Directory for the dataset files, observations.json and summary.json.
+    /// Directory for the dataset files, observations.json, summary.json and page.md.
     #[arg(long, default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/bench"))]
     out: PathBuf,
 }
@@ -132,6 +132,8 @@ async fn main() -> Result<()> {
     // A new database for each run, so no answer comes from the cache.
     let tmp = tempfile::tempdir()?;
     let db = tmp.path().join("bench.db");
+    // The report goes to stdout and, without the rows of excluded methods, to page.md.
+    let mut text = String::new();
     let mut server = eightball()?
         .args([
             "serve",
@@ -148,7 +150,7 @@ async fn main() -> Result<()> {
     let result = async {
         wait_for_server().await?;
         let doctor = doctor().await?;
-        args.endpoints = available(&args, &doctor)?;
+        args.endpoints = available(&args, &doctor, &mut text)?;
         let methods = methods(&args, &doctor)?;
         let runs = run(&args, methods.cascade).await?;
 
@@ -174,12 +176,21 @@ async fn main() -> Result<()> {
         args.out.join("summary.json"),
         serde_json::to_string_pretty(&summary)?,
     )?;
-    report(&methods, &runs);
-    if let Some(path) = &args.baseline {
-        let baseline: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
-        if !compare(&summary, &baseline, &args.report_only)? {
-            std::process::exit(1);
+    report(&mut text, &methods, &runs)?;
+    let ok = match &args.baseline {
+        Some(path) => {
+            let baseline: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+            compare(&mut text, &summary, &baseline, &args.report_only)?
         }
+        None => true,
+    };
+    print!("{text}");
+    fs::write(
+        args.out.join("page.md"),
+        page(&text, &excluded(&methods, &runs)),
+    )?;
+    if !ok {
+        std::process::exit(1);
     }
 
     Ok(())
@@ -233,7 +244,7 @@ fn doctor_endpoint<'a>(doctor: &'a Value, name: &str) -> Option<&'a Value> {
 
 /// The endpoints that passed their doctor probe. A model that cannot answer (no logprobs, no
 /// access) fails here, before hundreds of cases; `--skip-unavailable` drops it with a note instead.
-fn available(args: &Args, doctor: &Value) -> Result<Vec<String>> {
+fn available(args: &Args, doctor: &Value, out: &mut String) -> Result<Vec<String>> {
     let mut kept = Vec::new();
     let mut skipped = 0_usize;
     for name in &args.endpoints {
@@ -250,7 +261,7 @@ fn available(args: &Args, doctor: &Value) -> Result<Vec<String>> {
     }
     // Only the count: the names of unavailable catalog entries do not belong on a public page.
     if skipped > 0 {
-        println!("Skipped {skipped} endpoint(s) that cannot answer.\n");
+        writeln!(out, "Skipped {skipped} endpoint(s) that cannot answer.\n")?;
     }
     ensure!(!kept.is_empty(), "no endpoint passed its doctor probe");
 
@@ -597,7 +608,7 @@ fn accuracy_at(observations: &[&Value], percent: usize) -> f64 {
     count(right) / count(kept)
 }
 
-fn report(methods: &Methods, runs: &[Runs]) {
+fn report(out: &mut String, methods: &Methods, runs: &[Runs]) -> Result<()> {
     let label = |index: usize| {
         let name = &methods.names[index];
         methods
@@ -620,10 +631,14 @@ fn report(methods: &Methods, runs: &[Runs]) {
     let reference = methods.reference;
     let reference_ms = totals[reference].mean_ms();
     let short = &methods.names[reference];
-    println!(
+    writeln!(
+        out,
         "| Method | Decided | Wrong | Accuracy of decided | Correct of all | Correct vs {short} (95% CI) | Accuracy at 90% coverage | Mean time | Speed vs {short} |"
-    );
-    println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    )?;
+    writeln!(
+        out,
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    )?;
     for (index, s) in totals.iter().enumerate() {
         let versus = if index == reference {
             "reference".to_owned()
@@ -636,7 +651,8 @@ fn report(methods: &Methods, runs: &[Runs]) {
                 100.0 * high
             )
         };
-        println!(
+        writeln!(
+            out,
             "| {} | {:.0}% | {} | {} | {:.1}% | {versus} | {:.1}% | {:.0} ms | {:.1}x |",
             label(index),
             100.0 * s.share(),
@@ -646,18 +662,18 @@ fn report(methods: &Methods, runs: &[Runs]) {
             100.0 * accuracy_at(&pooled[index], 90),
             s.mean_ms(),
             reference_ms / s.mean_ms()
-        );
+        )?;
     }
-    println!("\nPer task, accuracy of decided (decided share):\n");
-    println!("| Method | {} |", TASKS.map(|t| t.spec).join(" | "));
-    println!("| --- |{}", " --- |".repeat(TASKS.len()));
+    writeln!(out, "\nPer task, accuracy of decided (decided share):\n")?;
+    writeln!(out, "| Method | {} |", TASKS.map(|t| t.spec).join(" | "))?;
+    writeln!(out, "| --- |{}", " --- |".repeat(TASKS.len()))?;
     for (index, by_task) in runs.iter().enumerate() {
         let cells: Vec<_> = by_task
             .iter()
             .map(Score::of)
             .map(|s| format!("{} ({:.0}%)", s.accuracy_text(), 100.0 * s.share()))
             .collect();
-        println!("| {} | {} |", label(index), cells.join(" | "));
+        writeln!(out, "| {} | {} |", label(index), cells.join(" | "))?;
     }
     let sizes: Vec<_> = runs[0]
         .iter()
@@ -672,12 +688,15 @@ fn report(methods: &Methods, runs: &[Runs]) {
         .iter()
         .map(|s| s.errors)
         .sum();
-    println!(
+    writeln!(
+        out,
         "\n{} cases per method (yes/no: {}), {errors} errors. Hardware: {}.",
         totals[0].total,
         sizes.join(", "),
         hardware()
-    );
+    )?;
+
+    Ok(())
 }
 
 /// Counts per method and task, for a later run's `--baseline`.
@@ -707,7 +726,7 @@ fn summary(methods: &Methods, runs: &[Runs], args: &Args) -> Value {
     })
 }
 
-/// Methods with errors on more than 1% of their cases, which dev/publish-bench.sh leaves off the page. A cascade
+/// Methods with errors on more than 1% of their cases, which page.md leaves out. A cascade
 /// goes when either of its endpoints goes, never for its own errors.
 fn excluded(methods: &Methods, runs: &[Runs]) -> Vec<String> {
     let mut bad: Vec<bool> = runs[..methods.models.len()]
@@ -730,28 +749,34 @@ fn excluded(methods: &Methods, runs: &[Runs]) -> Vec<String> {
         .collect()
 }
 
-/// Prints how each method and task changed from `baseline`. A task regresses when its wrong
+/// Writes how each method and task changed from `baseline`. A task regresses when its wrong
 /// count rises, or its decided count drops, by more than 1% of its cases (at least 1 case):
 /// CPU and GPU builds can flip a borderline verdict. Returns false on a regression.
-fn compare(summary: &Value, baseline: &Value, report_only: &[String]) -> Result<bool> {
+fn compare(
+    out: &mut String,
+    summary: &Value,
+    baseline: &Value,
+    report_only: &[String],
+) -> Result<bool> {
     ensure!(
         summary["per_side"] == baseline["per_side"] && summary["split"] == baseline["split"],
         "the baseline used another --per-side or --split"
     );
     let mut ok = true;
-    println!("\nCompared with the baseline (decided, wrong):\n");
-    println!("| Method | Task | Decided | Wrong | Result |");
-    println!("| --- | --- | --- | --- | --- |");
+    writeln!(out, "\nCompared with the baseline (decided, wrong):\n")?;
+    writeln!(out, "| Method | Task | Decided | Wrong | Result |")?;
+    writeln!(out, "| --- | --- | --- | --- | --- |")?;
     for (name, tasks) in summary["methods"].as_object().into_iter().flatten() {
         for (task, now) in tasks.as_object().into_iter().flatten() {
             let before = &baseline["methods"][name][task];
             let count = |value: &Value, key: &str| value[key].as_i64().unwrap_or_default();
             if before.is_null() {
-                println!(
+                writeln!(
+                    out,
                     "| {name} | {task} | {} | {} | new |",
                     count(now, "decided"),
                     count(now, "wrong")
-                );
+                )?;
                 continue;
             }
             let margin = (count(now, "cases") + 99) / 100;
@@ -768,15 +793,37 @@ fn compare(summary: &Value, baseline: &Value, report_only: &[String]) -> Result<
             } else {
                 "same"
             };
-            println!(
+            writeln!(
+                out,
                 "| {name} | {task} | {} ({decided:+}) | {} ({wrong:+}) | {result} |",
                 count(now, "decided"),
                 count(now, "wrong")
-            );
+            )?;
         }
     }
 
     Ok(ok)
+}
+
+/// The report without the rows of `excluded` methods, so one flaky model does not hide the others on the
+/// published page. A row belongs to a method when its first cell is the name, alone or with the model.
+fn page(report: &str, excluded: &[String]) -> String {
+    let rows: String = report
+        .split_inclusive('\n')
+        .filter(|line| {
+            !excluded.iter().any(|name| {
+                line.starts_with(&format!("| {name} (")) || line.starts_with(&format!("| {name} |"))
+            })
+        })
+        .collect();
+    if excluded.is_empty() {
+        return rows;
+    }
+
+    format!(
+        "Excluded, with errors on more than 1% of their cases: {}.\n\n{rows}",
+        excluded.join(", ")
+    )
 }
 
 fn hardware() -> String {
@@ -860,13 +907,16 @@ mod tests {
                 "methods": {"d3": {"spam": {"cases": 200, "decided": decided, "wrong": wrong}}}})
         };
         let baseline = run(180, 4);
+        let compare = |run: &_, report_only: &[String]| {
+            super::compare(&mut String::new(), run, &baseline, report_only)
+        };
         // 1% of 200 cases is 2.
-        assert!(super::compare(&run(178, 6), &baseline, &[]).unwrap());
-        assert!(!super::compare(&run(180, 7), &baseline, &[]).unwrap());
-        assert!(!super::compare(&run(177, 4), &baseline, &[]).unwrap());
-        assert!(super::compare(&run(180, 7), &baseline, &["d3".into()]).unwrap());
+        assert!(compare(&run(178, 6), &[]).unwrap());
+        assert!(!compare(&run(180, 7), &[]).unwrap());
+        assert!(!compare(&run(177, 4), &[]).unwrap());
+        assert!(compare(&run(180, 7), &["d3".into()]).unwrap());
         let other_size = json!({"per_side": 200, "split": "test", "methods": {}});
-        assert!(super::compare(&other_size, &baseline, &[]).is_err());
+        assert!(compare(&other_size, &[]).is_err());
     }
 
     #[test]
@@ -887,6 +937,16 @@ mod tests {
         let runs = [run(0), run(2), run(1), run(50)];
         assert_eq!(super::excluded(&methods((0, 2)), &runs), ["bad"]);
         assert_eq!(super::excluded(&methods((0, 1)), &runs), ["bad", "cascade"]);
+    }
+
+    #[test]
+    fn page_leaves_out_excluded_rows_but_not_longer_names() {
+        let report = "| Method | Decided |\n| hosted-clef (x) | 1 |\n| hosted-clef-flash (y) | 2 |\n| hosted-clef | spam |\n";
+        assert_eq!(super::page(report, &[]), report);
+        assert_eq!(
+            super::page(report, &["hosted-clef".into()]),
+            "Excluded, with errors on more than 1% of their cases: hosted-clef.\n\n| Method | Decided |\n| hosted-clef-flash (y) | 2 |\n"
+        );
     }
 
     #[test]

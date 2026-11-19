@@ -76,6 +76,7 @@ jobs:
           path: |
             target/bench/*.json
             target/bench/report.md
+            target/bench/page.md
 
   # Saves the tables of a main push on the bench-results branch (see docs/benchmark.md). The job has no secret and
   # never runs for a pull request.
