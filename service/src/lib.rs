@@ -310,8 +310,6 @@ struct Pass<'a> {
     /// Where `unsure` answers go; `None` keeps them.
     escalation: Option<&'a Escalation>,
     deadline: tokio::time::Instant,
-    /// `ask` or `triage`, for the deadline messages.
-    request: &'static str,
     /// The error message once `deadline` passes.
     passed: String,
 }
@@ -413,17 +411,9 @@ impl Service {
         self
     }
 
-    pub(crate) const fn learning(&self) -> &domain::config::Learning {
-        &self.config.learning
-    }
-
     /// `label` accepts decisions of a spec, or of an ad-hoc question with stored text while `learning.ad_hoc` is on.
     const fn learnable(&self, spec: Option<&str>, has_text: bool) -> bool {
         spec.is_some() || (self.config.learning.ad_hoc && has_text)
-    }
-
-    pub(crate) const fn specs(&self) -> &IndexMap<String, domain::config::SpecConfig> {
-        &self.config.specs
     }
 
     #[must_use]
@@ -493,7 +483,7 @@ impl Service {
 
     /// The stored text of an ad-hoc question, which `label` checks values against.
     async fn ad_hoc_question(&self, question_hash: &str) -> Result<Question, ServiceError> {
-        if !self.learnable(None, true) {
+        if !self.config.learning.ad_hoc {
             return Err(ServiceError::BadRequest(
                 "ad-hoc question: save it as a spec in the config first".into(),
             ));
@@ -509,7 +499,8 @@ impl Service {
         serde_json::from_value(question.into()).map_err(|e| ServiceError::BadRequest(e.to_string()))
     }
 
-    /// Refits a question when its label count reaches a multiple of `learning.recalibrate_after`.
+    /// Refits a question's bands on `endpoint` each time its labelled states pass a multiple of
+    /// `learning.recalibrate_after`.
     // ponytail: inline cached-only refit; move to a background task if it ever needs model calls
     async fn maybe_recalibrate(
         &self,
@@ -610,8 +601,8 @@ impl Service {
             self.store.question(&question_hash).await?,
         );
         let labels = question
-            .clone()
-            .and_then(|question| serde_json::from_value::<Kind>(question).ok())
+            .as_ref()
+            .and_then(|question| Kind::deserialize(question).ok())
             .map(|kind| kind.labels());
         let decisions = self
             .store
@@ -721,7 +712,6 @@ impl Service {
             .await
     }
 
-    /// A question's calibration id under endpoint `name`.
     /// The calibration id of a question on an endpoint, with the endpoint's backend kind.
     async fn calibration_id(
         &self,
@@ -889,13 +879,11 @@ impl Service {
                 "instructions": spec.instructions,
                 "calibration_id": null, "calibrated": false, "report": null
             });
-            match self.endpoints[&endpoint].info().await {
-                Ok(info) => {
-                    let calibration_id = verdict::calibration_id(
-                        &verdict::question_hash(&questions[0]),
-                        info.kind,
-                        &info.fingerprint,
-                    );
+            match self
+                .calibration_id(&endpoint, &verdict::question_hash(&questions[0]))
+                .await
+            {
+                Ok((calibration_id, _)) => {
                     status["calibration_id"] = json!(calibration_id);
                     match self.store.calibration(&calibration_id, Some(name)).await {
                         Ok(Some((_, report))) => {
@@ -907,9 +895,7 @@ impl Service {
                         Err(e) => status["error"] = json!(e.to_string()),
                     }
                 }
-                Err(e) => {
-                    status["error"] = json!(self.backend_error(&endpoint, e).to_string());
-                }
+                Err(e) => status["error"] = json!(e.to_string()),
             }
             specs.push(status);
         }
@@ -936,10 +922,9 @@ impl Service {
                 "use spec or question, exclusively".into(),
             ));
         }
-        let ad_hoc: Vec<_> = request.question.into_iter().collect();
         let (questions, endpoint) = self.resolve_questions(
             request.spec.as_deref(),
-            &ad_hoc,
+            request.question.as_slice(),
             request.endpoint.as_deref(),
         )?;
         let question = questions.into_iter().next().expect("one triage question");
@@ -1221,7 +1206,9 @@ impl Service {
         };
         domain::question::validate_all(&questions)
             .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-        let name = endpoint.unwrap_or_else(|| self.spec_endpoint(spec));
+        let name = endpoint
+            .or_else(|| spec.and_then(|name| self.config.specs.get(name)?.endpoint.as_deref()))
+            .unwrap_or(&self.config.default);
         if !self.endpoints.contains_key(name) {
             return Err(ServiceError::BadRequest(format!("unknown endpoint {name}")));
         }
@@ -1229,13 +1216,7 @@ impl Service {
         Ok((questions, name.into()))
     }
 
-    /// The endpoint of `spec`, else the default.
-    fn spec_endpoint(&self, spec: Option<&str>) -> &str {
-        spec.and_then(|name| self.config.specs.get(name)?.endpoint.as_deref())
-            .unwrap_or(&self.config.default)
-    }
-
-    /// Judges resolved questions; `resolve_questions` must have validated them and `name`.
+    /// Judges valid questions on `name`, which must be a configured endpoint.
     /// With `remember`, a label reported for the same question and state is the verdict.
     /// Also returns the state as fitted to the endpoint, which `escalate` re-asks about.
     async fn judge(
@@ -1365,7 +1346,6 @@ impl Service {
             remember: learn && self.config.learning.remember,
             escalation,
             deadline: tokio::time::Instant::now() + limit,
-            request,
             passed: format!("{request} deadline of {limit:?} passed"),
         }
     }
@@ -1390,10 +1370,7 @@ impl Service {
                 .await
                 .is_err()
             {
-                tracing::warn!(
-                    "escalation missed the {} deadline; keeping the unsure answer",
-                    pass.request
-                );
+                tracing::warn!("escalation: {}; keeping the unsure answer", pass.passed);
             }
         }
 
@@ -1401,8 +1378,10 @@ impl Service {
     }
 
     /// Re-asks `unsure` answers on the escalation endpoint, about `state` as the primary endpoint saw it, so both
-    /// stored rows share a state hash and one label serves both. Fails open: an error or a spent budget keeps the
-    /// primary answer. It changes `judgments` only after its last await, so a deadline can cancel it safely.
+    /// stored rows share a state hash and one label serves both. That needs a state limit on the escalation endpoint
+    /// at least as large as the primary's, because a smaller one trims `state` again. Fails open: an error or a spent
+    /// budget keeps the primary answer. It changes `judgments` only after its last await, so a deadline can cancel it
+    /// safely.
     async fn escalate(
         &self,
         state: &str,
@@ -1416,8 +1395,7 @@ impl Service {
             .iter()
             .enumerate()
             .filter(|(_, judgment)| {
-                let decision = &judgment.decision;
-                decision.verdict == "unsure" && !decision.remembered && decision.error.is_none()
+                judgment.decision.verdict == "unsure" && !judgment.decision.remembered
             })
             .map(|(index, _)| index)
             .collect();
@@ -1532,15 +1510,11 @@ impl Service {
             return;
         }
 
-        match action {
-            Action::Skip if judgment.explore_draw < learning.explore => {
-                decision.verdict = "unsure".into();
-                decision.explored = true;
-                decision.report = true;
-            }
-            Action::Work => decision.report = true,
-            Action::Skip | Action::Other => decision.report = decision.verdict == "unsure",
+        if matches!(action, Action::Skip) && judgment.explore_draw < learning.explore {
+            decision.verdict = "unsure".into();
+            decision.explored = true;
         }
+        decision.report = matches!(action, Action::Work) || decision.verdict == "unsure";
     }
 
     async fn persist(
@@ -1567,7 +1541,6 @@ impl Service {
             .into_iter()
             .zip(counts)
             .map(|(mut judgment, count)| {
-                // The last row is the returned decision, unless the decision came from the cache.
                 if let Some(id) = ids.by_ref().take(count).last()
                     && !judgment.decision.cached
                 {
@@ -1592,9 +1565,6 @@ fn list_limit(limit: Option<usize>) -> Result<u32, ServiceError> {
     }
 }
 
-/// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
-// ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
-// that ever matters.
 /// Gives `count` back to the window that granted it; a window that has since rolled over keeps its count.
 fn refund(window: &mut (Instant, usize), granted_in: Instant, count: usize) {
     if window.0 == granted_in {
@@ -1602,6 +1572,9 @@ fn refund(window: &mut (Instant, usize), granted_in: Instant, count: usize) {
     }
 }
 
+/// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
+// ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
+// that ever matters.
 fn grant(window: &mut (Instant, usize), now: Instant, per_minute: usize, wanted: usize) -> usize {
     if now.duration_since(window.0) >= Duration::from_secs(60) {
         *window = (now, 0);

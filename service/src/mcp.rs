@@ -128,7 +128,7 @@ Rules:
 - Not for permissions, exact logic (use code), long documents, or generating text.
 "#,
     );
-    if service.learning().report {
+    if service.config.learning.report {
         instructions.push_str(
             "- When a decision has `report: true`, do the work, then call decision_label with its id and what the work showed. Label only from what the work showed; skip it otherwise.\n",
         );
@@ -136,10 +136,10 @@ Rules:
     instructions.push_str(
         "- To review a spec, label its decisions with decision_review and decision_label, from evidence only.\nNamed specs (use with `spec`, they can be calibrated):\n",
     );
-    if service.specs().is_empty() {
+    if service.config.specs.is_empty() {
         instructions.push_str("(no specs configured)\n");
     } else {
-        for (name, spec) in service.specs() {
+        for (name, spec) in &service.config.specs {
             writeln!(
                 &mut instructions,
                 "- {name} ({}): {}",
