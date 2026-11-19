@@ -63,10 +63,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Keyed on the model URLs only, as in ci.yaml.
+      - id: models
+        run: echo "key=$(grep -o 'https://huggingface[^"]*' dev/compose.yaml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/8ball-models
-          key: models-${{ hashFiles('dev/compose.yaml') }}
+          key: models-${{ steps.models.outputs.key }}
           restore-keys: models-
       - run: cargo build --release -p cli -p bench
       - run: dev/models.sh up

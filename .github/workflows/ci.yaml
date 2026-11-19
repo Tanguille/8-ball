@@ -45,12 +45,14 @@ jobs:
       - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-nextest
-      # About 4.3 GB. Any edit to compose.yaml changes the key, so an image bump restores the last entry, and
-      # llama.cpp downloads only a model whose pinned URL changed.
+      # About 4.3 GB. The key hashes only the model URLs, so an image bump keeps the entry. A changed URL restores
+      # the last entry: llama.cpp downloads only that model, and dev/models.sh deletes the one it replaced.
+      - id: models
+        run: echo "key=$(grep -o 'https://huggingface[^"]*' dev/compose.yaml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/8ball-models
-          key: models-${{ hashFiles('dev/compose.yaml') }}
+          key: models-${{ steps.models.outputs.key }}
           restore-keys: models-
       - run: dev/models.sh up
       # One test at a time: on the runner's 4 CPUs, parallel tests queue on the same model servers past the
