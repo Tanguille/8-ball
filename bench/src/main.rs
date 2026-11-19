@@ -177,16 +177,16 @@ async fn main() -> Result<()> {
         args.out.join("summary.json"),
         serde_json::to_string_pretty(&summary)?,
     )?;
-    // One flaky model must not hide the others on the published page, so the page names it and leaves out its rows.
-    let mut page = String::new();
+    // One flaky model must not hide the others on the published page, so the page leaves out its rows. Both the
+    // page and the full report name it.
     if !excluded.is_empty() {
         writeln!(
-            page,
-            "Excluded, with errors on more than 1% of their cases: {}.\n",
+            text,
+            "Left off the published page, with errors on more than 1% of their cases: {}.\n",
             excluded.join(", ")
         )?;
     }
-    page += &text;
+    let mut page = text.clone();
     report(&mut text, &methods, &runs, &[])?;
     report(&mut page, &methods, &runs, &excluded)?;
     // A baseline error comes after the tables are printed and the page is written, so the run still reports.
@@ -617,9 +617,11 @@ fn accuracy_at(observations: &[&Value], percent: usize) -> f64 {
     count(right) / count(kept)
 }
 
-/// Writes the tables and the footer, without the rows and errors of the methods in `excluded`.
+/// Writes the tables and the footer, without the rows and errors of the methods in `excluded`. The reference row
+/// always stays, because every other row is compared with it.
 fn report(out: &mut String, methods: &Methods, runs: &[Runs], excluded: &[String]) -> Result<()> {
-    let shown = |index: usize| !excluded.contains(&methods.names[index]);
+    let shown =
+        |index: usize| index == methods.reference || !excluded.contains(&methods.names[index]);
     let label = |index: usize| {
         let name = &methods.names[index];
         methods
@@ -952,6 +954,14 @@ mod tests {
         super::report(&mut out, &methods, &runs, &["bad".into()]).unwrap();
         assert_eq!(out.matches("| d3 (m) |").count(), 2);
         assert!(!out.contains("| bad (n) |") && out.contains(", 0 errors."));
+        // An excluded reference keeps its row, because the other rows are compared with it.
+        let mut out = String::new();
+        let reference = super::Methods {
+            reference: 1,
+            ..methods
+        };
+        super::report(&mut out, &reference, &runs, &["bad".into()]).unwrap();
+        assert_eq!(out.matches("| bad (n) |").count(), 2);
     }
 
     #[test]
