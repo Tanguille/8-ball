@@ -1379,6 +1379,7 @@ impl Service {
                 .await
                 .is_err()
             {
+                self.metrics.record_backend_error(&escalation.endpoint);
                 tracing::warn!("escalation: {}; keeping the unsure answer", pass.passed);
             }
         }

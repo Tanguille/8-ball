@@ -251,6 +251,11 @@ async fn ask_deadline_keeps_the_primary_unsure() {
     assert!(started.elapsed() < Duration::from_secs(3));
     assert_eq!(decision.verdict, "unsure");
     assert!(!decision.escalated && decision.report);
+    let metrics = app.service.metrics();
+    assert!(
+        metrics.contains(r#"eightball_backend_errors_total{endpoint="big"} 1"#),
+        "{metrics}"
+    );
 }
 
 #[tokio::test]
