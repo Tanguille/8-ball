@@ -736,7 +736,14 @@ fn summary(methods: &Methods, runs: &[Runs], args: &Args, excluded: &[String]) -
         "split": args.split.to_possible_value().expect("no skipped variants").get_name(),
         "methods": rows,
         "excluded": excluded,
+        "publish": publish(methods, excluded),
     })
+}
+
+/// Whether dev/publish-bench.sh replaces the page: d3, the anchor of every run, is not excluded, and at least 2
+/// methods are left. The 27b run has one hosted model: if it is bad, the page keeps its old numbers.
+fn publish(methods: &Methods, excluded: &[String]) -> bool {
+    !excluded.iter().any(|name| name == "d3") && methods.names.len() - excluded.len() >= 2
 }
 
 /// Methods with errors on more than 1% of their cases, which page.md leaves out. A cascade
@@ -918,6 +925,27 @@ mod tests {
         assert!(!page.contains("| d3 |"));
         let other_size = json!({"per_side": 200, "split": "test", "methods": {}});
         assert!(compare(&other_size, &[]).is_err());
+    }
+
+    #[test]
+    fn publish_needs_d3_and_two_methods() {
+        let methods = super::Methods {
+            names: ["d3", "bad", "cascade"].map(String::from).to_vec(),
+            models: ["m", "n"].map(String::from).to_vec(),
+            reference: 0,
+            cascade: Some((0, 1)),
+        };
+        let publish = |excluded: &[&str]| {
+            super::publish(
+                &methods,
+                &excluded
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert!(publish(&[]) && publish(&["bad"]));
+        assert!(!publish(&["d3"]) && !publish(&["bad", "cascade"]));
     }
 
     #[test]

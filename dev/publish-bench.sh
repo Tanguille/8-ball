@@ -7,10 +7,9 @@ set -euo pipefail
 artifact=$1 page=$2 where=$3
 dir=$(mktemp -d)
 gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "$dir"
-# The bench writes page.md without the methods that it excluded (errors on more than 1% of their cases). The page is
-# skipped when d3, the anchor of every run, is excluded or fewer than 2 methods remain (the 27b run has one hosted
-# model: if it is bad, the page keeps its old numbers).
-if jq -e 'any(.excluded[]; . == "d3") or (.methods | length) - (.excluded | length) < 2' "$dir/summary.json" >/dev/null; then
+# The bench writes page.md without the methods that it excluded (errors on more than 1% of their cases), and decides
+# in summary.json whether the page is worth publishing.
+if ! jq -e .publish "$dir/summary.json" >/dev/null; then
   echo "::warning::$page not updated: d3 or all hosted models had errors on more than 1% of their cases."
   exit 0
 fi
