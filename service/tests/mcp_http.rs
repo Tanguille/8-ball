@@ -75,4 +75,12 @@ async fn bearer_scheme_is_case_insensitive() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
+    let other_scheme = reqwest::Client::new()
+        .post(format!("{url}/v1/questions"))
+        .header("Authorization", "Basic k")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(other_scheme.status(), 401);
 }
