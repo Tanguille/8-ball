@@ -38,10 +38,10 @@ impl Default for Metrics {
         let mut registry = Registry::default();
         let decisions = Family::<DecisionLabels, Counter>::default();
         let backend_errors = Family::<EndpointLabels, Counter>::default();
-        // 25 ms to 12.8 s: decision calls take about 1 s, and the 20 s timeout lands in +Inf.
+        // Keep fine buckets for local calls and finite buckets for hosted calls and retries.
         let backend_seconds: Latency = Family::new_with_constructor(|| {
             Histogram::new(prometheus_client::metrics::histogram::exponential_buckets(
-                0.025, 2.0, 10,
+                0.025, 2.0, 13,
             ))
         });
         let trimmed_states = Family::<EndpointLabels, Counter>::default();
