@@ -2,13 +2,13 @@
 
 All models ran on the CPU of the GitHub runner.
 
-Run on 2026-11-21, 8-ball commit 7b5b140134f0ef0a6c45317650f7b020b09576fb, [run](https://github.com/Tanguille/8-ball/actions/runs/44933135553).
+Run on 2026-11-21, 8-ball commit 42613ece1d6111b20039c3f095f43f98334ccd6d, [run](https://github.com/Tanguille/8-ball/actions/runs/44949573181).
 
 | Method | Decided | Wrong | Accuracy of decided | Correct of all | Correct vs d3 (95% CI) | Accuracy at 90% coverage | Mean time | Speed vs d3 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| d3 (vllm-d3-nano-Q8_0.gguf) | 90% | 10 | 98.2% | 88.8% | reference | 98.1% | 2495 ms | 1.0x |
-| rerank (bge-reranker-v2-m3-Q8_0.gguf) | 0% | 0 | - | 0.0% | -88.8 (-91.3 to -86.3) | 55.4% | 237 ms | 10.5x |
-| chat (Qwen3.5-0.8B-Q8_0.gguf) | 35% | 32 | 84.9% | 30.0% | -58.8 (-63.3 to -54.2) | 56.7% | 867 ms | 2.9x |
+| d3 (vllm-d3-nano-Q8_0.gguf) | 90% | 10 | 98.2% | 88.8% | reference | 98.1% | 2466 ms | 1.0x |
+| rerank (bge-reranker-v2-m3-Q8_0.gguf) | 0% | 0 | - | 0.0% | -88.8 (-91.3 to -86.3) | 55.4% | 237 ms | 10.4x |
+| chat (Qwen3.5-0.8B-Q8_0.gguf) | 35% | 32 | 84.9% | 30.0% | -58.8 (-63.3 to -54.2) | 56.7% | 843 ms | 2.9x |
 
 Per task, accuracy of decided (decided share):
 
