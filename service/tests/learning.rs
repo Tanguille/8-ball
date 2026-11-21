@@ -288,6 +288,55 @@ async fn triage_lists_duplicates_under_their_first_decision() {
 }
 
 #[tokio::test]
+async fn a_score_keep_is_a_minimum_level() {
+    let mock = MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(|request: &wiremock::Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let level: usize = body["state"].as_str().unwrap()[6..].parse().unwrap();
+            let probabilities: serde_json::Map<String, Value> = (0..3)
+                .map(|i| (i.to_string(), json!(if i == level { 0.97 } else { 0.015 })))
+                .collect();
+            let answers: serde_json::Map<String, Value> = body["questions"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(|id| {
+                    (
+                        id.clone(),
+                        json!({"type":"score","probabilities":probabilities}),
+                    )
+                })
+                .collect();
+
+            wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
+        })
+        .mount(&mock)
+        .await;
+    let config = toml::from_str(&format!(
+        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[learning]\nexplore = 0.0",
+        mock.uri()
+    ))
+    .unwrap();
+    let (service, _store, _directory) = common::service(config).await;
+    let question =
+        json!({"id":"q","type":"score","instructions":"Urgent?","criteria":["low","mid","high"]});
+    for (keep, kept, rejected) in [
+        ("0", vec![0, 1, 2], vec![]),
+        ("1", vec![1, 2], vec![0]),
+        ("2", vec![2], vec![0, 1]),
+    ] {
+        let request = serde_json::from_value(
+            json!({"question":question,"keep":keep,"items":["level-0","level-1","level-2"]}),
+        )
+        .unwrap();
+        let response = service.triage(request).await.unwrap();
+        assert_eq!(indices(&response.kept), kept, "keep {keep}");
+        assert_eq!(indices(&response.rejected), rejected, "keep {keep}");
+    }
+}
+
+#[tokio::test]
 async fn a_refit_that_keeps_the_bands_stores_its_report() {
     let app = fixture("recalibrate_after = 20").await;
     // Labels set straight in the store skip the refit; the 20th and the 40th, through the service, run it. Both
