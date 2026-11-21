@@ -140,7 +140,7 @@ const fn learn_default() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct TriageResponse {
     pub kept: Vec<TriageItem>,
     pub unsure: Vec<TriageItem>,
@@ -282,6 +282,9 @@ pub struct DoctorEndpoint {
     pub error: Option<String>,
 }
 
+/// The most items that one triage request may hold. The CLI splits a longer list into requests of this size.
+pub const MAX_TRIAGE_ITEMS: usize = 64;
+
 // ponytail: one deadline for the whole triage, prefilter included; items still unjudged when it passes fail open
 // to `unsure`. At 64 items, 2 slots and the 2.7 s p90 call this leaves room; a request field if callers need another
 // value.
@@ -310,8 +313,6 @@ struct Pass<'a> {
     /// Where `unsure` answers go; `None` keeps them.
     escalation: Option<&'a Escalation>,
     deadline: tokio::time::Instant,
-    /// `ask` or `triage`, for the deadline messages.
-    request: &'static str,
     /// The error message once `deadline` passes.
     passed: String,
 }
@@ -363,8 +364,9 @@ pub struct Service {
     embedder: Option<Embedder>,
     store: Store,
     metrics: Metrics,
-    /// Held during an automatic refit, so concurrent labels skip theirs.
-    refit: Mutex<()>,
+    /// The labelled count of each calibration key at its last automatic refit, in memory only. Its lock is held during
+    /// a refit, so concurrent labels skip theirs.
+    refits: Mutex<std::collections::HashMap<String, usize>>,
     /// The escalation budget window: its start and the escalations granted in it. A std mutex, held for a few
     /// instructions and never across an await.
     escalations: std::sync::Mutex<(Instant, usize)>,
@@ -397,7 +399,7 @@ impl Service {
             embedder,
             store,
             metrics: Metrics::default(),
-            refit: Mutex::new(()),
+            refits: Mutex::default(),
             escalations: std::sync::Mutex::new((Instant::now(), 0)),
             triage_deadline: TRIAGE_DEADLINE,
             ask_deadline: ASK_DEADLINE,
@@ -413,17 +415,9 @@ impl Service {
         self
     }
 
-    pub(crate) const fn learning(&self) -> &domain::config::Learning {
-        &self.config.learning
-    }
-
     /// `label` accepts decisions of a spec, or of an ad-hoc question with stored text while `learning.ad_hoc` is on.
     const fn learnable(&self, spec: Option<&str>, has_text: bool) -> bool {
         spec.is_some() || (self.config.learning.ad_hoc && has_text)
-    }
-
-    pub(crate) const fn specs(&self) -> &IndexMap<String, domain::config::SpecConfig> {
-        &self.config.specs
     }
 
     #[must_use]
@@ -493,7 +487,7 @@ impl Service {
 
     /// The stored text of an ad-hoc question, which `label` checks values against.
     async fn ad_hoc_question(&self, question_hash: &str) -> Result<Question, ServiceError> {
-        if !self.learnable(None, true) {
+        if !self.config.learning.ad_hoc {
             return Err(ServiceError::BadRequest(
                 "ad-hoc question: save it as a spec in the config first".into(),
             ));
@@ -509,7 +503,8 @@ impl Service {
         serde_json::from_value(question.into()).map_err(|e| ServiceError::BadRequest(e.to_string()))
     }
 
-    /// Refits a question when its label count reaches a multiple of `learning.recalibrate_after`.
+    /// Refits a question's bands on `endpoint` each time its labelled states pass a multiple of
+    /// `learning.recalibrate_after`.
     // ponytail: inline cached-only refit; move to a background task if it ever needs model calls
     async fn maybe_recalibrate(
         &self,
@@ -532,22 +527,37 @@ impl Service {
         if count < every {
             return Ok(());
         }
-        let Ok(_refit) = self.refit.try_lock() else {
+        let Ok(mut refits) = self.refits.try_lock() else {
             return Ok(());
         };
         let stored = self.store.calibration(&calibration_id, spec).await?;
-        // Refit once the count has crossed a multiple since the last fit, so a refit that a failed probe or a busy
-        // lock skipped runs at the next label instead of the next multiple.
-        let fitted = stored.as_ref().map_or(0, |(_, report)| report.examples);
+        // Refit once the count has crossed a multiple since the last refit, so a refit that a failed probe or a busy
+        // lock skipped runs at the next label instead of the next multiple. The count in memory also covers a refit
+        // that stored nothing and states that conflicting labels leave out of the fit. After a restart, the examples
+        // of the stored report stand in, which can cost one extra refit.
+        let key = verdict::calibration_key(&calibration_id, spec);
+        let fitted = refits
+            .get(&key)
+            .copied()
+            .unwrap_or_else(|| stored.as_ref().map_or(0, |(_, report)| report.examples));
         if count / every <= fitted / every {
             return Ok(());
         }
+        let calibrated = stored.is_some();
         let previous = stored.map_or_else(
             || Bands::default_for(&question.kind, backend),
             |(bands, _)| bands,
         );
-        self.calibrate_question(spec, question, endpoint, None, false, Some(previous))
+        let response = self
+            .calibrate_question(spec, question, endpoint, None, false, Some(previous))
             .await?;
+        // A refit that keeps the bands still stores its report, so the report shows the latest examples and warnings.
+        if calibrated && !response.stored {
+            self.store
+                .put_calibration(&calibration_id, spec, &response.bands, &response.report)
+                .await?;
+        }
+        refits.insert(key, count);
 
         Ok(())
     }
@@ -610,8 +620,8 @@ impl Service {
             self.store.question(&question_hash).await?,
         );
         let labels = question
-            .clone()
-            .and_then(|question| serde_json::from_value::<Kind>(question).ok())
+            .as_ref()
+            .and_then(|question| Kind::deserialize(question).ok())
             .map(|kind| kind.labels());
         let decisions = self
             .store
@@ -721,7 +731,6 @@ impl Service {
             .await
     }
 
-    /// A question's calibration id under endpoint `name`.
     /// The calibration id of a question on an endpoint, with the endpoint's backend kind.
     async fn calibration_id(
         &self,
@@ -889,13 +898,11 @@ impl Service {
                 "instructions": spec.instructions,
                 "calibration_id": null, "calibrated": false, "report": null
             });
-            match self.endpoints[&endpoint].info().await {
-                Ok(info) => {
-                    let calibration_id = verdict::calibration_id(
-                        &verdict::question_hash(&questions[0]),
-                        info.kind,
-                        &info.fingerprint,
-                    );
+            match self
+                .calibration_id(&endpoint, &verdict::question_hash(&questions[0]))
+                .await
+            {
+                Ok((calibration_id, _)) => {
                     status["calibration_id"] = json!(calibration_id);
                     match self.store.calibration(&calibration_id, Some(name)).await {
                         Ok(Some((_, report))) => {
@@ -907,9 +914,7 @@ impl Service {
                         Err(e) => status["error"] = json!(e.to_string()),
                     }
                 }
-                Err(e) => {
-                    status["error"] = json!(self.backend_error(&endpoint, e).to_string());
-                }
+                Err(e) => status["error"] = json!(e.to_string()),
             }
             specs.push(status);
         }
@@ -928,37 +933,30 @@ impl Service {
     }
 
     pub async fn triage(&self, request: TriageRequest) -> Result<TriageResponse, ServiceError> {
-        if request.items.len() > 64 {
-            return Err(ServiceError::BadRequest("at most 64 items".into()));
+        if request.items.len() > MAX_TRIAGE_ITEMS {
+            let message = format!("at most {MAX_TRIAGE_ITEMS} items");
+            return Err(ServiceError::BadRequest(message));
         }
         if request.spec.is_some() == request.question.is_some() {
             return Err(ServiceError::BadRequest(
                 "use spec or question, exclusively".into(),
             ));
         }
-        let ad_hoc: Vec<_> = request.question.into_iter().collect();
         let (questions, endpoint) = self.resolve_questions(
             request.spec.as_deref(),
-            &ad_hoc,
+            request.question.as_slice(),
             request.endpoint.as_deref(),
         )?;
         let question = questions.into_iter().next().expect("one triage question");
         let keep = request.keep.as_deref().unwrap_or("yes");
-        let valid_keep = match &question.kind {
-            Kind::Score { criteria } => keep
-                .parse::<usize>()
-                .is_ok_and(|minimum| minimum < criteria.len()),
-            _ => question.kind.labels().iter().any(|label| label == keep),
-        };
-        if !valid_keep {
+        if !question.kind.labels().iter().any(|label| label == keep) {
             return Err(ServiceError::BadRequest(format!(
                 "invalid keep value: {keep}"
             )));
         }
-        let mut items = self
+        let (mut items, firsts) = self
             .triage_items(&endpoint, request.items, request.context.as_deref())
             .await?;
-        let unique_count = items.len();
         let spec = request.spec.as_deref();
         let pass = self.pass(
             spec,
@@ -968,16 +966,16 @@ impl Service {
             "triage",
             self.triage_deadline,
         );
-        let (prefiltered, warning) = if let Some(top_k) = request.top_k {
-            self.prefilter(&question, &mut items, top_k, &pass).await?
-        } else {
-            (Vec::new(), None)
+        let warning = match request.top_k {
+            Some(top_k) => self.prefilter(&question, &mut items, top_k, &pass).await?,
+            None => None,
         };
         let (mut decisions, failures) = self.judge_items(items, &question, &pass).await?;
         let warning = [warning, failures]
             .into_iter()
             .flatten()
             .reduce(|first, second| format!("{first}; {second}"));
+        // Only so that stored row ids follow the item order; the output order comes from the input indices below.
         decisions.sort_by_key(|(index, _)| *index);
         let matches = |verdict: &str| {
             if matches!(question.kind, Kind::Score { .. }) {
@@ -1004,12 +1002,22 @@ impl Service {
                 self.learn(judgment, &action);
             }
         }
+        let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
+        let decisions: IndexMap<_, _> = indices
+            .into_iter()
+            .zip(self.persist(judgments, spec).await?)
+            .collect();
         let mut kept = Vec::new();
         let mut unsure = Vec::new();
         let mut rejected = Vec::new();
-        let (indices, judgments): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
-        let decisions = self.persist(judgments, spec).await?;
-        for (index, decision) in indices.into_iter().zip(decisions) {
+        let mut prefiltered = Vec::new();
+        // A duplicate shares the decision of its first copy; a first copy without one was prefiltered.
+        for (index, first) in firsts.into_iter().enumerate() {
+            let Some(decision) = decisions.get(&first).cloned() else {
+                prefiltered.push(index);
+
+                continue;
+            };
             let item = TriageItem { index, decision };
             if item.decision.verdict == "unsure" {
                 unsure.push(item);
@@ -1021,7 +1029,7 @@ impl Service {
         }
 
         Ok(TriageResponse {
-            dropped: unique_count - kept.len() - unsure.len(),
+            dropped: rejected.len() + prefiltered.len(),
             kept,
             unsure,
             warning,
@@ -1070,20 +1078,22 @@ impl Service {
         Ok((decisions, warning))
     }
 
+    /// The distinct item states with the index of their first copy, and for every item the index of its first copy.
     async fn triage_items(
         &self,
         endpoint: &str,
         items: Vec<Value>,
         context: Option<&str>,
-    ) -> Result<Vec<(usize, String)>, ServiceError> {
+    ) -> Result<(Vec<(usize, String)>, Vec<usize>), ServiceError> {
         let mut unique = IndexMap::new();
+        let mut firsts = Vec::new();
         for (index, item) in items.into_iter().enumerate() {
             let text = match (&context, item) {
                 (Some(context), item) => json!({"context":context,"item":item}).to_string(),
                 (None, Value::String(text)) => text,
                 (None, other) => other.to_string(),
             };
-            unique.entry(text).or_insert(index);
+            firsts.push(*unique.entry(text).or_insert(index));
         }
         let items: Vec<_> = unique
             .into_iter()
@@ -1105,22 +1115,23 @@ impl Service {
             }
         }
 
-        Ok(items)
+        Ok((items, firsts))
     }
 
+    /// Keeps the `top_k` items most similar to the question, or all of them with a warning if embedding fails.
     async fn prefilter(
         &self,
         question: &Question,
         items: &mut Vec<(usize, String)>,
         top_k: usize,
         pass: &Pass<'_>,
-    ) -> Result<(Vec<usize>, Option<String>), ServiceError> {
+    ) -> Result<Option<String>, ServiceError> {
         let embedder = self
             .embedder
             .as_ref()
             .ok_or_else(|| ServiceError::BadRequest("top_k needs [embedder] in config".into()))?;
         if top_k >= items.len() {
-            return Ok((Vec::new(), None));
+            return Ok(None);
         }
         let texts = std::iter::once(question.instructions.clone())
             .chain(items.iter().map(|(_, text)| text.clone()))
@@ -1128,7 +1139,7 @@ impl Service {
         let passed = || backend::BackendError(pass.passed.clone());
         let vectors = match within(pass.deadline, embedder.embed(&texts), passed).await {
             Ok(vectors) => vectors,
-            Err(e) => return Ok((Vec::new(), Some(format!("prefilter skipped: {e}")))),
+            Err(e) => return Ok(Some(format!("prefilter skipped: {e}"))),
         };
         let mut ranked: Vec<_> = items
             .drain(..)
@@ -1147,18 +1158,13 @@ impl Service {
                 .total_cmp(&left.2)
                 .then_with(|| left.0.cmp(&right.0))
         });
-        let mut prefiltered: Vec<_> = ranked
-            .split_off(top_k)
-            .into_iter()
-            .map(|(index, _, _)| index)
-            .collect();
-        prefiltered.sort_unstable();
         *items = ranked
             .into_iter()
+            .take(top_k)
             .map(|(index, text, _)| (index, text))
             .collect();
 
-        Ok((prefiltered, None))
+        Ok(None)
     }
 
     pub async fn ask(&self, request: AskRequest) -> Result<AskResponse, ServiceError> {
@@ -1221,7 +1227,9 @@ impl Service {
         };
         domain::question::validate_all(&questions)
             .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-        let name = endpoint.unwrap_or_else(|| self.spec_endpoint(spec));
+        let name = endpoint
+            .or_else(|| spec.and_then(|name| self.config.specs.get(name)?.endpoint.as_deref()))
+            .unwrap_or(&self.config.default);
         if !self.endpoints.contains_key(name) {
             return Err(ServiceError::BadRequest(format!("unknown endpoint {name}")));
         }
@@ -1229,13 +1237,7 @@ impl Service {
         Ok((questions, name.into()))
     }
 
-    /// The endpoint of `spec`, else the default.
-    fn spec_endpoint(&self, spec: Option<&str>) -> &str {
-        spec.and_then(|name| self.config.specs.get(name)?.endpoint.as_deref())
-            .unwrap_or(&self.config.default)
-    }
-
-    /// Judges resolved questions; `resolve_questions` must have validated them and `name`.
+    /// Judges valid questions on `name`, which must be a configured endpoint.
     /// With `remember`, a label reported for the same question and state is the verdict.
     /// Also returns the state as fitted to the endpoint, which `escalate` re-asks about.
     async fn judge(
@@ -1365,7 +1367,6 @@ impl Service {
             remember: learn && self.config.learning.remember,
             escalation,
             deadline: tokio::time::Instant::now() + limit,
-            request,
             passed: format!("{request} deadline of {limit:?} passed"),
         }
     }
@@ -1385,24 +1386,17 @@ impl Service {
         )
         .await?;
         if let Some(escalation) = pass.escalation {
-            let escalated = self.escalate(&state, questions, escalation, pass, &mut judgments);
-            if tokio::time::timeout_at(pass.deadline, escalated)
-                .await
-                .is_err()
-            {
-                tracing::warn!(
-                    "escalation missed the {} deadline; keeping the unsure answer",
-                    pass.request
-                );
-            }
+            self.escalate(&state, questions, escalation, pass, &mut judgments)
+                .await;
         }
 
         Ok(judgments)
     }
 
     /// Re-asks `unsure` answers on the escalation endpoint, about `state` as the primary endpoint saw it, so both
-    /// stored rows share a state hash and one label serves both. Fails open: an error or a spent budget keeps the
-    /// primary answer. It changes `judgments` only after its last await, so a deadline can cancel it safely.
+    /// stored rows share a state hash and one label serves both. That needs a state limit on the escalation endpoint
+    /// at least as large as the primary's, because a smaller one trims `state` again. Fails open: an error, a missed
+    /// deadline or a spent budget keeps the primary answer.
     async fn escalate(
         &self,
         state: &str,
@@ -1416,8 +1410,7 @@ impl Service {
             .iter()
             .enumerate()
             .filter(|(_, judgment)| {
-                let decision = &judgment.decision;
-                decision.verdict == "unsure" && !decision.remembered && decision.error.is_none()
+                judgment.decision.verdict == "unsure" && !judgment.decision.remembered
             })
             .map(|(index, _)| index)
             .collect();
@@ -1426,7 +1419,7 @@ impl Service {
             let granted = grant(
                 &mut window,
                 Instant::now(),
-                escalation.per_minute,
+                escalation.per_minute.get(),
                 unsure.len(),
             );
             (granted, window.0)
@@ -1443,9 +1436,12 @@ impl Service {
             .iter()
             .map(|&index| questions[index].clone())
             .collect();
-        let escalated = match self
-            .judge(state, pass.spec, &asked, name, pass.remember)
-            .await
+        let escalated = match within(
+            pass.deadline,
+            self.judge(state, pass.spec, &asked, name, pass.remember),
+            || self.backend_error(name, backend::BackendError(pass.passed.clone())),
+        )
+        .await
         {
             Ok((escalated, _)) => escalated,
             Err(error) => {
@@ -1532,15 +1528,11 @@ impl Service {
             return;
         }
 
-        match action {
-            Action::Skip if judgment.explore_draw < learning.explore => {
-                decision.verdict = "unsure".into();
-                decision.explored = true;
-                decision.report = true;
-            }
-            Action::Work => decision.report = true,
-            Action::Skip | Action::Other => decision.report = decision.verdict == "unsure",
+        if matches!(action, Action::Skip) && judgment.explore_draw < learning.explore {
+            decision.verdict = "unsure".into();
+            decision.explored = true;
         }
+        decision.report = matches!(action, Action::Work) || decision.verdict == "unsure";
     }
 
     async fn persist(
@@ -1567,7 +1559,8 @@ impl Service {
             .into_iter()
             .zip(counts)
             .map(|(mut judgment, count)| {
-                // The last row is the returned decision, unless the decision came from the cache.
+                // An escalated judgment stores the primary's row, then its own, so the last row is the returned
+                // decision. A cached decision keeps the id of the row that it came from.
                 if let Some(id) = ids.by_ref().take(count).last()
                     && !judgment.decision.cached
                 {
@@ -1592,9 +1585,6 @@ fn list_limit(limit: Option<usize>) -> Result<u32, ServiceError> {
     }
 }
 
-/// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
-// ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
-// that ever matters.
 /// Gives `count` back to the window that granted it; a window that has since rolled over keeps its count.
 fn refund(window: &mut (Instant, usize), granted_in: Instant, count: usize) {
     if window.0 == granted_in {
@@ -1602,6 +1592,9 @@ fn refund(window: &mut (Instant, usize), granted_in: Instant, count: usize) {
     }
 }
 
+/// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
+// ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
+// that ever matters.
 fn grant(window: &mut (Instant, usize), now: Instant, per_minute: usize, wanted: usize) -> usize {
     if now.duration_since(window.0) >= Duration::from_secs(60) {
         *window = (now, 0);

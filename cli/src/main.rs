@@ -18,7 +18,7 @@ use domain::{
     config::{self, Config},
     question::{Kind, Question},
 };
-use service::Service;
+use service::{MAX_TRIAGE_ITEMS, Service, TriageResponse};
 
 mod evaluate;
 
@@ -38,7 +38,7 @@ struct AskArgs {
     #[arg(value_parser = ["noul", "choice", "score"])]
     kind: Option<String>,
     instructions: Option<String>,
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["kind", "instructions", "options", "levels"])]
     spec: Option<String>,
     /// choice option, repeatable: name or name=description
     #[arg(long = "option")]
@@ -53,6 +53,9 @@ struct AskArgs {
     /// exit 0 yes / 1 no / 3 unsure (noul); 0 decided / 3 unsure (choice, score)
     #[arg(long)]
     exit_code: bool,
+    /// Turn off remembered labels, exploration and reports, for scripts that never label.
+    #[arg(long)]
+    no_learn: bool,
     #[command(flatten)]
     remote: Remote,
 }
@@ -78,6 +81,9 @@ struct TriageArgs {
     top_k: Option<usize>,
     #[arg(long)]
     endpoint: Option<String>,
+    /// Turn off remembered labels, exploration and reports, for scripts that never label.
+    #[arg(long)]
+    no_learn: bool,
     #[command(flatten)]
     remote: Remote,
 }
@@ -151,19 +157,19 @@ impl Remote {
             .send()
             .await?;
         let status = response.status();
-        let body: Value = response.json().await?;
         if !status.is_success() {
+            let body: Value = response.json().await.unwrap_or_default();
             bail!(
                 "HTTP {status}: {}",
                 body["error"].as_str().unwrap_or("request failed")
             );
         }
 
-        Ok(body)
+        Ok(response.json().await?)
     }
 }
 
-/// Where `serve` and `mcp` read their configuration.
+/// Where `serve` and `mcp` read their configuration and keep their database.
 #[derive(Args)]
 struct ConfigArgs {
     #[arg(long, env = "EIGHTBALL_CONFIG")]
@@ -176,14 +182,24 @@ struct ConfigArgs {
         hide_env_values = true
     )]
     config_toml: Option<String>,
+    #[arg(long, env = "EIGHTBALL_DB")]
+    db: Option<PathBuf>,
 }
 
 impl ConfigArgs {
-    fn load(self) -> Result<Config> {
-        Ok(match self.config_toml {
+    async fn service(self) -> Result<Arc<Service>> {
+        let config = match self.config_toml {
             Some(text) => Config::parse(&text, "EIGHTBALL_CONFIG_TOML")?,
             None => Config::load(&self.config.unwrap_or_else(config::default_config_path))?,
-        })
+        };
+        let store = store::Store::open(&self.db.unwrap_or_else(|| {
+            config::xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
+        }))
+        .await?;
+        let pruned = store.prune(config.retention_days).await?;
+        info!("pruned {pruned} old decisions");
+
+        Ok(Arc::new(Service::new(config, store)))
     }
 }
 
@@ -195,19 +211,17 @@ enum Command {
         config: ConfigArgs,
         #[arg(long, env = "EIGHTBALL_LISTEN", default_value = "127.0.0.1:8080")]
         listen: String,
-        #[arg(long, env = "EIGHTBALL_DB")]
-        db: Option<PathBuf>,
-        #[arg(long, env = "EIGHTBALL_API_KEY", hide_env_values = true)]
+        #[arg(
+            long,
+            env = "EIGHTBALL_API_KEY",
+            hide_env_values = true,
+            value_parser = clap::builder::NonEmptyStringValueParser::new()
+        )]
         api_key: Option<String>,
     },
     /// Run MCP over stdin and stdout.
-    Mcp {
-        #[command(flatten)]
-        config: ConfigArgs,
-        #[arg(long, env = "EIGHTBALL_DB")]
-        db: Option<PathBuf>,
-    },
-    /// Ask an ad-hoc question (state from --state or stdin).
+    Mcp(ConfigArgs),
+    /// Ask an ad-hoc question or a --spec (state from --state or stdin).
     Ask(AskArgs),
     /// Judge a JSON array from stdin.
     Triage(TriageArgs),
@@ -296,15 +310,14 @@ async fn run() -> Result<i32> {
         Command::Serve {
             config,
             listen,
-            db,
             api_key,
         } => {
-            serve(config, listen, db, api_key).await?;
+            serve(config, listen, api_key).await?;
 
             Ok(0)
         }
-        Command::Mcp { config, db } => {
-            let server = service::mcp::Mcp::new(build_service(config, db).await?)
+        Command::Mcp(config) => {
+            let server = service::mcp::Mcp::new(config.service().await?)
                 .serve(rmcp::transport::stdio())
                 .await?;
             server.waiting().await?;
@@ -371,13 +384,8 @@ async fn shutdown() {
     }
 }
 
-async fn serve(
-    config: ConfigArgs,
-    listen: String,
-    db: Option<PathBuf>,
-    api_key: Option<String>,
-) -> Result<()> {
-    let service = build_service(config, db).await?;
+async fn serve(config: ConfigArgs, listen: String, api_key: Option<String>) -> Result<()> {
+    let service = config.service().await?;
     let cancellation_token = tokio_util::sync::CancellationToken::new();
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     let address = listener.local_addr()?;
@@ -438,6 +446,7 @@ async fn ask(
         state,
         endpoint,
         exit_code,
+        no_learn,
         remote,
     }: AskArgs,
 ) -> Result<i32> {
@@ -454,7 +463,8 @@ async fn ask(
     let body = remote
         .post(
             "/v1/ask",
-            &json!({"state":state,"questions":questions,"spec":spec,"endpoint":endpoint}),
+            &json!({"state":state,"questions":questions,"spec":spec,"endpoint":endpoint,
+            "learn":!no_learn}),
         )
         .await?;
     println!("{body}");
@@ -467,19 +477,6 @@ async fn ask(
     } else {
         i32::from(verdict == "no" && body["results"][0]["type"] == "noul")
     })
-}
-
-async fn build_service(config: ConfigArgs, db: Option<PathBuf>) -> Result<Arc<Service>> {
-    let config = config.load()?;
-    let store =
-        store::Store::open(&db.unwrap_or_else(|| {
-            config::xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
-        }))
-        .await?;
-    let pruned = store.prune(config.retention_days).await?;
-    info!("pruned {pruned} old decisions");
-
-    Ok(Arc::new(Service::new(config, store)))
 }
 
 async fn doctor(remote: &Remote) -> Result<i32> {
@@ -510,16 +507,62 @@ async fn triage(args: TriageArgs) -> Result<i32> {
         .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
     let context = args.context_file.map(fs::read_to_string).transpose()?;
     let items: Vec<Value> = serde_json::from_str(&io::read_to_string(io::stdin())?)?;
+    let mut body = json!({
+        "context":context, "spec":args.spec, "question":question, "keep":args.keep,
+        "top_k":args.top_k, "endpoint":args.endpoint, "learn":!args.no_learn
+    });
+    // ponytail: chunks go one at a time, and top_k and duplicate sharing work per chunk; send them in parallel or
+    // split on the server if large arrays need that.
+    // An empty array still makes one request, so the server checks the question.
+    let chunks = items
+        .chunks(MAX_TRIAGE_ITEMS)
+        .chain(items.is_empty().then_some(&[][..]));
+    let client = args.remote.client()?;
+    let mut merged = TriageResponse::default();
+    let mut warnings = Vec::new();
+    for (start, chunk) in (0..).step_by(MAX_TRIAGE_ITEMS).zip(chunks) {
+        body["items"] = json!(chunk);
+        let request = client.post(args.remote.at("/v1/triage")).json(&body);
+        let response = serde_json::from_value(args.remote.send(request).await?)?;
+        merge(&mut merged, &mut warnings, response, start);
+    }
+    merged.warning = (!warnings.is_empty()).then(|| warnings.join("; "));
+    println!("{}", json!(merged));
 
-    args.remote
-        .print(
-            "/v1/triage",
-            &json!({
-                "items":items, "context":context, "spec":args.spec,
-                "question":question, "keep":args.keep, "top_k":args.top_k, "endpoint":args.endpoint
-            }),
-        )
-        .await
+    Ok(0)
+}
+
+/// Appends the response for the chunk whose first index is `start`. It takes every field by name, so a new field
+/// fails to compile here instead of staying at its default.
+fn merge(
+    merged: &mut TriageResponse,
+    warnings: &mut Vec<String>,
+    response: TriageResponse,
+    start: usize,
+) {
+    let TriageResponse {
+        kept,
+        unsure,
+        dropped,
+        rejected,
+        prefiltered,
+        warning,
+    } = response;
+    for (all, items) in [
+        (&mut merged.kept, kept),
+        (&mut merged.unsure, unsure),
+        (&mut merged.rejected, rejected),
+    ] {
+        all.extend(items.into_iter().map(|mut item| {
+            item.index += start;
+            item
+        }));
+    }
+    merged
+        .prefiltered
+        .extend(prefiltered.into_iter().map(|index| index + start));
+    merged.dropped += dropped;
+    warnings.extend(warning);
 }
 
 async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
@@ -529,19 +572,15 @@ async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
     let mut observations = Vec::with_capacity(cases.len());
     for case in cases {
         let start = Instant::now();
-        let response = async {
-            let body = args
-                .remote
-                .send(client.post(args.remote.at("/v1/triage")).json(
-                    &json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
-                    "items":[case.item],"context":case.context,"learn":false}),
-                ))
-                .await?;
-
-            Ok::<_, anyhow::Error>(serde_json::from_value::<service::TriageResponse>(body)?)
-        }
-        .await
-        .map_err(|e| format!("{e:#}"));
+        let response = args
+            .remote
+            .send(client.post(args.remote.at("/v1/triage")).json(
+                &json!({"spec":args.spec,"endpoint":args.endpoint,"keep":args.keep,
+                "items":[case.item],"context":case.context,"learn":false}),
+            ))
+            .await
+            .and_then(|body| Ok(serde_json::from_value::<TriageResponse>(body)?))
+            .map_err(|e| format!("{e:#}"));
         observations.push(evaluate::Observation::new(case, start.elapsed(), response));
     }
     let report = evaluate::Report::from_observations(&observations);
@@ -564,8 +603,8 @@ async fn observe(mut args: ObserveArgs) -> Result<i32> {
             snapshot["context"].is_string()
                 && snapshot["items"]
                     .as_array()
-                    .is_some_and(|items| items.len() <= 64),
-            "snapshot requires context text and an items array of at most 64 candidates"
+                    .is_some_and(|items| items.len() <= MAX_TRIAGE_ITEMS),
+            "snapshot requires context text and an items array of at most {MAX_TRIAGE_ITEMS} candidates"
         );
 
         Ok(snapshot)

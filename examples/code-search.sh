@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Search code by behaviour: ripgrep finds candidate blocks, 8-ball keeps the ones that match.
-# Usage: examples/code-search.sh "<what the code does>" <rg pattern> [path]
+# Usage: examples/code-search.sh "<what the code does>" <rg pattern> [rg flags and paths, default .]
+# Example: examples/code-search.sh "retry a failed request" 'retry|backoff' backend service -g '!**/tests/**'
 set -euo pipefail
-question=$1 pattern=$2 path=${3:-.}
+question=$1 pattern=$2
+shift 2
 
-# rg exits 1 when nothing matches: that is an empty result, not an error.
-matches=$(rg -n --json -C 12 "$pattern" "$path") || [ $? -eq 1 ]
+# rg exits 1 when nothing matches: that is an empty result, not an error. With stdin on /dev/null, rg searches the
+# current directory when it gets no path, not stdin.
+matches=$(rg -n --json -C 12 -e "$pattern" "$@" </dev/null) || [ $? -eq 1 ]
 
 # Join each match and its 12 context lines into one block per file region.
 blocks=$(jq -s -c '
@@ -20,18 +23,18 @@ blocks=$(jq -s -c '
 
 count=$(jq length <<<"$blocks")
 if ((count == 0)); then
-  echo "No code matches $pattern in $path." >&2
+  echo "No code matches $pattern." >&2
   exit 0
 fi
-if ((count > 64)); then
-  echo "$count blocks; triage takes at most 64. Use narrower keywords or a path." >&2
-  exit 1
-fi
 
-# triage returns indices into its input, so map them back to the blocks.
-echo "$blocks" | jq -c 'map(.code)' |
-  8ball triage "Does this code $question?" |
-  jq -c --argjson b "$blocks" '
-      ((.kept[] | {verdict: "match", index, c: .decision.confidence}),
-       (.unsure[] | {verdict: "check", index, c: .decision.confidence}))
-      | {verdict, file: $b[.index].file, lines: "\($b[.index].start)-\($b[.index].end)", confidence: (.c * 100 | round / 100)}'
+# --no-learn: exploration never turns a skipped block into `unsure`.
+result=$(jq -c 'map(.code)' <<<"$blocks" | 8ball triage --no-learn "Does this code $question?")
+
+# triage returns indices into its input, so map them back to the blocks. A file, not --argjson: one argument is
+# limited to 128 KiB.
+jq -c --slurpfile b <(printf '%s' "$blocks") '
+    ((.kept[] | {verdict: "match", index, c: .decision.confidence}),
+     (.unsure[] | {verdict: "check", index, c: .decision.confidence}))
+    | $b[0][.index] as $block
+    | {verdict, file: $block.file, lines: "\($block.start)-\($block.end)", confidence: (.c * 100 | round / 100)}' <<<"$result"
+jq -r --argjson n "$count" '"\($n) blocks: \(.kept | length) match, \(.unsure | length) check, \(.rejected | length) no"' <<<"$result" >&2

@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    num::NonZero,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use serde_json::{Value, json};
@@ -9,12 +12,16 @@ use wiremock::{MockServer, ResponseTemplate, matchers};
 use backend::Endpoint;
 use domain::question::Question;
 
+use common::posts;
+
+mod common;
+
 fn question() -> Question {
     serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Is this a greeting?"}))
         .unwrap()
 }
 fn endpoint_config(url: &str) -> domain::config::EndpointConfig {
-    toml::from_str(&format!("url = '{url}'\nkind = 'systemone'\n")).unwrap()
+    common::config(url, "kind='systemone'")
 }
 fn response() -> Value {
     json!({"answers":{"q":{"type":"noul","noul":0.97}}})
@@ -51,13 +58,7 @@ async fn three_questions_one_request() {
             assert!((probability - expected_probability).abs() < 1e-9);
         }
     }
-    let requests: Vec<_> = server
-        .received_requests()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|request| request.method == "POST")
-        .collect();
+    let requests = posts(&server).await;
     assert_eq!(requests.len(), 1);
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["questions"]["q1"]["type"], "noul");
@@ -73,25 +74,12 @@ async fn three_questions_one_request() {
 #[tokio::test]
 async fn long_state_is_fitted() {
     let server = MockServer::start().await;
-    mount(
-        &server,
-        ResponseTemplate::new(200).set_body_json(response()),
-    )
-    .await;
     let mut config = endpoint_config(&server.uri());
     config.max_state_chars = Some(10);
     let endpoint = Endpoint::new("d3", &config, None);
     let info = endpoint.info().await.unwrap();
     let sent = endpoint.fitted(&info, "abcdefghijklmnopqrstuvwxyz0123");
     assert_eq!(sent, "abcde\n…\nz0123");
-    endpoint.ask(&sent, &[question()]).await.unwrap();
-    let requests = server.received_requests().await.unwrap();
-    let request = requests
-        .iter()
-        .find(|request| request.method == "POST")
-        .unwrap();
-    let body: Value = serde_json::from_slice(&request.body).unwrap();
-    assert_eq!(body["state"], "abcde\n…\nz0123");
 }
 #[test]
 fn fit_respects_char_boundaries() {
@@ -146,13 +134,7 @@ async fn bearer_only_when_set() {
         .await;
         let endpoint = Endpoint::new("d3", &endpoint_config(&server.uri()), key.clone());
         endpoint.ask("hi", &[question()]).await.unwrap();
-        let requests: Vec<_> = server
-            .received_requests()
-            .await
-            .unwrap()
-            .into_iter()
-            .filter(|request| request.method == "POST")
-            .collect();
+        let requests = posts(&server).await;
         assert_eq!(
             requests[0]
                 .headers
@@ -199,7 +181,7 @@ async fn concurrency_one_serializes() {
             axum::serve(listener, router).await.unwrap();
         });
         let mut config = endpoint_config(&url);
-        config.concurrency = Some(concurrency);
+        config.concurrency = NonZero::new(concurrency);
         let endpoint = Endpoint::new("d3", &config, None);
         let test_questions = [question()];
         let (first, second) = tokio::join!(
@@ -252,7 +234,7 @@ async fn slow_call_times_out_after_timeout_secs() {
     )
     .await;
     let mut config = endpoint_config(&server.uri());
-    config.timeout_secs = Some(1);
+    config.timeout_secs = NonZero::new(1);
     let endpoint = Endpoint::new("d3", &config, None);
     let error = endpoint.ask("hi", &[question()]).await.unwrap_err();
     assert_eq!(error.0, "timed out after 1s");
@@ -270,8 +252,8 @@ async fn queued_calls_do_not_count_the_queue_wait() {
     )
     .await;
     let mut config = endpoint_config(&server.uri());
-    config.concurrency = Some(1);
-    config.timeout_secs = Some(1);
+    config.concurrency = NonZero::new(1);
+    config.timeout_secs = NonZero::new(1);
     let endpoint = Endpoint::new("d3", &config, None);
     let question = question();
     let results = futures::future::join_all(

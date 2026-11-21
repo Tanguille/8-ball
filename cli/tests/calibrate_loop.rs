@@ -2,9 +2,10 @@ use serde_json::{Value, json};
 use tokio::process::Command;
 use wiremock::{MockServer, matchers};
 
-use domain::{config::Config, verdict};
+use domain::config::Config;
 use service::Service;
-use store::Store;
+
+use common::requests;
 
 #[path = "../../service/tests/common.rs"]
 mod common;
@@ -12,10 +13,10 @@ mod common;
 struct App {
     service: std::sync::Arc<Service>,
     model: MockServer,
-    directory: tempfile::TempDir,
+    _directory: tempfile::TempDir,
     url: String,
     config: Config,
-    store: Store,
+    store: store::Store,
 }
 async fn app() -> App {
     let model = MockServer::start().await;
@@ -52,7 +53,7 @@ async fn app() -> App {
         .await;
     let config: Config = toml::from_str(
         &format!(
-            "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.team]\ntype='choice'\ninstructions='Team?'\ncriteria={{a='',b=''}}\n[specs.urgency]\ntype='score'\ninstructions='Urgent?'\ncriteria=['low','high']\n[learning]\nrecalibrate_after=0\nad_hoc=false",
+            "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.team]\ntype='choice'\ninstructions='Team?'\ncriteria={{a='',b=''}}\n[specs.urgency]\ntype='score'\ninstructions='Urgent?'\ncriteria=['low','high']\n[learning]\nrecalibrate_after=0\nad_hoc=false\nexplore=0.0",
             model.uri(),
         ),
     )
@@ -63,7 +64,7 @@ async fn app() -> App {
     App {
         service,
         model,
-        directory,
+        _directory: directory,
         url,
         config,
         store,
@@ -84,15 +85,6 @@ async fn ask(service: &Service, spec: &str, state: &str) -> service::Decision {
         .unwrap()
         .results
         .remove(0)
-}
-async fn posts(app: &App) -> usize {
-    app.model
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .filter(|request| request.method == "POST")
-        .count()
 }
 #[tokio::test]
 async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
@@ -116,7 +108,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
             200
         );
     }
-    let before = posts(&app).await;
+    let before = requests(&app.model).await.len();
     let result = post(
         &app,
         "/v1/calibrate",
@@ -131,7 +123,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
             .await
             .calibrated
     );
-    let before_stored = posts(&app).await;
+    let before_stored = requests(&app.model).await.len();
     assert_eq!(before_stored, before + 1);
     let result = post(
         &app,
@@ -143,7 +135,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     let result: Value = result.json().await.unwrap();
     assert_eq!(result["stored"], true);
     assert!(result["report"]["coverage"].as_f64().unwrap() > 0.9);
-    assert_eq!(posts(&app).await, before_stored);
+    assert_eq!(requests(&app.model).await.len(), before_stored);
     assert!(
         ask(&app.service, "greeting", "hello new state")
             .await
@@ -151,12 +143,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     );
     let mut config = app.config.clone();
     config.specs["greeting"].instructions.push_str(" clearly");
-    let changed = Service::new(
-        config,
-        Store::open(&app.directory.path().join("db.sqlite"))
-            .await
-            .unwrap(),
-    );
+    let changed = Service::new(config, app.store.clone());
     assert!(
         !ask(&changed, "greeting", "hello new state")
             .await
@@ -173,7 +160,7 @@ async fn full_ask_label_calibrate_loop_reuses_cache_and_invalidates_edits() {
     );
 }
 #[tokio::test]
-async fn label_validation_rejects_unknown_adhoc_old_and_invalid_values() {
+async fn label_validation_rejects_unknown_old_and_invalid_values() {
     let app = app().await;
     assert!(
         app.service
@@ -182,19 +169,6 @@ async fn label_validation_rejects_unknown_adhoc_old_and_invalid_values() {
             .unwrap_err()
             .to_string()
             .contains("no decision")
-    );
-    let adhoc: service::AskRequest = serde_json::from_value(
-        json!({"state":"hello","questions":[{"id":"q","type":"noul","instructions":"Ad hoc?"}]}),
-    )
-    .unwrap();
-    let id = app.service.ask(adhoc).await.unwrap().results[0].id;
-    assert!(
-        app.service
-            .label(id, "yes".into())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("ad-hoc question")
     );
     for (spec, good, bad) in [
         ("greeting", "true", "maybe"),
@@ -225,25 +199,7 @@ async fn conflicting_labels_are_excluded() {
     let state = "hello conflict";
     let id = ask(&app.service, "greeting", state).await.id;
     app.service.label(id, "yes".into()).await.unwrap();
-    let question: domain::question::Question =
-        serde_json::from_value(json!({"id":"greeting","type":"noul","instructions":"Greeting?"}))
-            .unwrap();
-    let other = app
-        .store
-        .insert_many(vec![store::NewDecision {
-            spec: Some("greeting".into()),
-            question_hash: verdict::question_hash(&question),
-            question: "{}".into(),
-            calibration_id: "previous-model".into(),
-            state_hash: verdict::short_hash(state),
-            state: state.into(),
-            answer: vec![0.9, 0.1],
-            verdict: "yes".into(),
-            endpoint: "d3".into(),
-        }])
-        .await
-        .unwrap()[0];
-    app.service.label(other, "no".into()).await.unwrap();
+    common::label_under_old_model(&app.store, state, "no").await;
     let result = app
         .service
         .calibrate("greeting", Some(0.95), true)

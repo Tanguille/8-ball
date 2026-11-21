@@ -1,41 +1,22 @@
-use serde_json::{Value, json};
-use wiremock::{MockServer, matchers};
+use serde_json::json;
 
-use domain::{question::Question, verdict};
+use domain::verdict;
 use service::{AskRequest, Service};
-use store::Store;
 
-async fn fixture(ad_hoc: bool) -> (Service, Store, MockServer, tempfile::TempDir) {
-    let mock = MockServer::start().await;
-    wiremock::Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(|request: &wiremock::Request| {
-            let body: Value = serde_json::from_slice(&request.body).unwrap();
-            let answers: serde_json::Map<String, Value> = body["questions"]
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(|id| (id.clone(), json!({"type":"noul","noul":0.97})))
-                .collect();
+mod common;
 
-            wiremock::ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
-        })
-        .mount(&mock)
-        .await;
-    let config: domain::config::Config =
-        toml::from_str(
-            &format!(
-                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\nmax_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc={ad_hoc}",
-                mock.uri(),
-            ),
-        )
-        .unwrap();
-    let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
-    let store = Store::open(&directory.path().join("db.sqlite"))
-        .await
-        .unwrap();
-
-    (Service::new(config, store.clone()), store, mock, directory)
+async fn fixture(
+    ad_hoc: bool,
+) -> (
+    std::sync::Arc<Service>,
+    store::Store,
+    wiremock::MockServer,
+    tempfile::TempDir,
+) {
+    common::d3(&format!(
+        "max_state_chars=10\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n[specs.greeting-copy]\ntype='noul'\ninstructions='Greeting?'\n[learning]\nad_hoc={ad_hoc}"
+    ))
+    .await
 }
 fn request(state: &str) -> AskRequest {
     serde_json::from_value(json!({"spec":"greeting","state":state})).unwrap()
@@ -52,14 +33,9 @@ async fn cache_hashes_exactly_the_fitted_state() {
     assert!(!first.cached);
     assert!(second.cached);
     assert_eq!(first.id, second.id);
-    let requests = mock.received_requests().await.unwrap();
-    let posts: Vec<_> = requests
-        .iter()
-        .filter(|request| request.method == "POST")
-        .collect();
-    assert_eq!(posts.len(), 1);
-    let body: Value = serde_json::from_slice(&posts[0].body).unwrap();
-    assert_eq!(body["state"], "abcde\n…\nz0123");
+    let requests = common::requests(&mock).await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["state"], "abcde\n…\nz0123");
 }
 #[tokio::test]
 async fn rejects_unknown_spec_and_mixed_question_sources() {
@@ -96,8 +72,7 @@ async fn ad_hoc_question_with_a_spec_text_keeps_its_own_calibration() {
 }
 async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
     let (service, store, mock, _dir) = fixture(learning_ad_hoc).await;
-    let question: Question =
-        serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
+    let question = common::greeting();
     let calibration_id = verdict::calibration_id(
         &verdict::question_hash(&question),
         domain::config::BackendKind::Systemone,
@@ -166,9 +141,7 @@ async fn cache_ids_and_labels_stay_in_the_requested_scope() {
     let again = ask_one(&service, copy_request).await;
     assert!(again.cached);
     assert_eq!(again.id, copy.id);
-    let question: Question =
-        serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Greeting?"})).unwrap();
-    let question_hash = verdict::question_hash(&question);
+    let question_hash = verdict::question_hash(&common::greeting());
     assert_eq!(
         store
             .labelled(Some("greeting"), &question_hash)

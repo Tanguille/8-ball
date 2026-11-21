@@ -14,7 +14,7 @@ To calibrate a spec:
 
 Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model file invalidates its calibration identity. A new llama.cpp build of the same file does not. 8-ball checks the model again every minute. Ad-hoc questions learn by their exact text when `learning.ad_hoc` is on. They get their own calibration, apart from specs.
 
-8-ball also refits a question by itself at every multiple of `recalibrate_after` labels. This refit uses only cached answers, so it makes no model calls. A side without enough evidence keeps its threshold. Manual `8ball calibrate` still works for specs. Keep `recalibrate_after = 0` during a holdout comparison, so that the calibration stays fixed.
+8-ball also refits an endpoint's bands by itself each time its labelled states pass a multiple of `recalibrate_after`. This refit uses only cached answers, so it makes no model calls. A side without enough evidence keeps its threshold. Manual `8ball calibrate` still works for specs. Keep `recalibrate_after = 0` during a holdout comparison, so that the calibration stays fixed.
 
 Each endpoint has its own bands and cache. The escalation endpoint is fitted only on the cases it receives, which are the default endpoint's `unsure` answers. A label serves every endpoint that judged its state, so it refits each of them. Each endpoint counts only the labelled states it judged toward `recalibrate_after`. Review lists each case once.
 

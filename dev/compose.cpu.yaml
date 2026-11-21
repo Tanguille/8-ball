@@ -1,5 +1,5 @@
-# Added by models.sh when the host has no /dev/dri (CI runners, CPU-only machines): the Vulkan image then runs
-# on its CPU backend, and the missing device must not be passed through.
+# Added by models.sh when the host has no real GPU (no /dev/dri, or only a virtual display, as on CI runners): the
+# Vulkan image then runs on its CPU backend, and no device is passed through.
 services:
   d3: { devices: !reset [] }
   embed: { devices: !reset [] }

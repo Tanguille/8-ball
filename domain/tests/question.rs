@@ -42,6 +42,16 @@ fn validate_rejects() {
             "options",
         ),
         (
+            Kind::Choice {
+                criteria: [
+                    ("a".into(), String::new()),
+                    ("unsure".into(), String::new()),
+                ]
+                .into(),
+            },
+            "reserved",
+        ),
+        (
             Kind::Score {
                 criteria: vec!["low".into()],
             },

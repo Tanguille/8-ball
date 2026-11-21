@@ -51,7 +51,13 @@ async fn check_client(client: rmcp::service::RunningService<rmcp::RoleClient, ()
 
 #[tokio::test]
 async fn binary_stdio_lists_tools_and_preserves_fail_open_errors() {
-    for (status, probability) in [(200, 0.97), (500, 0.97), (200, 2.0)] {
+    // The last case points at a dead port (9, connection refused) instead of the mock.
+    for (status, probability, dead) in [
+        (200, 0.97, false),
+        (500, 0.97, false),
+        (200, 2.0, false),
+        (200, 0.97, true),
+    ] {
         let mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(matchers::method("POST"))
             .and(matchers::path("/v1/systemone"))
@@ -62,9 +68,13 @@ async fn binary_stdio_lists_tools_and_preserves_fail_open_errors() {
             .await;
         let directory = tempfile::Builder::new().prefix("8ball-").tempdir().unwrap();
         let database_path = directory.path().join("db.sqlite");
-        let text = format!(
-            "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'",
+        let url = if dead {
+            "http://127.0.0.1:9".to_owned()
+        } else {
             mock.uri()
+        };
+        let text = format!(
+            "default='d3'\n[endpoints.d3]\nurl='{url}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'"
         );
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"));
         // Config variables from the developer's shell would conflict with the source chosen below.
@@ -87,6 +97,6 @@ async fn binary_stdio_lists_tools_and_preserves_fail_open_errors() {
             ().serve(rmcp::transport::TokioChildProcess::new(command).unwrap())
                 .await
                 .unwrap();
-        check_client(client, status == 200 && probability < 1.0).await;
+        check_client(client, !dead && status == 200 && probability < 1.0).await;
     }
 }

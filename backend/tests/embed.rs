@@ -13,6 +13,17 @@ fn embedder(mock: &MockServer) -> Embedder {
         None,
     )
 }
+/// An embedder mock that answers every call with this `data`.
+async fn answering(data: Value) -> MockServer {
+    let mock = MockServer::start().await;
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/embeddings"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":data})))
+        .mount(&mock)
+        .await;
+
+    mock
+}
 #[tokio::test]
 async fn ten_texts_use_two_ordered_batches() {
     let mock = MockServer::start().await;
@@ -47,14 +58,9 @@ async fn ten_texts_use_two_ordered_batches() {
 }
 #[tokio::test]
 async fn shuffled_indices_restore_order() {
-    let mock = MockServer::start().await;
-    Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/embeddings"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"data":[{"index":1,"embedding":[0.0,1.0]},{"index":0,"embedding":[1.0,0.0]}]}),
-        ))
-        .mount(&mock)
-        .await;
+    let mock =
+        answering(json!([{"index":1,"embedding":[0.0,1.0]},{"index":0,"embedding":[1.0,0.0]}]))
+            .await;
     let vectors = embedder(&mock)
         .embed(&["a".into(), "b".into()])
         .await
@@ -64,14 +70,8 @@ async fn shuffled_indices_restore_order() {
 }
 #[tokio::test]
 async fn mixed_dimensions_rejected() {
-    let mock = MockServer::start().await;
-    Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/embeddings"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"data":[{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[1.0]}]}),
-        ))
-        .mount(&mock)
-        .await;
+    let mock =
+        answering(json!([{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[1.0]}])).await;
     assert!(
         embedder(&mock)
             .embed(&["a".into(), "b".into()])
@@ -93,12 +93,7 @@ async fn missing_or_duplicate_indices_are_errors() {
         json!([{"index":0,"embedding":[1.0]}]),
         json!([{"index":0,"embedding":[1.0]},{"index":0,"embedding":[2.0]}]),
     ] {
-        let mock = MockServer::start().await;
-        Mock::given(matchers::method("POST"))
-            .and(matchers::path("/v1/embeddings"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":data})))
-            .mount(&mock)
-            .await;
+        let mock = answering(data).await;
         assert!(
             embedder(&mock)
                 .embed(&["a".into(), "b".into()])

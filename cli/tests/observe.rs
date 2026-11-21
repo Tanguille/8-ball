@@ -138,16 +138,17 @@ async fn backend_errors_malformed_json_and_timeouts_keep_original_snapshot() {
 #[tokio::test]
 async fn refuses_redirects_without_forwarding_credentials() {
     let destination = MockServer::start().await;
-    let server = server(
-        ResponseTemplate::new(302)
-            .insert_header("Location", destination.uri())
-            .set_body_json(json!({})),
-    )
-    .await;
+    let server =
+        server(ResponseTemplate::new(302).insert_header("Location", destination.uri())).await;
     let fixture = Fixture::new();
     let body = fixture.run(&server.uri(), &[]).await;
     assert_eq!(body["context"]["snapshot"], fixture.snapshot);
-    assert!(fixture.record()["error"].as_str().unwrap().contains("302"));
+    assert!(
+        fixture.record()["error"]
+            .as_str()
+            .unwrap()
+            .contains("HTTP 302")
+    );
     assert!(destination.received_requests().await.unwrap().is_empty());
 }
 

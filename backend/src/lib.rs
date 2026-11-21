@@ -1,6 +1,6 @@
-use std::{sync::Arc, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
-use reqwest::{Client, Error, RequestBuilder};
+use reqwest::{Client, Error, RequestBuilder, StatusCode};
 use serde_json::Value;
 use tokio::{
     sync::{Mutex, Semaphore},
@@ -46,6 +46,15 @@ impl From<Error> for BackendError {
     }
 }
 
+/// llama.cpp answers 503 while it loads a model, and a proxy or hosted gateway answers 502 while its upstream restarts.
+/// Both serve the request soon.
+const fn answers_soon(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE
+    )
+}
+
 impl Endpoint {
     #[must_use]
     pub fn new(name: &str, config: &EndpointConfig, api_key: Option<String>) -> Self {
@@ -83,18 +92,18 @@ impl Endpoint {
         Ok(info)
     }
 
-    async fn get_info_json(&self, path: &str) -> Result<Value, BackendError> {
+    async fn get_info_json(&self, path: &str) -> Result<Value, Error> {
         let request = self
             .client
             .get(format!("{}{path}", self.config.url))
             .timeout(Duration::from_secs(5));
 
-        Ok(authed(request, self.api_key.as_deref())
+        authed(request, self.api_key.as_deref())
             .send()
             .await?
             .error_for_status()?
             .json()
-            .await?)
+            .await
     }
 
     /// Takes the permit from the `info` that `ask` fetched, so each call does not lock `Endpoint::info` again.
@@ -110,7 +119,7 @@ impl Endpoint {
         let timeout = self
             .config
             .timeout_secs
-            .map_or(DECISION_TIMEOUT, Duration::from_secs);
+            .map_or(DECISION_TIMEOUT, |secs| Duration::from_secs(secs.get()));
         let timed_out = |error: Error| {
             if error.is_timeout() {
                 BackendError(format!("timed out after {timeout:?}"))
@@ -121,11 +130,7 @@ impl Endpoint {
         let mut retried = false;
         let (status, text) = loop {
             self.pace().await;
-            let permit = info
-                .permits
-                .acquire()
-                .await
-                .map_err(|e| BackendError(e.to_string()))?;
+            let permit = info.permits.acquire().await.expect("never closed");
             let request = self
                 .client
                 .post(format!("{}{path}", self.config.url))
@@ -146,12 +151,10 @@ impl Endpoint {
             drop(permit);
             // One retry: a short 429 after its wait, and a 502 or 503, which a hosted gateway may answer from another upstream the next time.
             let wait = match status {
-                reqwest::StatusCode::TOO_MANY_REQUESTS if retry_after <= MAX_RETRY_AFTER => {
+                StatusCode::TOO_MANY_REQUESTS if retry_after <= MAX_RETRY_AFTER => {
                     Some(retry_after)
                 }
-                reqwest::StatusCode::BAD_GATEWAY | reqwest::StatusCode::SERVICE_UNAVAILABLE => {
-                    Some(MIN_RETRY)
-                }
+                status if answers_soon(status) => Some(MIN_RETRY),
                 _ => None,
             };
             match wait {
@@ -164,7 +167,7 @@ impl Endpoint {
         };
         if !status.is_success() {
             let text: String = text.chars().take(500).collect();
-            let hint = if status == reqwest::StatusCode::NOT_IMPLEMENTED {
+            let hint = if status == StatusCode::NOT_IMPLEMENTED {
                 "; not a decision model"
             } else {
                 ""
@@ -178,12 +181,12 @@ impl Endpoint {
 
     /// Waits for this request's turn under `requests_per_minute`.
     async fn pace(&self) {
-        let Some(per_minute) = self.config.requests_per_minute.filter(|n| *n > 0) else {
+        let Some(per_minute) = self.config.requests_per_minute else {
             return;
         };
         let mut next = self.next_request.lock().await;
         let start = (*next).max(Instant::now());
-        *next = start + Duration::from_secs(60) / per_minute;
+        *next = start + Duration::from_secs(60) / per_minute.get();
         drop(next);
         tokio::time::sleep_until(start).await;
     }
@@ -191,8 +194,16 @@ impl Endpoint {
     async fn detect(&self, refresh: bool) -> Result<Info, BackendError> {
         let properties = match self.get_info_json("/props").await {
             Ok(properties) => properties,
-            // Without /props the fingerprint falls back to the model id, which would switch caches; keep the old one.
-            Err(e) if refresh => return Err(e),
+            // Without /props the fingerprint falls back to the model id, which would switch caches; keep the old one. A
+            // server that is down, slow or still loading serves /props soon, so do not cache the fallback.
+            Err(e)
+                if refresh
+                    || e.is_connect()
+                    || e.is_timeout()
+                    || e.status().is_some_and(answers_soon) =>
+            {
+                return Err(e.into());
+            }
             Err(_) => Value::Null,
         };
         let mut models = Value::Null;
@@ -205,11 +216,11 @@ impl Endpoint {
                     self.name
                 ))
             })?;
-            let data = models["data"].as_array();
+            let data = models["data"].as_array().map_or(&[][..], Vec::as_slice);
             // A hosted catalog lists the endpoints that each model serves.
             let served = |endpoint: &str| {
-                data.into_iter().flatten().any(|model| {
-                    Some(model["id"].as_str()) == Some(self.config.model.as_deref())
+                data.iter().any(|model| {
+                    model["id"].as_str() == self.config.model.as_deref()
                         && model["endpoints"]
                             .as_array()
                             .is_some_and(|endpoints| endpoints.iter().any(|e| e == endpoint))
@@ -219,18 +230,14 @@ impl Endpoint {
                 BackendKind::Decisions
             } else if served("chat/completions") {
                 BackendKind::Logprob
-            } else if data.is_some_and(|data| {
-                data.iter().any(|model| {
-                    model["architecture"]["output_modalities"]
-                        .as_array()
-                        .is_some_and(|modes| modes.iter().any(|mode| mode == "decisions"))
-                })
+            } else if data.iter().any(|model| {
+                model["architecture"]["output_modalities"]
+                    .as_array()
+                    .is_some_and(|modes| modes.iter().any(|mode| mode == "decisions"))
             }) {
                 BackendKind::Systemone
             } else if self.config.model.is_some()
-                && data.is_some_and(|data| {
-                    data.iter().any(|model| model.get("architecture").is_some())
-                })
+                && data.iter().any(|model| model.get("architecture").is_some())
             {
                 BackendKind::Logprob
             } else {
@@ -254,8 +261,9 @@ impl Endpoint {
                 properties["total_slots"]
                     .as_u64()
                     .and_then(|value| usize::try_from(value).ok())
+                    .and_then(NonZeroUsize::new)
             })
-            .unwrap_or(2);
+            .map_or(2, NonZeroUsize::get);
 
         Ok(Info {
             kind,

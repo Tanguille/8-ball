@@ -40,6 +40,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
 
 jobs:
   bench:
@@ -50,7 +51,6 @@ jobs:
       HOSTED_URL: ${{ vars.HOSTED_URL }}
       # Our own joke model and router ids (they contain a slash) cannot answer a decision question. The variable replaces this.
       HOSTED_SKIP: ${{ vars.HOSTED_SKIP || '^8ball$|/' }}
-      MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
       ACCEPT: ${{ inputs.accept == true }}
     steps:
       - name: Check the key
@@ -63,10 +63,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Keyed on the model URLs only, as in ci.yaml.
+      - id: models
+        run: echo "key=$(grep -o 'https://huggingface[^"]*' dev/compose.yaml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/8ball-models
-          key: models-${{ hashFiles('dev/compose.yaml') }}
+          key: models-${{ steps.models.outputs.key }}
+          restore-keys: models-
       - run: cargo build --release -p cli -p bench
       - run: dev/models.sh up
       # A provider's free tier can allow 1,000 requests an hour: the 27b run takes about 560 at 30 a minute, the matrix
@@ -91,7 +95,7 @@ jobs:
           restore-keys: hosted-${{ env.MODE }}-
       - name: Benchmark
         run: |
-          # The default shell has no pipefail: without it, the status of the last tee would hide a bench failure.
+          # The default shell has no pipefail: without it, the status of tee would hide a bench failure.
           set -o pipefail
           args=(--endpoints "$ENDPOINTS" --cascade "d3,hosted-qwen-3-8-27b" --per-side "$PER_SIDE" --config hosted.toml)
           # The matrix compares with d3, which always runs; a model that cannot answer this week is skipped.
@@ -104,8 +108,7 @@ jobs:
             args+=(--baseline baseline/summary.json)
           fi
           status=0
-          mkdir -p target/bench
-          cargo run --release -p bench -- "${args[@]}" | tee target/bench/report.md | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+          cargo run --release -p bench -- "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
           mkdir -p baseline && cp target/bench/summary.json baseline/
           if [ "$status" != 0 ] && [ "$MODE" = matrix ]; then
             echo "::warning::A hosted model got worse than last week; see the job summary."
@@ -124,7 +127,7 @@ jobs:
           name: bench-${{ env.MODE }}
           path: |
             target/bench/*.json
-            target/bench/report.md
+            target/bench/page.md
 
   # Saves the tables on the bench-results branch (see docs/benchmark.md). The job has no secret. A failing 27b run
   # skips it, so a regression never replaces the page.
@@ -137,7 +140,6 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      MODE: ${{ (github.event.schedule == '23 3 * * 0' || inputs.run == 'matrix') && 'matrix' || '27b' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

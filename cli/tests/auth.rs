@@ -1,26 +1,11 @@
 use reqwest::Client;
 use serde_json::{Value, json};
-use wiremock::{MockServer, matchers};
 
 #[path = "../../service/tests/common.rs"]
 mod common;
 
-async fn app(key: Option<&str>) -> (String, MockServer, tempfile::TempDir) {
-    let mock = MockServer::start().await;
-    wiremock::Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/systemone"))
-        .respond_with(
-            wiremock::ResponseTemplate::new(200)
-                .set_body_json(json!({"answers":{"q":{"type":"noul","noul":0.97}}})),
-        )
-        .mount(&mock)
-        .await;
-    let endpoint_config: domain::config::Config = toml::from_str(&format!(
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'",
-        mock.uri()
-    ))
-    .unwrap();
-    let (service, _, directory) = common::service(endpoint_config).await;
+async fn app(key: Option<&str>) -> (String, wiremock::MockServer, tempfile::TempDir) {
+    let (service, _, mock, directory) = common::d3("").await;
 
     (common::serve(service, key).await, mock, directory)
 }

@@ -130,8 +130,26 @@ fn zero_timeout_rejected() {
         Config::parse(&format!("{MINIMAL}timeout_secs = 0\n"), "test")
             .unwrap_err()
             .to_string()
-            .contains("timeout_secs must be positive")
+            .contains("nonzero")
     );
+}
+
+#[test]
+fn zero_requests_per_minute_rejected() {
+    assert!(
+        Config::parse(&format!("{MINIMAL}requests_per_minute = 0\n"), "test")
+            .unwrap_err()
+            .to_string()
+            .contains("nonzero")
+    );
+}
+
+/// The CLI prints errors with `{e:#}`, which appends the source; the message must not repeat it.
+#[test]
+fn read_error_prints_the_io_error_once() {
+    let error = Config::load(std::path::Path::new("/nonexistent/8ball.toml")).unwrap_err();
+    assert_eq!(error.to_string(), "cannot read /nonexistent/8ball.toml");
+    assert!(std::error::Error::source(&error).is_some());
 }
 
 const TWO_ENDPOINTS: &str =
@@ -155,7 +173,7 @@ fn escalation_parses_with_default_budget() {
     .unwrap();
     let escalation = config.escalation.unwrap();
     assert_eq!(escalation.endpoint, "big");
-    assert_eq!(escalation.per_minute, 30);
+    assert_eq!(escalation.per_minute.get(), 30);
 }
 
 #[test]
@@ -170,10 +188,7 @@ fn escalation_to_default_rejected() {
 
 #[test]
 fn escalation_zero_budget_rejected() {
-    assert!(
-        escalation_error("endpoint = 'big'\nper_minute = 0\n")
-            .contains("per_minute must be positive")
-    );
+    assert!(escalation_error("endpoint = 'big'\nper_minute = 0\n").contains("nonzero"));
 }
 
 #[test]

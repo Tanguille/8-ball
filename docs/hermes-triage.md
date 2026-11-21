@@ -24,7 +24,7 @@ The CLI equivalent is:
 
 Each model state is the JSON object `{"context": ..., "item": ...}`. Instructions stay in the reviewed question or spec. The cache identity includes the complete serialized state, so a change to the context produces a different cached decision. 8-ball stores the context with the decision and retains it under the existing database policy. Without context, the state format and truncation behavior do not change.
 
-For contextual requests, every serialized context and item pair must fit the state limit of the endpoint. The limit is 2,000 characters by default for System One and rerank. If one pair does not fit, 8-ball rejects the whole batch before any judgment. Supply compact, current evidence. Do not silently remove details to make an assertion pass.
+For contextual requests, each serialized context and item pair must fit the endpoint's `max_state_chars` ([configuration](configuration.md)). If one pair does not fit, 8-ball rejects the whole batch before any judgment. Supply compact, current evidence. Do not silently remove details to make an assertion pass.
 
 Responses keep `kept` and `unsure`, and report the other items in these fields:
 
@@ -32,9 +32,9 @@ Responses keep `kept` and `unsure`, and report the other items in these fields:
 - `prefiltered`: Original indices that embedding similarity excluded, without a model judgment.
 - `dropped`: The sum of the two groups above.
 
-A batch of up to 64 items needs no client-side splitting. Items that fail come back in `unsure` with an `error` field.
+A request takes up to 64 items. `8ball triage` splits a larger array into requests of 64. Items that fail come back in `unsure` with an `error` field.
 
-Do not interpret a prefiltered item as a confident rejection. Items with identical serialized state collapse to their first index. 8-ball preserves the JSON object key order in contextual and context-free requests, so reordered objects stay distinct model inputs. This pilot never sets `top_k`, because you must judge every candidate to measure missed candidates.
+Do not interpret a prefiltered item as a confident rejection. Items with identical serialized state share one decision, and each keeps its own index. 8-ball preserves the JSON object key order in contextual and context-free requests, so reordered objects stay distinct model inputs. This pilot never sets `top_k`, because you must judge every candidate to measure missed candidates.
 
 ## Observe without filtering
 
@@ -48,8 +48,6 @@ export EIGHTBALL_URL=http://127.0.0.1:8080
   --input examples/hermes/snapshot.json \
   --observations /tmp/8ball-gitops-run.jsonl
 ```
-
-The command uses the authentication and JSON handling of the CLI. It needs no Python runtime.
 
 Choose a new observation path for every run. If the input is valid and the write succeeds, the command creates a new file with mode 0600. It never overwrites an existing file. The file contains one JSONL record: `observed_at_unix_ms` (Unix milliseconds), spec, endpoint override, original snapshot, duration, complete response, and any error.
 
