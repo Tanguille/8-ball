@@ -135,24 +135,22 @@ def primary_verdict(row):
     return row["decision"]["verdict"]
 
 
-def run(arm):
+def run():
     source = json.loads(Path("target/paired-input/observations.json").read_text())["d3"]
     assert all(len(source[task]) == 200 for task in task_order)
+    source = {task: [row for row in source[task] if primary_verdict(row) == "unsure"] for task in task_order}
+    assert sum(map(len, source.values())) == 57
     global run_dir
-    run_dir = Path("target/paired-results") / arm
+    run_dir = Path("target/paired-results") / "hosted"
     run_dir.mkdir(parents=True, exist_ok=True)
     config = original_config
     endpoint = "hosted-qwen-3-8-27b"
-    if arm == "hosted":
-        found = subprocess.run(["dev/hosted.sh", "30", "qwen-3.8-27b"], check=True,
-                               text=True, capture_output=True)
-        if f"[endpoints.{endpoint}]" not in found.stdout:
-            sys.exit("Hosted provider does not advertise the benchmark model")
-        config += "\n" + found.stdout
-    else:
-        assert arm == "control"
-    if arm != "control":
-        config += f'\n[escalation]\nendpoint = "{endpoint}"\nper_minute = 30\n'
+    found = subprocess.run(["dev/hosted.sh", "30", "qwen-3.8-27b"], check=True,
+                           text=True, capture_output=True)
+    if f"[endpoints.{endpoint}]" not in found.stdout:
+        sys.exit("Hosted provider does not advertise the benchmark model")
+    config += "\n" + found.stdout + "\ntimeout_secs = 30\n"
+    config += f'\n[escalation]\nendpoint = "{endpoint}"\nper_minute = 30\n'
     (run_dir / "config.toml").write_text(config)
     assert not (run_dir / "service.sqlite").exists()
     observations, counters, backend_failures = {}, {}, {}
@@ -160,7 +158,7 @@ def run(arm):
     with serve("config.toml", "service.sqlite", "service.log"):
         previous = metrics(endpoint)
         for task in task_order:
-            print(f"{arm} / {task}", flush=True)
+            print(f"30-second fallback / {task}", flush=True)
             observations[task] = evaluate(task, source[task])
             current = metrics(endpoint)
             counters[task] = {key: current[key] - previous[key] for key in current}
@@ -179,15 +177,7 @@ def run(arm):
     save("metrics.json", counters)
     save("backend-failures.json", backend_failures)
 
-    if arm == "control":
-        for task in task_order:
-            assert not any(r["decision"]["escalated"] for r in observations[task])
-        save("archived-verdict-changes.json", {
-            task: sum(primary_verdict(x) != primary_verdict(y) for x, y in zip(source[task], observations[task]))
-            for task in task_order
-        })
-        return
-    control = json.loads((run_dir.parent / "control" / "observations.json").read_text())
+    control = source
     report = {}
     for task in task_order:
         a, b, counts = control[task], observations[task], counters[task]
@@ -210,4 +200,4 @@ def run(arm):
 
 
 if __name__ == "__main__":
-    run(sys.argv[1])
+    run()

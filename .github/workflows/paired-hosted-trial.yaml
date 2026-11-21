@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
-name: Paired hosted escalation trial
+name: Hosted escalation timeout trial
 
 on:
   push:
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   trial:
     runs-on: ubuntu-26.04
-    timeout-minutes: 150
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,16 +36,14 @@ jobs:
           restore-keys: models-
       - run: cargo build --release --locked -p cli
       - run: dev/models.sh up
-      - name: D3 control
-        run: python3 -B dev/paired-hosted.py control
-      - name: D3 with real hosted fallback
+      - name: Retry the 57 D3 abstentions with a 30-second timeout
         env:
           HOSTED_API_KEY: ${{ secrets.HOSTED_API_KEY }}
           HOSTED_URL: ${{ vars.HOSTED_URL }}
           HOSTED_SKIP: ${{ vars.HOSTED_SKIP || '^8ball$|/' }}
-        run: python3 -B dev/paired-hosted.py hosted
+        run: python3 -B dev/paired-hosted.py
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: paired-hosted
+          name: hosted-timeout-trial
           path: target/paired-results/*/*.json
