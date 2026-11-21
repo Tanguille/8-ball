@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Paired hosted escalation trial
+
+on:
+  push:
+    branches: [ci/paired-hosted-escalation]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: hosted
+  queue: max
+
+jobs:
+  trial:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify archived test inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 44908717515 --repo "$GITHUB_REPOSITORY" --name bench --dir target/paired-input
+          echo 'ffacce526f0eabc3070e64ba9a2228098f1cb8bc3b9d3b1d77d6b4e71b3e9705  target/paired-input/observations.json' | sha256sum --check
+      - id: models
+        run: echo "key=$(grep -o 'https://huggingface[^"]*' dev/compose.yaml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/8ball-models
+          key: models-${{ steps.models.outputs.key }}
+          restore-keys: models-
+      - run: cargo build --release --locked -p cli
+      - run: dev/models.sh up
+      - name: D3 control
+        run: python3 -B dev/paired-hosted.py control
+      - name: D3 with real hosted fallback
+        env:
+          HOSTED_API_KEY: ${{ secrets.HOSTED_API_KEY }}
+          HOSTED_URL: ${{ vars.HOSTED_URL }}
+          HOSTED_SKIP: ${{ vars.HOSTED_SKIP || '^8ball$|/' }}
+        run: python3 -B dev/paired-hosted.py hosted
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: paired-hosted
+          path: target/paired-results/*/*.json
