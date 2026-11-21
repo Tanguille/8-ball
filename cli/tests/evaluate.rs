@@ -140,6 +140,7 @@ async fn replay_reports_misses_abstentions_errors_and_latency_without_sending_la
         assert_eq!(sent["spec"], "relevant");
         assert_eq!(sent["endpoint"], "candidate");
         assert_eq!(sent["keep"], "yes");
+        assert_eq!(sent["learn"], false);
         assert!(sent["context"].as_str().unwrap().starts_with("snapshot "));
         assert!(sent.get("expected_keep").is_none());
     }

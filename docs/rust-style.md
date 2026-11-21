@@ -165,11 +165,7 @@ Follow the [Rust style guide](https://doc.rust-lang.org/beta/style-guide/items.h
 
 ### Module file layout
 
-Prefer the module-name-as-filename layout over top-level `mod.rs` files ([Rust book](https://doc.rust-lang.org/book/ch07-05-separating-modules-into-different-files.html)). For a module `foo`, use `foo.rs` in the same directory as the parent, not `foo/mod.rs`. Put the submodules of `foo` in the `foo/` directory. For example, `mod bar;` in `foo` uses `foo/bar.rs`. The compiler looks up child modules there, not as siblings of `foo.rs`.
-
-This layout prevents many files named `mod.rs` and keeps the module tree easy to follow. 8-ball always uses this layout. Do not add `mod.rs`.
-
-For example, prefer `src/parser.rs` with `src/parser/lexer.rs` and `src/parser/tokens.rs`. Avoid `src/parser/mod.rs` with the same children, because the parent is then the redundant `mod.rs`. A crate root is `src/lib.rs` or `src/main.rs`, so `backend/src/lib.rs` has `backend/src/embed.rs` beside it.
+Never add `mod.rs` ([Rust book](https://doc.rust-lang.org/book/ch07-05-separating-modules-into-different-files.html)). A module `foo` is `foo.rs` beside its parent, and its submodules go in `foo/`: `src/parser.rs` with `src/parser/lexer.rs`, not `src/parser/mod.rs`. A crate root is `src/lib.rs` or `src/main.rs`, so `backend/src/lib.rs` has `backend/src/embed.rs` beside it.
 
 ## Error Handling
 

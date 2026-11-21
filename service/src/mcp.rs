@@ -37,7 +37,7 @@ impl Mcp {
 
     #[tool(
         name = "decision_triage",
-        description = "Call to filter a list (alerts, feed items, search hits; at most 64) down to the ones that matter, cheaply, before reading them yourself. Judges every item with one question (`spec` or `question`) and returns `kept` (verdict matched `keep`, default yes), `unsure` (read these yourself) a `rejected` list with model decisions, a `prefiltered` list of unjudged indices, and a `dropped` count covering both. Optional `context` is shared evidence included in each item state; the whole contextual input must fit the endpoint limit. `top_k` pre-filters by embedding similarity when the server has an embedder; those exclusions are not confident rejections. `learn: false` answers from the model alone, without remembered labels or exploration."
+        description = "Call to filter a list (alerts, feed items, search hits; at most 64) down to the ones that matter, cheaply, before reading them yourself. Judges every item with one question (`spec` or `question`) and returns `kept` (verdict matched `keep`, default yes), `unsure` (read these yourself) a `rejected` list with model decisions, a `prefiltered` list of unjudged indices, and a `dropped` count covering both. Every index is in one list; identical items share one decision. Optional `context` is shared evidence included in each item state; the whole contextual input must fit the endpoint limit. `top_k` pre-filters by embedding similarity when the server has an embedder; those exclusions are not confident rejections. `learn: false` answers from the model alone, without remembered labels or exploration."
     )]
     async fn decision_triage(
         &self,
@@ -128,7 +128,7 @@ Rules:
 - Not for permissions, exact logic (use code), long documents, or generating text.
 "#,
     );
-    if service.learning().report {
+    if service.config.learning.report {
         instructions.push_str(
             "- When a decision has `report: true`, do the work, then call decision_label with its id and what the work showed. Label only from what the work showed; skip it otherwise.\n",
         );
@@ -136,10 +136,10 @@ Rules:
     instructions.push_str(
         "- To review a spec, label its decisions with decision_review and decision_label, from evidence only.\nNamed specs (use with `spec`, they can be calibrated):\n",
     );
-    if service.specs().is_empty() {
+    if service.config.specs.is_empty() {
         instructions.push_str("(no specs configured)\n");
     } else {
-        for (name, spec) in service.specs() {
+        for (name, spec) in &service.config.specs {
             writeln!(
                 &mut instructions,
                 "- {name} ({}): {}",

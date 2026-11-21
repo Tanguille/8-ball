@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::{env, num::NonZeroUsize, path::PathBuf};
 
 use indexmap::IndexMap;
 use serde::Deserialize;
@@ -26,11 +26,11 @@ pub struct Escalation {
     pub endpoint: String,
     /// Most re-asks per minute that reach the model, across all requests. Answers over the budget stay `unsure`.
     #[serde(default = "default_per_minute")]
-    pub per_minute: usize,
+    pub per_minute: NonZeroUsize,
 }
 
-const fn default_per_minute() -> usize {
-    30
+const fn default_per_minute() -> NonZeroUsize {
+    NonZeroUsize::new(30).unwrap()
 }
 
 /// How 8-ball learns from answers that agents report. Each part can be turned off.
@@ -43,7 +43,7 @@ pub struct Learning {
     pub remember: bool,
     /// Share of skipped decisions (noul `no`, triage `rejected`) returned as `unsure`, so the agent checks them.
     pub explore: f64,
-    /// Refit a question's bands at every multiple of this many labels; 0 turns it off.
+    /// Refit an endpoint's bands each time its labelled states pass a multiple of this; 0 turns it off.
     pub recalibrate_after: usize,
     /// Also learn ad-hoc questions, by their exact text.
     pub ad_hoc: bool,
@@ -66,15 +66,15 @@ impl Default for Learning {
 pub struct EndpointConfig {
     pub url: String,
     pub kind: Option<BackendKind>,
-    pub concurrency: Option<usize>,
+    pub concurrency: Option<NonZeroUsize>,
     pub model: Option<String>,
     pub api_key_env: Option<String>,
     pub max_state_chars: Option<usize>,
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
     /// Spaces requests evenly to stay under a hosted provider's rate limit.
-    pub requests_per_minute: Option<u32>,
+    pub requests_per_minute: Option<std::num::NonZeroU32>,
     /// Seconds one HTTP attempt may take once it has a slot; default 20. Waiting for a slot is not counted, and a retry gets its own budget.
-    pub timeout_secs: Option<u64>,
+    pub timeout_secs: Option<std::num::NonZeroU64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
@@ -108,7 +108,8 @@ pub struct SpecConfig {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("cannot read {path}: {source}")]
+    // thiserror makes `source` the error's source, which `{e:#}` prints after this message.
+    #[error("cannot read {path}")]
     Read {
         path: String,
         source: std::io::Error,
@@ -160,12 +161,6 @@ impl Config {
             return Err("learning.explore must be between 0 and 1".into());
         }
         for (name, endpoint) in &self.endpoints {
-            if endpoint.concurrency == Some(0) {
-                return Err(format!("endpoint {name}: concurrency must be positive"));
-            }
-            if endpoint.timeout_secs == Some(0) {
-                return Err(format!("endpoint {name}: timeout_secs must be positive"));
-            }
             if endpoint.kind == Some(BackendKind::Logprob) && endpoint.model.is_none() {
                 return Err(format!("endpoint {name}: logprob needs model"));
             }
@@ -179,9 +174,6 @@ impl Config {
                 return Err(format!(
                     "escalation: endpoint {endpoint} is the default endpoint"
                 ));
-            }
-            if escalation.per_minute == 0 {
-                return Err("escalation: per_minute must be positive".into());
             }
         }
         for (name, spec) in &self.specs {

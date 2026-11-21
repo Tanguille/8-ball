@@ -219,16 +219,20 @@ mod tests {
             "calibrated":false,"cached":false
         }))
         .unwrap();
+        let observation =
+            |elapsed_ms: f64, decision: Option<service::Decision>, error: Option<String>| {
+                super::Observation {
+                    id: elapsed_ms.to_string(),
+                    expected_keep: true,
+                    would_keep: true,
+                    elapsed_ms,
+                    decision,
+                    error,
+                }
+            };
         let mut observations: Vec<_> = (1..=21)
             .rev()
-            .map(|elapsed| super::Observation {
-                id: elapsed.to_string(),
-                expected_keep: true,
-                would_keep: true,
-                elapsed_ms: f64::from(elapsed),
-                decision: Some(decision.clone()),
-                error: None,
-            })
+            .map(|elapsed| observation(f64::from(elapsed), Some(decision.clone()), None))
             .collect();
         let even = super::Report::from_observations(&observations[1..]);
         assert_eq!(even.uncached_latency.samples, 20);
@@ -240,23 +244,9 @@ mod tests {
         for elapsed in [200.0, 100.0] {
             let mut cached = decision.clone();
             cached.cached = true;
-            observations.push(super::Observation {
-                id: elapsed.to_string(),
-                expected_keep: true,
-                would_keep: true,
-                elapsed_ms: elapsed,
-                decision: Some(cached),
-                error: None,
-            });
+            observations.push(observation(elapsed, Some(cached), None));
         }
-        observations.push(super::Observation {
-            id: "failed".into(),
-            expected_keep: true,
-            would_keep: true,
-            elapsed_ms: 99_999.0,
-            decision: None,
-            error: Some("request failed".into()),
-        });
+        observations.push(observation(99_999.0, None, Some("request failed".into())));
         let report = super::Report::from_observations(&observations);
         assert_eq!(report.errors, 1);
         assert_eq!(report.uncached_latency.samples, 21);

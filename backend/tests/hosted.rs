@@ -8,9 +8,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 use backend::Endpoint;
 use domain::{config::BackendKind, question::Question};
 
-fn config(url: &str, extra: &str) -> domain::config::EndpointConfig {
-    toml::from_str(&format!("url='{url}'\n{extra}")).unwrap()
-}
+use common::{config, posts};
+
+mod common;
+
 fn question() -> Question {
     serde_json::from_value(json!({"id":"q","type":"noul","instructions":"Is this spam?"})).unwrap()
 }
@@ -27,14 +28,6 @@ async fn decisions(server: &MockServer, template: ResponseTemplate) {
         .respond_with(template)
         .mount(server)
         .await;
-}
-/// POST requests only: detection also sends GET /props.
-async fn posts(server: &MockServer) -> Vec<wiremock::Request> {
-    let requests = server.received_requests().await.unwrap();
-    requests
-        .into_iter()
-        .filter(|r| r.method == "POST")
-        .collect()
 }
 fn answer() -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(json!({

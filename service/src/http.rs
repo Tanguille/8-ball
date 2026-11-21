@@ -158,7 +158,9 @@ async fn require_bearer(
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "));
+        .and_then(|value| value.split_once(' '))
+        // RFC 7235: the scheme name is case-insensitive.
+        .and_then(|(scheme, token)| scheme.eq_ignore_ascii_case("bearer").then_some(token));
     let authorized = given
         .is_some_and(|token| constant_time_eq::constant_time_eq(token.as_bytes(), key.as_bytes()));
 
