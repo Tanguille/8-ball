@@ -68,9 +68,24 @@ cargo run --release -p bench -- --split dev  # to try a question change
 
 The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build. It saves each answer, with its text, to `target/bench/observations.json`, the counts per task to `target/bench/summary.json`, and the tables for the published page to `target/bench/page.md`. `cargo run -p bench -- --help` lists the options: other endpoints, a cascade, extra configuration, and `--baseline` to compare with an earlier `summary.json`.
 
+## D3 v3.1 on llama.cpp
+
+The D3 model in `dev/compose.yaml` already uses the v3.1.0 weights. The pinned Q8 file comes from conversion `50dea20`, whose source history includes the upstream v3.1.0 release. Its SHA-256 matched the local model file. [Pinned conversion](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/50dea2057df10c4b393559a155ab3bf0bc7532c6), [Source history](https://huggingface.co/vllm-sr/d3-nano/commits/462efc366229ea268cf4eed3738b3fc4415e4817)
+
+We also ran the newer Q8 conversion, `f2256df`, on the same pinned llama.cpp image. llama.cpp loaded both files, and 8-ball scored the same 600 test cases through the native `/v1/systemone` backend with zero errors. Every verdict and reported probability matched. Mean time was 80 ms with the pin and 79 ms with the newer file on the same machine. One run per file is too little to claim a speed gain, so we kept the current pin. [Newer conversion](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/f2256dfaff5b8337e8bf67ca064aeef18ee14a79)
+
 ## Service fallback trial
 
-Keep D3 alone for spam, sentiment, and lost-card. The trials on 21 November 2026 ran both arms through `8ball evaluate` on the same 600 pinned test cases with fresh storage and learning off. The D3 control used the pinned Q8 conversion of the v3.1.0 weights. It got 533 right, 10 wrong, and 57 unsure. In the fallback arm, 8-ball sent only the 57 `unsure` cases to Qwen3.8 27B at up to 30 calls per minute. [Pinned D3 conversion](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/50dea2057df10c4b393559a155ab3bf0bc7532c6)
+Keep D3 alone for spam, sentiment, and lost-card. D3 got 533 of 600 cases right (88.8%), and sentiment accounted for all ten wrong answers and 38 of the 57 `unsure` answers. The test used 100 cases per answer per task. Both arms ran through `8ball evaluate` with fresh storage and learning off. In the fallback arm, 8-ball sent only the 57 `unsure` cases to Qwen3.8 27B at up to 30 calls per minute.
+
+| Method | Right out of 600 | Wrong | Unsure | Failed fallback calls | End-to-end p95 on its runner |
+| --- | --- | --- | --- | --- | --- |
+| D3 control, local | 533 (88.8%) | 10 | 57 | — | 107 ms |
+| D3, then local 27B | 577 (96.2%) | 14 | 9 | 0/57 | 1.71 s |
+| D3 control, GitHub Actions CPU | 533 (88.8%) | 10 | 57 | — | 3.07 s |
+| D3, then hosted 27B | 574 (95.7%) | 14 | 12 | 6/57 | 3.28 s |
+
+Use each fallback row with its own control for timing comparisons. The local run and the hosted run used different machines.
 
 | Hosted task | Fallback calls | Timeouts | Extra right | Extra wrong | Gain in correct answers, 95% interval |
 | --- | --- | --- | --- | --- | --- |
@@ -78,11 +93,11 @@ Keep D3 alone for spam, sentiment, and lost-card. The trials on 21 November 2026
 | Sentiment | 38 | 5 | 26 | 2 | +13.0 pp [8.5, 18.0] |
 | Lost-card | 15 | 1 | 12 | 1 | +6.0 pp [3.0, 9.5] |
 
-Hosted fallback raised the total to 574 right, 14 wrong, and 12 unsure. The gain was 6.8 percentage points (95% interval 5.0 to 8.8). All six failures were timeouts (6 of 57 fallback calls, 10.5%), with zero budget skips. The service kept D3's `unsure` answer on a timeout. Overall p95 went from 3.07 s to 3.28 s on the same runner. Sentiment p95 went from 2.75 s to 13.35 s. Spam's gain interval includes zero. Sentiment and lost-card both exceeded the 1% fallback error limit, measured over fallback calls. [Paired hosted run](https://github.com/Tanguille/8-ball/actions/runs/44940853914)
+Hosted fallback gained 6.8 percentage points in correct answers (95% interval 5.0 to 8.8). Spam's gain interval includes zero. Sentiment and lost-card both exceeded the 1% error limit on actual fallback calls. The service kept D3's `unsure` answer on all six timeouts. The small change in overall p95 hides the cost for cases that reach the hosted model. Their p95 was 22.42 s, and p95 across all sentiment cases rose from 2.75 s to 13.35 s. [Paired hosted run](https://github.com/Tanguille/8-ball/actions/runs/44940853914)
 
 At a 30-second timeout, five of the same 57 cases timed out (8.8%), with the same right and wrong totals. The shorter run used another runner and different request spacing, so its timing cannot isolate the effect of the longer timeout. Its error rate still exceeded 1%. [Timeout follow-up](https://github.com/Tanguille/8-ball/actions/runs/44950702256)
 
-Local Qwen 27B added 44 right and four wrong answers with zero failures or budget skips. On that machine, p95 rose from 107 ms to 1.71 s. Sentiment and lost-card each gained two wrong answers. An agreed limit on extra wrong answers is needed before recommending local fallback for either spec. The uncalibrated reranker abstained on all 600 cases, so it remains a relevance scorer for this use.
+Local Qwen 27B gained 7.3 percentage points (95% interval 5.5 to 9.3) with zero failures or budget skips. Sentiment and lost-card each gained two wrong answers. An agreed limit on extra wrong answers is needed before recommending local fallback for either spec. The uncalibrated reranker abstained on all 600 cases, so it remains a relevance scorer for this use.
 
 ## Latest results
 
@@ -100,9 +115,11 @@ Compare accuracy between pages only when the cases per side are the same. Do not
 
 | Workflow | When | What |
 | --- | --- | --- |
-| `ci.yaml` | Every pull request and main push | `cargo fmt`, `clippy` and `nextest`. Then the live tests and the benchmark on the runner's CPU, with d3, the reranker and Qwen3.5 0.8B. |
+| `ci.yaml` | Every pull request and main push | `cargo fmt`, `clippy` and `nextest`. The model job runs live tests and a CPU benchmark. Pull requests limited to Markdown, `.mise.toml`, or the lint workflow skip the model job. |
 | `bench-hosted.yaml` | Main pushes, every night but Sunday, and by hand | d3, Qwen3.8 27B on a hosted provider, and the cascade |
 | `bench-hosted.yaml` | Sunday, and by hand | Every hosted model that can answer a decision question, from its live catalog |
+
+The skip avoids the model job for changes that only affect documentation or lint tooling. Two lint-tool update PRs spent 29 and 33 minutes in that job. Main pushes, manual runs, and PRs whose changes cannot be checked still run it. [Markdown lint update](https://github.com/Tanguille/8-ball/actions/runs/44696028191), [Shell lint update](https://github.com/Tanguille/8-ball/actions/runs/44545507966)
 
 The PR benchmark fails when a task of d3 or the reranker gets worse than `bench/baseline.json` by more than 1% of its cases. CPU and GPU builds can flip a borderline verdict, so 1% is allowed. On the same 600 cases, d3 gave the same verdicts on CPU and GPU, and Qwen3.5 0.8B gave 20 other verdicts. So Qwen3.5 0.8B changes are shown, but do not fail the run. When a pull request changes verdicts on purpose, copy `summary.json` from the job's `bench` artifact to `bench/baseline.json` in the same pull request.
 

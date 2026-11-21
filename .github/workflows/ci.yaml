@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: CI
 
-# Every PR and main push: the checks from docs/development.md, the live tests, and the benchmark gate.
+# Every PR and main push runs the checks from docs/development.md.
 on:
   pull_request:
   push:
@@ -33,8 +33,32 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo nextest run
 
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    outputs:
+      docs_or_lint_only: ${{ steps.diff.outputs.docs_or_lint_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        # Compare the PR merge commit with its base. An unavailable diff keeps the model checks enabled.
+        run: |
+          if git diff --quiet --no-renames "$BASE_SHA" HEAD -- . \
+            ':(exclude,glob)**/*.md' \
+            ':(exclude,literal).mise.toml' \
+            ':(exclude,literal).github/workflows/lint.yaml'; then
+            echo "docs_or_lint_only=true" >> "$GITHUB_OUTPUT"
+          fi
+
   # The pinned dev models on the runner's CPU (dev/models.sh falls back to CPU without a real GPU).
   models:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_or_lint_only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
