@@ -68,9 +68,25 @@ cargo run --release -p bench -- --split dev  # to try a question change
 
 The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build. It saves each answer, with its text, to `target/bench/observations.json`, the counts per task to `target/bench/summary.json`, and the tables for the published page to `target/bench/page.md`. `cargo run -p bench -- --help` lists the options: other endpoints, a cascade, extra configuration, and `--baseline` to compare with an earlier `summary.json`.
 
+## Service fallback trial
+
+Keep D3 alone for spam, sentiment, and lost-card. The trials on 21 November 2026 ran both arms through `8ball evaluate` on the same 600 pinned test cases with fresh storage and learning off. The D3 control used the pinned Q8 conversion of the v3.1.0 weights. It got 533 right, 10 wrong, and 57 unsure. In the fallback arm, 8-ball sent only the 57 `unsure` cases to Qwen3.8 27B at up to 30 calls per minute. [Pinned D3 conversion](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/50dea2057df10c4b393559a155ab3bf0bc7532c6)
+
+| Hosted task | Fallback calls | Timeouts | Extra right | Extra wrong | Gain in correct answers, 95% interval |
+| --- | --- | --- | --- | --- | --- |
+| Spam | 4 | 0 | 3 | 1 | +1.5 pp [0.0, 3.5] |
+| Sentiment | 38 | 5 | 26 | 2 | +13.0 pp [8.5, 18.0] |
+| Lost-card | 15 | 1 | 12 | 1 | +6.0 pp [3.0, 9.5] |
+
+Hosted fallback raised the total to 574 right, 14 wrong, and 12 unsure. The gain was 6.8 percentage points (95% interval 5.0 to 8.8). All six failures were timeouts (6 of 57 fallback calls, 10.5%), with zero budget skips. The service kept D3's `unsure` answer on a timeout. Overall p95 went from 3.07 s to 3.28 s on the same runner. Sentiment p95 went from 2.75 s to 13.35 s. Spam's gain interval includes zero. Sentiment and lost-card both exceeded the 1% fallback error limit, measured over fallback calls. [Paired hosted run](https://github.com/Tanguille/8-ball/actions/runs/44940853914)
+
+At a 30-second timeout, five of the same 57 cases timed out (8.8%), with the same right and wrong totals. The shorter run used another runner and different request spacing, so its timing cannot isolate the effect of the longer timeout. Its error rate still exceeded 1%. [Timeout follow-up](https://github.com/Tanguille/8-ball/actions/runs/44950702256)
+
+Local Qwen 27B added 44 right and four wrong answers with zero failures or budget skips. On that machine, p95 rose from 107 ms to 1.71 s. Sentiment and lost-card each gained two wrong answers. An agreed limit on extra wrong answers is needed before recommending local fallback for either spec. The uncalibrated reranker abstained on all 600 cases, so it remains a relevance scorer for this use.
+
 ## Latest results
 
-The tables above come from one run by hand. CI runs the benchmark again and saves the tables on the `bench-results` branch. Each page shows the date, the 8-ball commit, the model files, and the hardware.
+The local-stack tables at the top of this page come from one run by hand. CI runs the benchmark again and saves the tables on the `bench-results` branch. Each page shows the date, the 8-ball commit, the model files, and the hardware.
 
 | Page | Models | Where they run | When |
 | --- | --- | --- | --- |
