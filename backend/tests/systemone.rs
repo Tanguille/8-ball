@@ -74,12 +74,21 @@ async fn three_questions_one_request() {
 #[tokio::test]
 async fn long_state_is_fitted() {
     let server = MockServer::start().await;
+    mount(
+        &server,
+        ResponseTemplate::new(200).set_body_json(response()),
+    )
+    .await;
     let mut config = endpoint_config(&server.uri());
     config.max_state_chars = Some(10);
     let endpoint = Endpoint::new("d3", &config, None);
     let info = endpoint.info().await.unwrap();
     let sent = endpoint.fitted(&info, "abcdefghijklmnopqrstuvwxyz0123");
     assert_eq!(sent, "abcde\n…\nz0123");
+    // `ask` sends the state it is given. The service fits it first: service/tests/cache.rs covers that step.
+    endpoint.ask(&sent, &[question()]).await.unwrap();
+    let body: Value = serde_json::from_slice(&posts(&server).await[0].body).unwrap();
+    assert_eq!(body["state"], sent);
 }
 #[test]
 fn fit_respects_char_boundaries() {

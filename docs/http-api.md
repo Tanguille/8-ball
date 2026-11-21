@@ -20,7 +20,7 @@ Service, authentication, and host errors are JSON with an `error` field. Rejecte
 | Tool | Purpose |
 | --- | --- |
 | `decision_ask` | Ask typed questions about `state`. It takes `spec` or `questions`, and an optional `endpoint`, `learn`, and `escalate`. |
-| `decision_triage` | Judge at most 64 `items` with one `spec` or `question`. It also takes optional `context`, `keep`, `top_k`, `endpoint`, `learn`, and `escalate`. Every index is in one list, and identical items share one decision. |
+| `decision_triage` | Judge at most 64 `items` with one `spec` or `question`. It also takes optional `context`, `keep`, `top_k`, `endpoint`, `learn`, and `escalate`. Every index is in exactly one of `kept`, `unsure`, `rejected`, or `prefiltered` (the items that `top_k` leaves out). Identical items share one decision. |
 | `decision_questions` | List the stored questions with their decision, `unsure`, and label counts. |
 | `decision_review` | List the unlabeled decisions of a `spec` with their ids and states. It leaves out the model's answer, so a label stays independent. |
 | `decision_label` | Label a decision `id` with a `value`, as `label` does. Agents call it for each decision with `report: true`, after the work. |
