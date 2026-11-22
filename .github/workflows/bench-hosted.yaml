@@ -2,8 +2,8 @@
 name: Benchmark (hosted)
 
 # Large and hosted models through a hosted provider, next to d3 on the runner's CPU. Needs the HOSTED_API_KEY secret and the HOSTED_URL variable.
-# - 27b: d3, Qwen3.8 27B and the d3-then-27B cascade, on main pushes and nightly. It fails when a task gets
-#   worse than the last passing run by more than 1% of its cases.
+# - 27b: d3, Qwen3.8 27B and the d3-then-27B cascade, on main pushes and nightly. It fails when an endpoint
+#   has over 1% call errors, or a task gets worse than the last passing run by more than 1% of its cases.
 # - matrix: every hosted model that can answer a decision question, weekly. It reports and never fails.
 # Pull requests never run this: secrets do not reach fork PRs, and the PR gate is in ci.yaml.
 on:
@@ -80,9 +80,12 @@ jobs:
           if [ "$MODE" = matrix ]; then
             dev/hosted.sh 16 > hosted.toml
             echo "PER_SIDE=50" >> "$GITHUB_ENV"
+            echo "BASELINE_PREFIX=hosted-matrix" >> "$GITHUB_ENV"
           else
             dev/hosted.sh 30 qwen-3.8-27b > hosted.toml
             echo "PER_SIDE=100" >> "$GITHUB_ENV"
+            # Start with a fresh baseline because older runs could save one despite excessive errors.
+            echo "BASELINE_PREFIX=hosted-27b-reliable" >> "$GITHUB_ENV"
           fi
           endpoints=$(sed -n 's/^\[endpoints\.\(.*\)\]$/\1/p' hosted.toml | paste -sd,)
           echo "ENDPOINTS=d3,$endpoints" >> "$GITHUB_ENV"
@@ -91,8 +94,8 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: baseline
-          key: hosted-${{ env.MODE }}-${{ github.run_id }}
-          restore-keys: hosted-${{ env.MODE }}-
+          key: ${{ env.BASELINE_PREFIX }}-${{ github.run_id }}
+          restore-keys: ${{ env.BASELINE_PREFIX }}-
       - name: Benchmark
         run: |
           # The default shell has no pipefail: without it, the status of tee would hide a bench failure.
@@ -102,25 +105,25 @@ jobs:
           if [ "$MODE" = matrix ]; then
             args+=(--skip-unavailable --reference d3)
           else
-            args+=(--reference hosted-qwen-3-8-27b)
+            args+=(--reference hosted-qwen-3-8-27b --require-reliable)
           fi
           if [ -f baseline/summary.json ] && [ "$ACCEPT" != true ]; then
             args+=(--baseline baseline/summary.json)
           fi
           status=0
           cargo run --release -p bench -- "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
-          mkdir -p baseline && cp target/bench/summary.json baseline/
           if [ "$status" != 0 ] && [ "$MODE" = matrix ]; then
             echo "::warning::A hosted model got worse than last week; see the job summary."
           elif [ "$status" != 0 ]; then
             exit "$status"
           fi
+          mkdir -p baseline && cp target/bench/summary.json baseline/
       # The saved run of this mode is the next baseline. A failing 27b run skips this save, so a regression
       # stays red until it is fixed or accepted; the matrix run only warns, so it always advances its baseline.
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: baseline
-          key: hosted-${{ env.MODE }}-${{ github.run_id }}
+          key: ${{ env.BASELINE_PREFIX }}-${{ github.run_id }}
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

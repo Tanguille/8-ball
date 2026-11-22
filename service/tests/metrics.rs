@@ -56,6 +56,15 @@ async fn backend_errors_are_counted() {
         text.contains("eightball_backend_request_duration_seconds_count{endpoint=\"d3\"} 1"),
         "{text}"
     );
+    // Slow hosted calls need finite buckets above the default endpoint timeout.
+    for ceiling in ["25.6", "51.2", "102.4"] {
+        assert!(
+            text.contains(&format!(
+                "eightball_backend_request_duration_seconds_bucket{{le=\"{ceiling}\",endpoint=\"d3\"}} 1"
+            )),
+            "{text}"
+        );
+    }
 }
 #[tokio::test]
 async fn trimmed_states_are_counted() {

@@ -95,6 +95,9 @@ struct Args {
     /// Methods whose changes from `--baseline` are shown but never fail the run.
     #[arg(long, value_delimiter = ',')]
     report_only: Vec<String>,
+    /// Fail if an endpoint exceeds the 1% call error limit. Still write the report and observations.
+    #[arg(long)]
+    require_reliable: bool,
     /// A summary.json of an earlier run: exit 1 if a task got worse by more than 1% of its cases.
     #[arg(long)]
     baseline: Option<PathBuf>,
@@ -198,6 +201,7 @@ async fn main() -> Result<()> {
     });
     print!("{text}");
     fs::write(args.out.join("page.md"), page)?;
+    check_reliability(args.require_reliable, &excluded)?;
     if !ok? {
         std::process::exit(1);
     }
@@ -746,6 +750,16 @@ fn publish(methods: &Methods, excluded: &[String]) -> bool {
     !excluded.iter().any(|name| name == "d3") && methods.names.len() - excluded.len() >= 2
 }
 
+fn check_reliability(required: bool, excluded: &[String]) -> Result<()> {
+    ensure!(
+        !required || excluded.is_empty(),
+        "the 1% call error limit excludes: {}",
+        excluded.join(", ")
+    );
+
+    Ok(())
+}
+
 /// Methods with errors on more than 1% of their cases, which page.md leaves out. A cascade
 /// goes when either of its endpoints goes, never for its own errors.
 fn excluded(methods: &Methods, runs: &[Runs]) -> Vec<String> {
@@ -965,7 +979,11 @@ mod tests {
         // 1% of errors is allowed, and a cascade never goes for its own errors.
         let runs = [run(0), run(2), run(1), run(50)];
         assert_eq!(super::excluded(&methods((0, 2)), &runs), ["bad"]);
-        assert_eq!(super::excluded(&methods((0, 1)), &runs), ["bad", "cascade"]);
+        let excluded = super::excluded(&methods((0, 1)), &runs);
+        assert_eq!(excluded, ["bad", "cascade"]);
+        assert!(super::check_reliability(false, &excluded).is_ok());
+        assert!(super::check_reliability(true, &excluded).is_err());
+        assert!(super::check_reliability(true, &[]).is_ok());
     }
 
     #[test]
