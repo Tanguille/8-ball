@@ -26,6 +26,14 @@
       semanticCommitType: 'ci',
     },
     {
+      // Cargo.toml versions are caret ranges, so the default only rewrites Cargo.lock for an in-range update.
+      // Kritika skips lockfiles, so a lockfile-only PR gets no review. Bump rewrites the Cargo.toml version too.
+      matchManagers: [
+        'cargo',
+      ],
+      rangeStrategy: 'bump',
+    },
+    {
       // Merge the llama.cpp image bump without approval once the PR checks pass.
       // The preset uses branch automerge, which skips the PR and so skips the PR-only lint workflow.
       matchFileNames: [
