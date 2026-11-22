@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://kritika.home-operations.com/kritika.schema.json
+skills:
+  scope:
+    # Only Renovate PRs need the dependency checklist; it is loaded into the prompt instead of offered by name.
+    dependency-review:
+      when:
+        - expr: 'pr.headRef.startsWith("renovate/")'
+      load: true
