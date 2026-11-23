@@ -1,6 +1,6 @@
 ---
 name: 8-ball
-description: "Cheap yes/no, pick-one and level judgments from a small decision model through the 8-ball MCP tools (decision_ask, decision_triage), about 0.5 s and no LLM turn. Use BEFORE expensive or noisy work to decide whether it is needed (wake an agent? post this? read these 40 items?), to triage lists, or to bucket things. Not for permissions, exact logic, long documents or generating text."
+description: "Use 8-ball MCP to ask a one-off yes/no, category, or rating question, triage a list, or qualify a recurring decision with the user before it filters, routes, or scores real items."
 license: MIT
 metadata:
   hermes:
@@ -9,20 +9,22 @@ metadata:
 
 # 8-ball
 
-The MCP instructions of the server hold the full usage rules. Follow them. These are the main rules:
+For a one-off judgment, use the connected MCP directly. For a new filter, routing rule, or rating that people will rely on, follow the [qualification guide](references/qualification.md) with the user. A named spec makes a question reusable. Its name alone says nothing about accuracy on the user's data.
 
-- Act only on a clear verdict.
-- If the verdict is `unsure` or the call returns an error, do the normal work.
-- Ask one judgment per question.
-- Put all evidence in `state`, the text that the model judges. For triage, you can put shared evidence in `context`.
+## Ask once
 
-## Tools
+Check the server instructions for available specs. Call `decision_ask` with `{"spec":"greeting","state":"hello there"}` if that spec exists. For an ad-hoc question, supply the question in the call:
 
-Call `decision_ask` with `{state, spec}` for a named calibrated question, or with `{state, questions: [{id, type, instructions, criteria}]}`.
+```json
+{"state":"The last four backups failed.","questions":[{"id":"investigate","type":"noul","instructions":"Does this message report a backup failure?"}]}
+```
 
-Call `decision_triage` with `{items: [...≤64], spec | question, context?, keep?, top_k?}`.
+Ask one judgment per question. Put instructions in the question and the evidence in `state`. Use code for exact rules and permission checks. Use the normal workflow for long documents and text generation.
 
-The triage result includes `rejected` model decisions and `prefiltered` unjudged indices. Do not treat embedding exclusions as confident rejections. Contextual inputs must fit the endpoint state limit. If triage returns an error, continue the normal work.
+- Use `noul` for yes/no. For `choice`, give `criteria` as a map of option names to descriptions. For `score`, supply level descriptions in order from lowest to highest. The verdict is a zero-based index.
+- Use `decision_triage` for up to 64 items with one `spec` or one inline `question`. Use `keep` for the option or minimum score to keep (default `yes` for noul). Optional shared `context` plus each item must fit the endpoint's state limit.
+- On `unsure` or an error, do the normal work. In triage, `rejected` contains judged items. The indices in `prefiltered` were never judged. Review them when a miss matters.
+- When a decision requests `report: true`, do the work. Use `decision_label` with the saved decision id and the observed answer if the outcome establishes it. For matters of taste, the user supplies the label.
 
 ## From a script
 
@@ -38,9 +40,3 @@ try:
 except Exception:
     verdict = "error"   # fail open: treat as "do the work"
 ```
-
-## Making a question reliable
-
-1. Add the question as a spec in the server configuration (`[specs.<name>]`). Review the spec like code.
-2. Use the spec. Then label real decisions with `8ball label <id> yes|no|<option>|<level>`.
-3. If you have 20 or more labeled examples per side, run `8ball calibrate <name>`. Results then report `calibrated: true`.
