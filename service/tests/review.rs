@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 
 use service::{DecisionsRequest, QuestionsRequest, ReviewRequest, Service};
 
+#[path = "support/common.rs"]
 mod common;
 
 /// `common::systemone` as endpoint `d3`.

@@ -2,6 +2,7 @@ use serde_json::json;
 
 use service::AskRequest;
 
+#[path = "support/common.rs"]
 mod common;
 
 async fn app() -> (

@@ -6,6 +6,7 @@ use domain::question::Question;
 
 use common::posts;
 
+#[path = "support/common.rs"]
 mod common;
 
 #[tokio::test]

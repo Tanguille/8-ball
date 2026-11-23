@@ -13,3 +13,4 @@
 !cli/**
 !bench/
 !bench/**
+**/tests/**

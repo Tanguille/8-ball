@@ -10,6 +10,7 @@ use domain::{config::BackendKind, question::Question};
 
 use common::{config, posts};
 
+#[path = "support/common.rs"]
 mod common;
 
 fn question() -> Question {

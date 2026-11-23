@@ -30,14 +30,15 @@ impl Embedder {
                 .post(format!("{}/v1/embeddings", self.config.url))
                 .timeout(std::time::Duration::from_secs(10))
                 .json(&serde_json::json!({"model":self.config.model,"input":batch}));
-            let response: serde_json::Value = crate::authed(request, self.api_key.as_deref())
+            let mut response: serde_json::Value = crate::authed(request, self.api_key.as_deref())
                 .send()
                 .await?
                 .error_for_status()?
                 .json()
                 .await?;
-            let data = response["data"]
-                .as_array()
+            let data = response
+                .get_mut("data")
+                .and_then(serde_json::Value::as_array_mut)
                 .ok_or_else(|| BackendError("embedder returned no data".into()))?;
             let mut ordered = vec![None; batch.len()];
             for entry in data {
@@ -46,7 +47,7 @@ impl Embedder {
                     .and_then(|index| usize::try_from(index).ok())
                     .filter(|index| *index < batch.len())
                     .ok_or_else(|| BackendError("embedder returned invalid index".into()))?;
-                let vector: Vec<f32> = serde_json::from_value(entry["embedding"].clone())
+                let vector: Vec<f32> = serde_json::from_value(entry["embedding"].take())
                     .map_err(|e| BackendError(e.to_string()))?;
                 if dimensions.is_some_and(|length| length != vector.len()) {
                     return Err(BackendError("embedder returned mixed dimensions".into()));

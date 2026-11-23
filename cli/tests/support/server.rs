@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "cargo also builds this file as a test crate of its own, which uses none of it"
-)]
-
 use std::io::{BufRead, Read};
 
 /// An `8ball serve` process with a fresh database, killed on drop.

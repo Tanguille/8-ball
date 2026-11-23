@@ -114,7 +114,10 @@ fn calibration_id_changes_with_fingerprint() {
 #[test]
 fn explore_draw_is_deterministic() {
     let first = verdict::explore_draw("question", "state one");
-    assert!((first - verdict::explore_draw("question", "state one")).abs() < f64::EPSILON);
+    assert_eq!(
+        first.to_bits(),
+        (f64::from(0x01d0_f38e_u32) / 4_294_967_296.0).to_bits()
+    );
     assert!((0.0..1.0).contains(&first));
     let second = verdict::explore_draw("question", "state two");
     assert!((0.0..1.0).contains(&second));

@@ -3,6 +3,7 @@ use serde_json::json;
 use domain::verdict;
 use service::{AskRequest, Service};
 
+#[path = "support/common.rs"]
 mod common;
 
 async fn fixture(

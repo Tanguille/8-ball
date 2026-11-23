@@ -3,8 +3,9 @@ use std::process::Command;
 use serde_json::{Value, json};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
-#[path = "../../service/tests/common.rs"]
+#[path = "../../service/tests/support/common.rs"]
 mod common;
+#[path = "support/server.rs"]
 mod server;
 
 fn serve(mock: &MockServer) -> server::Server {

@@ -468,6 +468,9 @@ impl Service {
         if !self.store.set_label(id, &value).await? {
             return Err(ServiceError::BadRequest(format!("no decision {id}")));
         }
+        if self.config.learning.recalibrate_after == 0 {
+            return Ok(LabelResponse { id, label: value });
+        }
         // A label serves every endpoint that answered this state, an escalated one's primary included.
         let endpoints = self
             .store
@@ -513,9 +516,6 @@ impl Service {
         endpoint: &str,
     ) -> Result<(), ServiceError> {
         let every = self.config.learning.recalibrate_after;
-        if every == 0 {
-            return Ok(());
-        }
         let question_hash = verdict::question_hash(question);
         let (calibration_id, backend) = self.calibration_id(endpoint, &question_hash).await?;
         // Only the states this endpoint answered, which its fit counts as examples, so an escalation endpoint that

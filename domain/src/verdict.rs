@@ -146,8 +146,8 @@ pub fn calibration_id(question_hash: &str, kind: BackendKind, fingerprint: &str)
 /// Deterministic draw in [0, 1) for one question and state, so exploration never flips an answer.
 #[must_use]
 pub fn explore_draw(question_hash: &str, state_hash: &str) -> f64 {
-    let hash = short_hash(&format!("{question_hash}\n{state_hash}"));
-    let draw = u32::from_str_radix(&hash[..8], 16).expect("short_hash is hex");
+    let hash = sha2::Sha256::digest(format!("{question_hash}\n{state_hash}"));
+    let draw = u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]);
 
     f64::from(draw) / (f64::from(u32::MAX) + 1.0)
 }
@@ -324,6 +324,7 @@ fn threshold(
     if !above {
         candidates.reverse();
     }
+    candidates.dedup();
     let min_side = (1.0 / (1.0 - target)).ceil();
 
     candidates.into_iter().find(|threshold| {

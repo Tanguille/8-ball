@@ -1,4 +1,4 @@
-#[path = "../../service/tests/common.rs"]
+#[path = "../../service/tests/support/common.rs"]
 mod common;
 
 async fn service(
