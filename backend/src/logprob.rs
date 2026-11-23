@@ -29,21 +29,21 @@ pub async fn ask(
         let response = endpoint.post_json(info, "/v1/chat/completions", body).await?;
         let generated = response["choices"][0]["logprobs"]["content"]
             .as_array()
-            .ok_or_else(|| BackendError("missing logprobs content".into()))?;
-        let entries = if reasoning == 0 {
+            .ok_or_else(|| BackendError("missing top_logprobs".into()))?;
+        let answer = if reasoning == 0 {
             generated.first()
         } else {
             answer_token(generated)
-        }
-        .ok_or_else(|| {
-            BackendError(if reasoning == 0 {
-                "missing top_logprobs".into()
-            } else {
-                format!("no answer within reasoning_tokens = {reasoning}; raise it")
-            })
-        })?["top_logprobs"]
-            .as_array()
-            .ok_or_else(|| BackendError("missing top_logprobs".into()))?;
+        };
+        let entries = answer
+            .and_then(|answer| answer["top_logprobs"].as_array())
+            .ok_or_else(|| {
+                BackendError(if reasoning == 0 {
+                    "missing top_logprobs".into()
+                } else {
+                    format!("no answer within reasoning_tokens = {reasoning}; raise it")
+                })
+            })?;
         let mut probabilities = vec![0.0; labels.len()];
         for entry in entries {
             let token = entry["token"]
