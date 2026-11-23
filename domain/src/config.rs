@@ -71,6 +71,8 @@ pub struct EndpointConfig {
     pub api_key_env: Option<String>,
     pub max_state_chars: Option<usize>,
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
+    /// For `kind = "logprob"` with a reasoning model: tokens the model may think before it answers. Unset or 0 asks for one token.
+    pub reasoning_tokens: Option<u32>,
     /// Spaces requests evenly to stay under a hosted provider's rate limit.
     pub requests_per_minute: Option<std::num::NonZeroU32>,
     /// Seconds one HTTP attempt may take once it has a slot; default 20. Waiting for a slot is not counted, and a retry gets its own budget.

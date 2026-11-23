@@ -11,8 +11,10 @@ pub async fn ask(
     futures::future::try_join_all(questions.iter().map(|question| async move {
         let (prompt, labels) = prompt(question, state)?;
         let noul = matches!(question.kind, Kind::Noul { .. });
+        let reasoning = endpoint.config.reasoning_tokens.unwrap_or(0);
         let mut body = serde_json::json!({
-            "max_tokens": 1,
+            // A few spare tokens after the thinking: the answer can follow whitespace tokens.
+            "max_tokens": if reasoning == 0 { 1 } else { reasoning + 4 },
             "temperature": 0,
             "logprobs": true,
             "top_logprobs": 20,
@@ -25,7 +27,21 @@ pub async fn ask(
             body[key] = value.clone();
         }
         let response = endpoint.post_json(info, "/v1/chat/completions", body).await?;
-        let entries = response["choices"][0]["logprobs"]["content"][0]["top_logprobs"]
+        let generated = response["choices"][0]["logprobs"]["content"]
+            .as_array()
+            .ok_or_else(|| BackendError("missing logprobs content".into()))?;
+        let entries = if reasoning == 0 {
+            generated.first()
+        } else {
+            answer_token(generated)
+        }
+        .ok_or_else(|| {
+            BackendError(if reasoning == 0 {
+                "missing top_logprobs".into()
+            } else {
+                format!("no answer within reasoning_tokens = {reasoning}; raise it")
+            })
+        })?["top_logprobs"]
             .as_array()
             .ok_or_else(|| BackendError("missing top_logprobs".into()))?;
         let mut probabilities = vec![0.0; labels.len()];
@@ -59,6 +75,25 @@ pub async fn ask(
         Ok(probabilities)
     }))
     .await
+}
+
+/// The first token after the thinking. Servers differ in whether `logprobs.content` holds the thinking tokens,
+/// so: start after the last end-of-thinking marker if one is there, else at the first token. Whitespace-only tokens are skipped.
+fn answer_token(generated: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    let start = generated
+        .iter()
+        .rposition(|entry| {
+            entry["token"]
+                .as_str()
+                .is_some_and(|token| token.contains("</think>"))
+        })
+        .map_or(0, |marker| marker + 1);
+
+    generated[start..].iter().find(|entry| {
+        entry["token"]
+            .as_str()
+            .is_none_or(|token| !token.trim().is_empty())
+    })
 }
 
 fn prompt(question: &Question, state: &str) -> Result<(String, Vec<String>), BackendError> {
