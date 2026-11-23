@@ -1,12 +1,10 @@
 # Calibration and learning
 
-Bands are score ranges that tell 8-ball when to give a clear answer. Outside those bands, 8-ball returns `unsure`. Calibration uses known answers, called labels, to adjust the bands.
+Bands are score ranges for clear answers. Outside them, 8-ball returns `unsure`. Calibration adjusts the bands using known answers, called labels.
 
-Precision is the share of clear answers on one side that are correct. Calibration sets a cutoff for each side, such as `yes` and `no`. It picks the cutoff that answers the most labeled cases while meeting the target precision. Set the target with `--precision`, which defaults to 0.95.
+Precision is the share of clear answers on one side that are correct. For each side, calibration picks the cutoff that answers the most labeled cases while meeting the target precision. Set the target with `--precision` (default 0.95).
 
 If the default bands are more precise than the target, calibration can trade some precision for more answers. To keep precision high, set a high target.
-
-A reranker scores how well the input matches the topic of the question. It returns `unsure` until you calibrate that question.
 
 ## Calibrate a saved question
 
@@ -16,7 +14,7 @@ Each side needs at least 1 / (1 − precision) labeled cases with clear answers.
 2. List unlabeled decisions with `8ball decisions --spec <spec> --unlabelled`. Save each label with `8ball label <id> <value>`. Use evidence such as the outcome of the work to choose the label. An agent can use `decision_review` and `decision_label`.
 3. Run `8ball calibrate <spec>`.
 
-The calibration report uses the same cases as calibration. For a separate test, use a holdout, which is a set of labeled cases that calibration did not use.
+The report uses the calibration cases. For an independent test, use a holdout. It contains labeled cases that calibration did not use.
 
 8-ball checks the model again every minute. If the question or the model file changes, 8-ball stops using the old calibration. A new llama.cpp build keeps the calibration if the model file stays the same. If `learning.ad_hoc` is on, 8-ball keeps separate calibrations for questions asked on the spot, keyed by their exact text.
 

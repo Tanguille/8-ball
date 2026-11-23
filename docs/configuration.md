@@ -2,7 +2,7 @@
 
 8-ball looks for `$XDG_CONFIG_HOME/8ball/config.toml` by default. If `XDG_CONFIG_HOME` is unset, it looks for `$HOME/.config/8ball/config.toml`.
 
-An endpoint is a model server that 8-ball can call. A spec is a saved question. The example gives both a name so that you can refer to them later.
+An endpoint is a model server. A spec is a saved question.
 
 8-ball rejects unknown top-level fields and unknown fields in `[endpoints.*]`, `[embedder]`, and `[learning]`. In `[specs.*]`, it ignores unknown fields and still checks that each question is valid.
 
@@ -45,7 +45,7 @@ ad_hoc = true                   # also learn ad-hoc questions, by their exact te
 
 The `decisions` backend sends System One questions and `model` to a hosted `/v1/decisions` API. If the hosted catalog lists each model's `endpoints`, 8-ball picks `decisions` or `logprob` for the configured `model`.
 
-If the first detection cannot reach the server, times out, or gets 502 or 503 from `/props`, the request fails. The next request tries detection again. If a later check fails, 8-ball keeps the known model.
+If the first detection fails to connect, times out, or gets 502 or 503 from `/props`, the request fails. The next request tries again. If a later check fails, 8-ball keeps the known model.
 
 8-ball retries a request once after a 502 or 503 response. It also retries a 429 response if `Retry-After` is at most 10 seconds. It waits at least 1 second before the 429 retry.
 
@@ -64,7 +64,7 @@ per_minute = 30                 # optional (default 30): model re-asks per minut
 escalate = false                # optional: keep this spec's `unsure` answers
 ```
 
-When `[escalation]` exists, 8-ball re-asks every `unsure` answer on the escalation endpoint before it returns. A request's `escalate` field wins, then the spec's `escalate`, else escalation is on. Without `[escalation]`, it is always off. A remembered answer does not escalate. The escalation endpoint judges the same trimmed state that the default endpoint saw. So give it a `max_state_chars` at least as large as the default endpoint's: a smaller limit trims the state again, and one label no longer serves both endpoints.
+When `[escalation]` exists, 8-ball re-asks every `unsure` answer on the escalation endpoint before it returns. A request's `escalate` field wins, then the spec's `escalate`, else escalation is on. Without `[escalation]`, it is always off. A remembered answer does not escalate. The escalation endpoint judges the same trimmed state that the default endpoint saw. Set its `max_state_chars` to at least the default endpoint's limit. A smaller limit trims the state again, so one label can no longer serve both endpoints.
 
 An escalation that fails, times out, or goes over `per_minute` keeps the `unsure` answer and logs a warning. The request deadlines also bound it; see [Decisions](http-api.md#decisions).
 
@@ -72,7 +72,7 @@ The escalation endpoint is usually a chat model with `kind = "logprob"` and thin
 
 ## Environment variables
 
-If you set both a flag and its environment variable, the flag takes priority.
+A flag takes priority over its environment variable.
 
 | Variable | Flag | Purpose |
 | --- | --- | --- |

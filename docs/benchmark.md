@@ -1,10 +1,6 @@
 # Benchmark
 
-We compared the models in the local setup with Qwen3.8 27B on the same questions. Each model used `8ball evaluate` with the same questions and the default decision thresholds. We ran the test without calibration. Every answer came from a new model call.
-
-d3 got 97.3% of the cases it decided right, compared with 97.0% for the 27B model. It took about one fifteenth as long on average. d3 returned `unsure` for 9% of the cases.
-
-Using the 27B model for those `unsure` cases raised the share of all correct answers by 1.8 points compared with the 27B alone. The 95% interval was 0.9 to 2.8 points. The combined approach ran 6.5 times as fast.
+We compare every model of the local stack with Qwen3.8 27B, a large local model, on the same questions. All models answer through `8ball evaluate`, with the same spec text and the default bands, without calibration. Each answer is a new model call.
 
 | Method | Decided | Wrong | Accuracy of decided | Correct of all | Correct vs 27B (95% CI) | Accuracy at 90% coverage | Mean time | Speed vs 27B |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -14,16 +10,16 @@ Using the 27B model for those `unsure` cases raised the share of all correct ans
 | Qwen3.8 27B (logprob) | 97% | 32 | 97.0% | 93.7% | baseline | 97.8% | 1280 ms | 1.0x |
 | d3, then 27B for `unsure` | 99% | 38 | 96.6% | 95.4% | +1.8 (+0.9 to +2.8) | 97.4% | 198 ms | 6.5x |
 
-Coverage is the share of cases that a model decides. Use these columns to compare accuracy and coverage together.
+The columns:
 
-- `Decided` counts `yes` and `no` as a share of all cases.
-- `Wrong` counts clear answers that were wrong.
-- `Accuracy of decided` is the share of clear answers that were right. Models can leave different numbers of difficult cases as `unsure`.
-- `Correct of all` is the share of all cases that got a right answer. This includes `unsure` cases in the total.
-- `Correct vs 27B` gives the difference in points for `Correct of all`. The paired bootstrap resamples the same cases for both models to estimate a 95% interval. If that interval includes 0, the run does not show a clear difference.
-- `Accuracy at 90% coverage` compares each method on the 90% of cases it scored highest. The ranking uses the larger of the `yes` and `no` probabilities.
+- **Decided**: the share of cases with a `yes` or `no` verdict. The others are `unsure`.
+- **Wrong**: decided cases with the wrong verdict.
+- **Accuracy of decided**: right verdicts among decided cases. Methods that decide different shares do not compare well on this column, because the cases that a method leaves `unsure` are the hard ones.
+- **Correct of all**: right verdicts among all cases. `unsure` counts as not right.
+- **Correct vs 27B**: the difference in "correct of all" from the 27B, in points, with a 95% interval from a paired bootstrap. If the interval contains 0, the difference is noise.
+- **Accuracy at 90% coverage**: each method decides the 90% of cases that it is most sure of, by its larger probability. This compares the models at the same coverage.
 
-Each cell below shows accuracy among decided cases, with the decided share in parentheses.
+On the cases that it decides, d3 is as accurate as the 27B (97.3% and 97.0%), and it is 15 times faster. d3 is `unsure` for 9% of the cases. If the 27B answers those cases, 1.8 points more of all cases get a right verdict than with the 27B alone (95% interval: 0.9 to 2.8 points), 6.5 times faster.
 
 | Method | spam | positive | lost-card |
 | --- | --- | --- | --- |
@@ -33,7 +29,9 @@ Each cell below shows accuracy among decided cases, with the decided share in pa
 | Qwen3.8 27B (logprob) | 97.7% (98%) | 96.3% (95%) | 97.1% (97%) |
 | d3, then 27B for `unsure` | 98.2% (99%) | 93.4% (98%) | 98.4% (99%) |
 
-## Test cases
+Each cell is the accuracy of decided cases, with the decided share in brackets.
+
+The cases:
 
 | Spec | Question | Dataset | Cases (yes / no) |
 | --- | --- | --- | --- |
@@ -41,26 +39,24 @@ Each cell below shows accuracy among decided cases, with the decided share in pa
 | `positive` | Is this movie review positive? | [SST-2](https://huggingface.co/datasets/stanfordnlp/sst2), validation | 200 / 200 |
 | `lost-card` | Is the customer asking about a lost, stolen, or compromised card, including fraud or someone else using their card? | [Banking77](https://huggingface.co/datasets/PolyAI/banking77), train and test, classes 22 and 41 | 119 / 200 |
 
-We use labels from public datasets. We pin each dataset to a specific revision. The SHA-256 hash of each text sets its order and assigns it to the `test` or `dev` group. This keeps case selection automatic.
+How we keep it fair:
 
-We use `dev` to refine questions and report results from `test`. The first `lost-card` question was "Does the customer report a lost, stolen, or compromised card?" It missed fraud cases that Banking77 labels `compromised_card`. The current question cut the 27B model's misses on `dev` from 8 to 4 out of 200. d3 stayed at 4 misses.
+- The labels come from public datasets. We did not write or label the cases.
+- The benchmark pins each dataset revision. The SHA-256 of each text puts the case in the `test` or the `dev` split, and orders the cases. So no person picks them.
+- We change questions only from results on `dev`, and we report only `test`. On `dev`, the first `lost-card` question ("Does the customer report a lost, stolen, or compromised card?") missed fraud cases, which Banking77 labels `compromised_card`. The current question halved the 27B's misses on `dev` (8 to 4 of 200), and kept d3 at 4.
+- Every model gets the same question. No model gets a prompt that is tuned for it.
+- We show all models, also those that do badly.
 
-Every model gets the same questions, and we report results for every model in the test.
+On 40 SST-2 cases, d3 on 4 CPU cores gave the same 40 verdicts as on the GPU, and P(yes) changed by at most 0.02. The [CI comparison](#ci) covers 600 cases and two models. Time depends on your hardware. The speed ratio is more stable, because all models run on the same machine. We measured on an AMD Ryzen AI 9 HX 370 with its Radeon 890M iGPU (Vulkan, all layers on the GPU), on 2026-11-10.
 
-## Hardware and limits
+Limits:
 
-We measured on 2026-11-10 with an AMD Ryzen AI 9 HX 370 and its Radeon 890M iGPU. We used Vulkan and ran all layers on the GPU. Times vary with hardware. The speed comparison uses the same machine for all models.
+- The reranker answers `unsure` without calibration, because its score shows topic match, not the answer. Its row shows what it would answer at 90% coverage.
+- Qwen3.5 0.8B is `unsure` for most cases with the default bands. Calibration can change this.
+- The cases are short texts, and there are 3 tasks. Long states and other questions can give other results.
+- The numbers come from 1 run. The 95% intervals show what is noise: about 1 to 2 points at this size.
 
-On 40 SST-2 cases, d3 gave the same answers on 4 CPU cores and on the GPU. The probability of `yes` changed by at most 0.02. The [CI comparison](#ci) covers 600 cases and two models.
-
-- The reranker scores how well a text matches the topic of the question. It returns `unsure` without calibration. Its 90% coverage result shows how it scores when the benchmark forces that coverage.
-- Qwen3.5 0.8B returned `unsure` for most cases with the default thresholds. Calibration can change this.
-- The benchmark uses short texts from 3 tasks. Longer inputs and different questions can give different results.
-- The numbers come from 1 run. At this size, the 95% intervals show about 1 to 2 points of uncertainty.
-
-## Run the benchmark
-
-Run these commands from the repository root. The 27B model is a 19 GB download.
+To run it yourself (the 27B model is a 19 GB download):
 
 ```sh
 dev/models.sh up
@@ -70,9 +66,7 @@ cargo run --release -p bench                 # test split, 200 cases per answer 
 cargo run --release -p bench -- --split dev  # to try a question change
 ```
 
-The `bench` crate uses the `8ball` binary from the same build. It prints tables for your model files and hardware. It saves each answer and its text to `target/bench/observations.json`. It writes counts per task to `target/bench/summary.json` and the tables for publication to `target/bench/page.md`.
-
-Run `cargo run -p bench -- --help` to see the options. You can choose other endpoints, a cascade, or extra configuration. Use `--baseline` to compare with an earlier `summary.json`.
+The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build. It saves each answer, with its text, to `target/bench/observations.json`, the counts per task to `target/bench/summary.json`, and the tables for the published page to `target/bench/page.md`. `cargo run -p bench -- --help` lists the options: other endpoints, a cascade, extra configuration, and `--baseline` to compare with an earlier `summary.json`.
 
 ## D3 v3.1 on llama.cpp
 

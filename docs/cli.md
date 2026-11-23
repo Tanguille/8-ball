@@ -1,34 +1,30 @@
 # CLI
 
-A spec is a question saved in the configuration. The state is the text that 8-ball judges. An endpoint is a model server listed in the configuration. Its `kind` sets how 8-ball talks to it.
-
-Use `noul` for yes or no, `choice` to pick one option, and `score` to pick a level. The lowest score level has position 0.
-
-Start an 8-ball server before you run client commands. The client refuses HTTP redirects. The commands `serve`, `mcp`, and `config check` run on their own.
+A spec is a named question in the configuration. The state is the text to judge. An endpoint is a configured model server. Its `kind` is the backend, which sets how 8-ball talks to that server. All commands except `serve`, `mcp`, and `config check` call a running server and refuse HTTP redirects.
 
 | Command | Purpose |
 | --- | --- |
-| `serve` | Start the REST and MCP server over HTTP. |
-| `mcp` | Start an MCP server that reads standard input and writes to standard output. |
-| `ask [<kind> <instructions>]` | Pass either a new question or `--spec` for a saved one. Pass the text with `--state` or through standard input. Use `--exit-code` to enable codes 1 and 3. |
-| `triage [<instructions>]` | Read a JSON array from standard input. Give either one new question or one `--spec`. Set the question type with `--type` (default `noul`). Use `--context-file` to pass shared evidence from a UTF-8 file. If you configure `[embedder]`, use `--top-k` to judge only the items most similar to the question. See [larger lists](#larger-lists). |
-| `observe` | Save decisions in a private file. The JSON output includes `wakeAgent: true` and every candidate. Pass `--spec`, `--input`, and `--observations`. The input is JSON with `context` text and up to 64 `items`. The observations path must be new. 8-ball writes one JSONL record there. |
-| `evaluate` | Read labeled JSONL cases from standard input and run them against a required `--spec`. Report misses, `unsure` verdicts, errors, and response times. Keep the current calibration. |
-| `questions` | List stored questions with counts for decisions, `unsure` answers, and labels. Use the list to find repeated questions worth saving as specs. |
-| `decisions --spec <spec>` | Show the current spec version's verdicts and input text, newest first. Use `--unlabelled` to hide labeled rows. Use `--question <hash>` for a one-off question. To view an older spec version, pass its hash with `--spec`. |
-| `label <id> <value>` | Save the known answer for a decision. Use `yes`, `no`, an option name, or the position of a score level. This works for current specs and, with `learning.ad_hoc` on, for one-off questions. |
-| `calibrate <spec>` | Set decision thresholds from known answers. `--precision` accepts 0.5 to 0.99 and defaults to 0.95. Use `--dry-run` to see the report without saving. |
-| `doctor` | Show how 8-ball detected each endpoint, whether it responds, the model fingerprint, and the calibration for each spec. |
-| `config check [<path>]` | Make sure that a TOML file is valid. If you omit `<path>`, 8-ball uses the [default configuration path](configuration.md), even if you set `EIGHTBALL_CONFIG`. |
+| `serve` | Run REST and HTTP MCP. |
+| `mcp` | Serve MCP over stdin and stdout. |
+| `ask [<kind> <instructions>]` | Ask one ad-hoc question or a `--spec`, not both. `--state` gives the state. The default is stdin. `--exit-code` enables exit codes 1 and 3. |
+| `triage [<instructions>]` | Judge a JSON array from stdin with one question or a `--spec`, not both. `--type` sets the question type (default `noul`). `--context-file` names a UTF-8 file with shared evidence for every item. `--top-k` judges only the items most similar to the question and needs `[embedder]`. An array of more than 64 items goes in requests of 64, one after another, and the output keeps the input indices. `--top-k` and identical items work within each group of 64. If one request fails, `triage` stops, prints nothing and exits 4. A new run gets the groups that were judged before the failure from the cache. |
+| `observe` | Record the triage decisions of a snapshot in a private file. Print JSON with `wakeAgent: true` and every candidate. It requires `--spec`, `--input` (JSON with `context` text and at most 64 `items`), and `--observations` (a new JSONL file, never overwritten). |
+| `evaluate` | Replay labeled JSONL cases from stdin against a required `--spec`. Report misses, `unsure` verdicts, errors, and latency. Calibration does not change. |
+| `questions` | List the stored questions with their decision, `unsure`, and label counts. Find ad-hoc questions that come back often, and save them as specs. |
+| `decisions --spec <spec>` | List the stored decisions of the current spec version, newest first, with verdicts and states. `--unlabelled` hides labeled ones. `--question <hash>` lists an ad-hoc question, or an older spec version together with `--spec`. |
+| `label <id> <value>` | Label a saved decision of a current spec, or of an ad-hoc question when `learning.ad_hoc` is on. The value is `yes`, `no`, an option name, or a level index. |
+| `calibrate <spec>` | Fit bands (decision thresholds) from labeled states. `--precision` takes 0.5 to 0.99 and defaults to 0.95. `--dry-run` reports without a save. |
+| `doctor` | Report endpoint detection, health, model fingerprints, and spec calibration. |
+| `config check [<path>]` | Make sure that a TOML file is valid, without a server. `<path>` defaults to the [configuration path](configuration.md), not `EIGHTBALL_CONFIG`. |
 
 | Shared flag | Commands | Purpose |
 | --- | --- | --- |
 | `--endpoint <name>` | `ask`, `triage`, `evaluate`, `observe` | Override the endpoint. |
-| `--option <name[=description]>`, `--level <text>` | `ask`, `triage` | Add a choice option or a score level. You can repeat either flag. Give score levels in order from lowest to highest. |
-| `--keep <value>` | `triage`, `evaluate` | For `noul`, keep `yes` by default or set `no`. For `choice` or `score`, set an option name or a minimum level index. |
-| `--no-learn` | `ask`, `triage` | Turn off remembered labels, exploration, and reports. This sends `"learn": false`. |
-| `--limit <n>` | `questions`, `decisions` | List up to this many rows. Set a number from 1 to 500. The default is 50. |
-| `--timeout-ms <ms>` | All that call a server | Set the request deadline in milliseconds, with a minimum of 1. The default is 25,000 for `observe` and `evaluate`. Other commands have no deadline by default. |
+| `--option <name[=description]>`, `--level <text>` | `ask`, `triage` | Add a choice option or a score level, lowest first. Both repeat. |
+| `--keep <value>` | `triage`, `evaluate` | Keep `yes` (default), `no`, an option name, or a minimum level index. The default works for noul only, so choice and score questions need `--keep`. |
+| `--no-learn` | `ask`, `triage` | Turn off remembered labels, exploration, and reports. It sends `"learn": false`. |
+| `--limit <n>` | `questions`, `decisions` | List at most this many rows, 1 to 500. The default is 50. |
+| `--timeout-ms <ms>` | All that call a server | Total request deadline, at least 1. The default is 25,000 for `observe` and `evaluate`, otherwise none. |
 
 [Environment variables](configuration.md#environment-variables) lists the other flags. `8ball --version` prints the version.
 
@@ -36,24 +32,12 @@ Start an 8-ball server before you run client commands. The client refuses HTTP r
 | --- | --- |
 | 0 | Success. With `--exit-code`, the verdict is `yes`, an option, or a level. |
 | 1 | With `--exit-code`, the noul verdict is `no`. |
-| 2 | The command rejected the arguments. |
+| 2 | The argument parser rejected the arguments. |
 | 3 | With `--exit-code`, the verdict is `unsure`. |
-| 4 | Any other error. For example, `ask` needs `--spec` or `<kind> <instructions>`. For `doctor`, the default endpoint failed. For `evaluate`, a case failed. |
+| 4 | Any other error, for example `ask` with neither `--spec` nor `<kind> <instructions>`. For `doctor`, the default endpoint failed. For `evaluate`, a case failed. |
 
-`observe` reports input, model, and write errors in its JSON and still exits with code 0.
+`observe` exits 0 after input, model, and write errors. Its JSON reports them.
 
-## Larger lists
+`results[].id` is the saved row id for `label`. `results[].question` is the question id of the caller. `results[].type` is the question type. An identical request within a spec reuses a row. Ad-hoc questions and different specs have separate rows. Invalid backend probabilities return a backend error.
 
-For arrays with more than 64 items, `triage` sends groups of 64 in order. The output keeps each item's original position. The `--top-k` filter and identical-item matching apply within each group. If a request fails, `triage` stops without printing a result and exits with code 4. On a retry, it can reuse saved answers from the groups that finished.
-
-## Read an answer
-
-Use `results[].id` to label the saved decision. The `results[].question` field holds the question id that the caller sent. The `results[].type` field holds the question type. When you repeat the same request for a spec, 8-ball reuses its row. Each spec and each one-off question has a separate set of rows. If the model server returns invalid probabilities, 8-ball returns a backend error.
-
-A result can include these fields.
-
-- `report: true` asks you to do the work. Then label the id with what you found.
-- `explored: true` means that 8-ball wants you to look at an item the model would skip (`noul` `no` or triage `rejected`). The verdict is `unsure`.
-- `remembered: true` means that 8-ball used a label from an earlier answer to the same question and text.
-
-For `/v1/ask` and `/v1/triage`, pass `"learn": false` to turn these three features off for one request. The default is `true`.
+A result can also have `report`, `explored`, and `remembered`. `report: true` asks the caller to do the work, then label the id with what the work showed. `explored: true` means that the model skipped the item (noul `no`, triage `rejected`), but 8-ball returns `unsure` so that the caller checks it. `remembered: true` means that the verdict is a label reported earlier for the same question and state. `/v1/ask` and `/v1/triage` take `"learn": false` (default `true`) to turn all 3 off for one request.

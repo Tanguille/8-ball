@@ -1,12 +1,10 @@
 # Examples
 
-Run `dev/models.sh up` to start the development models. Then run `8ball serve --config dev/config.toml` to start 8-ball.
-
-We took these results from the first run with an empty database. The run used the default decision thresholds, with no calibration. Results can vary between runs and with different models, hardware, or versions.
+Start 8-ball as shown in the [quickstart](../README.md#quickstart). These results use an empty database and the default decision thresholds. Results vary with the run, model, hardware, or version.
 
 ## Ask a saved question
 
-A spec is a question saved in the configuration. Use `--state` to pass the text that 8-ball judges. The command prints one line of JSON. The pipe to `jq` formats it for reading.
+Pass the text with `--state` and format the JSON with `jq`.
 
 ```sh
 8ball ask --spec greeting --state "hey there, how are you?" | jq
@@ -36,7 +34,7 @@ A spec is a question saved in the configuration. Use `--state` to pass the text 
 }
 ```
 
-`confidence` shows how sure the model is. The decision thresholds determine which answer 8-ball returns. If confidence is too low, 8-ball returns `unsure`. Do the work as usual in that case.
+`confidence` shows how sure the model is. If it is too low, the verdict is `unsure`.
 
 ## Ask a question on the spot
 
@@ -70,7 +68,7 @@ A score verdict is the position of the chosen level, starting at 0 for the lowes
 
 ## Filter a list
 
-Use `triage` to judge a list of items with the same question. An index in the output is the item's original position, starting at 0. See the [alert example](../README.md#skip-the-alerts-that-do-not-matter).
+See the [alert example](../README.md#skip-the-alerts-that-do-not-matter). Each index in the output is an item's original position, starting at 0.
 
 ## Use the answer in a shell script
 
@@ -86,7 +84,7 @@ Agents can ask questions with `decision_ask` or filter lists with `decision_tria
 
 ## Search code by behavior
 
-The [code search script](../examples/code-search.sh) uses ripgrep to find blocks that match a few keywords. 8-ball judges each block against your question. The script searches the files on disk, so it includes uncommitted edits and works without an index.
+The [code search script](../examples/code-search.sh) finds blocks with ripgrep and asks 8-ball whether they match. It searches your files directly, including uncommitted edits.
 
 ```sh
 examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|401' service/src
