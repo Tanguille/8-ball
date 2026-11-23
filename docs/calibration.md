@@ -1,28 +1,32 @@
 # Calibration and learning
 
-Bands select the decisive verdicts at the requested precision. The other verdicts are `unsure`.
+Bands are score ranges for clear answers. Outside them, 8-ball returns `unsure`. Calibration adjusts the bands using known answers, called labels.
 
-For each side, calibration picks the loosest threshold whose labeled answers still reach the target precision (`--precision`, default 0.95). So calibration makes a question decide more cases at that precision. It does not make verdicts safer than the default bands. If the defaults are already more precise than the target, calibration gives lower precision for more coverage. To keep high precision, ask for a high target.
+Precision is the share of clear answers on one side that are correct. For each side, calibration picks the cutoff that answers the most labeled cases while meeting the target precision. Set the target with `--precision` (default 0.95).
 
-A reranker answers `unsure` until you calibrate the question, because its score shows topic match, not the answer.
+If the default bands are more precise than the target, calibration can trade some precision for more answers. To keep precision high, set a high target.
 
-To calibrate a spec:
+## Calibrate a saved question
 
-1. Save the question as a reviewed spec in the configuration.
-2. Label real decisions on each side. A side needs at least 1 / (1 − precision) decided labels: 20 for 0.95, 50 for 0.98, and 100 for 0.99. With fewer, a first calibration stops that side from deciding, and a refit keeps its previous threshold. `8ball decisions --spec <spec> --unlabelled` lists them, and `8ball label <id> <value>` saves a label. An agent can do the same with `decision_review` and `decision_label`. Label only from evidence, such as the outcome of the work.
+Each side needs at least 1 / (1 − precision) labeled cases with clear answers. That means 20 for 0.95, 50 for 0.98, and 100 for 0.99. With fewer labels, the first calibration stops that side from giving clear answers. Later calibrations keep that side's previous cutoff.
+
+1. Review the question and save it as a spec in the configuration.
+2. List unlabeled decisions with `8ball decisions --spec <spec> --unlabelled`. Save each label with `8ball label <id> <value>`. Use evidence such as the outcome of the work to choose the label. An agent can use `decision_review` and `decision_label`.
 3. Run `8ball calibrate <spec>`.
 
-Reports are in-sample, so evaluate a separate holdout (labeled cases that calibration did not use). A change to the question or the model file invalidates its calibration identity. A new llama.cpp build of the same file does not. 8-ball checks the model again every minute. Ad-hoc questions learn by their exact text when `learning.ad_hoc` is on. They get their own calibration, apart from specs.
+The report uses the calibration cases. For an independent test, use a holdout. It contains labeled cases that calibration did not use.
 
-On 160 separate D3 sentiment development cases, bands fitted on 240 labeled cases at a 95% target raised the correct count from 122 to 143 and the wrong count from six to nine. A wording change tried on the 200-case test split lowered the wrong count from 10 to six and the correct count from 152 to 150. We kept the original wording and bands for this spec. Check both counts on unseen cases before accepting a fit.
+8-ball checks the model again every minute. If the question or the model file changes, 8-ball stops using the old calibration. A new llama.cpp build keeps the calibration if the model file stays the same. If `learning.ad_hoc` is on, 8-ball keeps separate calibrations for questions asked on the spot, keyed by their exact text.
 
-8-ball also refits an endpoint's bands by itself each time its labelled states pass a multiple of `recalibrate_after`. This refit uses only cached answers, so it makes no model calls. A side without enough evidence keeps its threshold. Manual `8ball calibrate` still works for specs. Keep `recalibrate_after = 0` during a holdout comparison, so that the calibration stays fixed.
+On 160 separate D3 sentiment development cases, calibration raised the correct count from 122 to 143 and the wrong count from six to nine. It used 240 labeled cases and a 95% target. On the 200-case test split, a wording change lowered the wrong count from 10 to six and the correct count from 152 to 150. We kept the original wording and bands for this spec. Before you accept a calibration, check both counts on unseen cases.
 
-Each endpoint has its own bands and cache. The escalation endpoint is fitted only on the cases it receives, which are the default endpoint's `unsure` answers. A label serves every endpoint that judged its state, so it refits each of them. Each endpoint counts only the labelled states it judged toward `recalibrate_after`. Review lists each case once.
+8-ball recalibrates each endpoint when its labeled cases pass a multiple of `recalibrate_after`. It uses saved answers for this step, so it makes no model calls. A side without enough labels keeps its cutoff. You can still run `8ball calibrate` for a spec. During a holdout comparison, set `recalibrate_after = 0` to keep the calibration fixed.
+
+Each endpoint has its own bands and cache. The escalation endpoint uses only the cases where the default endpoint returned `unsure`. A label applies to every endpoint that judged the case. Each endpoint counts only the cases it judged toward `recalibrate_after`. The review tools list each case once.
 
 ## Learning upgrade notes
 
-- With the defaults, about `explore` (5%) of skipped answers come back as `unsure`. This is extra work by design. `report = false` also stops exploration.
-- Metrics count explored answers as `unsure`, and remembered answers as `cached`. The `questions` and `decisions` listings show the stored model verdict, so an explored answer keeps its model verdict there.
+- By default, 8-ball returns about 5% of answers it would skip as `unsure`. This gives the agent a sample to review. Set the share with `explore`. Set `report = false` to stop exploration.
+- Metrics count explored answers as `unsure` and remembered answers as `cached`. The `questions` and `decisions` listings show the saved model verdict, even for explored answers.
 - A label becomes the answer for that exact question and state. Anyone with the API key can set it. To fix a wrong label, label the same id again.
 - To turn learning off, set `report = false`, `remember = false`, `explore = 0.0`, `recalibrate_after = 0`, and `ad_hoc = false`.
