@@ -3,19 +3,21 @@
 > [!WARNING]
 > 8-ball is in early development. Commands, APIs, configuration, and the database format can change without notice. Use it at your own risk.
 
-**Ask a small model before you pay a big one.**
+8-ball helps AI agents decide what is worth their time. A small local model can pick which links to read, which alerts need attention, or where a support ticket belongs. If 8-ball returns `unsure`, the agent does the work as usual.
 
-Agents spend seconds and tokens to read alerts, tickets, and files, often only to decide "not relevant". 8-ball gives that decision to a small local model. On the pinned dev models, an answer takes about 0.08 seconds. A repeated question comes from the cache in less than 0.01 seconds. If the model is not sure, it says `unsure`, and you do the normal work.
+## Find the links worth reading
 
-Our [benchmark](docs/benchmark.md) has 1,119 public cases. On the cases that it decides, the d3 decision model is as accurate as Qwen3.8 27B, and it is 15 times faster. If the 27B answers the cases where d3 is `unsure`, you get more right verdicts than with the 27B alone, 6.5 times faster.
+Say you ask an agent why your tomato plants are turning yellow. It finds 30 links and sends their titles and short descriptions to 8-ball. It asks, “Does this page explain why tomato leaves turn yellow?” The agent reads the pages that 8-ball keeps or marks `unsure`.
+
+Once you [connect 8-ball to your agent](docs/mcp-clients.md) through the plugin or MCP, the agent can ask questions on the spot. It needs no script or saved question. Reading fewer pages saves tokens and leaves more room for useful information during long tasks.
 
 ## What you can do with it
 
-The examples use the specs in [`dev/config.toml`](dev/config.toml). Start the model stack with `dev/models.sh up` (about 4.5 GB on the first run), then `8ball serve --config dev/config.toml`.
+Install `8ball` as shown in the [quickstart](#quickstart). Run `dev/models.sh up` to start the models for these examples. The first run downloads about 4.5 GB. Then run `8ball serve --config dev/config.toml` to start 8-ball with the [example configuration](dev/config.toml).
 
 ### Skip the alerts that do not matter
 
-Judge the alerts first. Your agent then reads only the alerts that 8-ball keeps:
+A spec is a question saved in the configuration. The `storage-risk` spec helps an agent find the alerts that need attention.
 
 ```sh
 echo '["Primary database is down, all writes fail", "Weekly report is ready", "Backups have failed for the last 4 nights", "New comment on your blog post"]' \
@@ -27,9 +29,11 @@ echo '["Primary database is down, all writes fail", "Weekly report is ready", "B
 {"kept":[0,2],"rejected":[1,3],"unsure":[]}
 ```
 
-Why it pays: the big model reads 2 alerts, not 4.
+8-ball keeps two alerts for the agent to read.
 
 ### Route tickets without a big model
+
+Ask 8-ball to choose a team based on the text of a support ticket.
 
 ```sh
 8ball ask choice "Which team should handle this ticket?" \
@@ -44,11 +48,11 @@ Why it pays: the big model reads 2 alerts, not 4.
 {"verdict":"billing","confidence":0.99}
 ```
 
-Why it pays: a local call replaces a paid call for each ticket.
+8-ball returns `billing` so that the agent knows where to send the ticket.
 
 ### Search code by behavior
 
-In [`examples/code-search.sh`](examples/code-search.sh), ripgrep finds the blocks that match a few keywords. 8-ball keeps the blocks that do the behavior.
+The [code search script](examples/code-search.sh) uses ripgrep to find code that matches your keywords. 8-ball then judges whether each block does what you asked for.
 
 ```sh
 examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|401' service/src
@@ -60,29 +64,37 @@ examples/code-search.sh "reject a request with a wrong API key" 'api_key|bearer|
 {"verdict":"check","file":"service/src/lib.rs","lines":"370-402","confidence":0.02}
 ```
 
-Why it pays: the agent reads the matching blocks, not every file that has a keyword. You need no index. [More about the limits](docs/examples.md#search-code-by-behavior).
+The agent can start with the blocks marked `match` and read the ones marked `check` when 8-ball is unsure. The script reads the files on disk, so it works without a search index. See the [code search limits](docs/examples.md#search-code-by-behavior).
 
 ### Gate a script
+
+Use the answer to decide whether a script pages the on-call person.
 
 ```sh
 if 8ball ask --spec storage-risk --state "$ALERT" --exit-code > /dev/null; then page_oncall; fi
 ```
 
-Exit code 0 is `yes`, 1 is `no`, and 3 is `unsure`. Any error, such as a spec that is not configured or a server that is down, exits 4, which this `if` treats as `no`, so an alert is not paged. Test for 4 if a missed page costs more than a false one. See the [CLI](docs/cli.md).
+With `--exit-code`, 0 means `yes`, 1 means `no`, and 3 means `unsure`. A missing spec or a server error returns 4. This example pages only on 0. If a missed page costs more than a false one, handle code 4 too. See the [CLI reference](docs/cli.md).
 
 ### Get better with use
 
-Label the outcome of the work. 8-ball then fits its thresholds to the precision that you ask for. It also remembers your labels for the same question and state. See [calibration and learning](docs/calibration.md).
+After you do the work, give 8-ball the answer that the evidence supports. 8-ball can remember that answer for the same question and input. It can also use labels to adjust when it says `unsure`. See [calibration and learning](docs/calibration.md).
 
 ## How it works
 
-A question is `noul` (yes or no), `choice` (pick one option), or `score` (pick a level). The verdict is the answer. A low confidence gives `unsure`. Each answer goes into a SQLite cache.
+A question can ask for yes or no (`noul`), one option (`choice`), or a level (`score`). The verdict is the answer that 8-ball returns. When confidence is too low, the verdict is `unsure`. 8-ball saves each answer in SQLite for reuse.
 
-8-ball is a Rust server and CLI. It uses System One decision models and rerankers on llama.cpp servers. It also uses chat models through logprobs on any OpenAI-compatible server that returns them, such as vLLM. Claude Code, Codex, Cursor, qwen-code, and OpenCode connect over MCP. Scripts use the CLI or REST.
+8-ball is a Rust server with a command-line tool. Claude Code, Codex, Cursor, qwen-code, and OpenCode connect over MCP. Scripts use the command-line tool or the HTTP API.
 
-The times come from `dev/models.sh up` with GPU offload, `8ball serve --config dev/config.toml`, and `/usr/bin/time` around `8ball ask`. Other models and hardware give other numbers.
+8-ball supports System One decision models and rerankers on llama.cpp. A reranker scores how well an input matches the topic of a question. 8-ball also supports chat models on OpenAI-compatible servers such as vLLM if they return logprobs, which measure the likelihood of each answer token.
+
+On the development models, an answer takes about 0.08 seconds. A repeat answer takes less than 0.01 seconds. These times use GPU offload with `dev/models.sh up` and `8ball serve --config dev/config.toml`. We measured `8ball ask` with `/usr/bin/time`. Times vary with the model and hardware.
+
+In our [benchmark](docs/benchmark.md) of 1,119 public cases, d3 was about as accurate as Qwen3.8 27B on the cases it decided. It answered 15 times as fast. Using the 27B model for cases where d3 returned `unsure` got more answers right than the 27B alone and ran 6.5 times as fast.
 
 ## Quickstart
+
+From the repository root, install `8ball` and start the development models.
 
 ```sh
 cargo install --path cli
@@ -90,7 +102,7 @@ dev/models.sh up        # four pinned dev models, about 4.5 GB
 mkdir -p ~/.config/8ball
 ```
 
-Write `~/.config/8ball/config.toml`:
+Create `~/.config/8ball/config.toml` with this content.
 
 ```toml
 default = "d3"
@@ -103,14 +115,19 @@ type = "noul"
 instructions = "Is this message a greeting?"
 ```
 
-Then start the server, and ask in another terminal:
+Start the server.
 
 ```sh
 8ball serve
+```
+
+Ask a question from a second terminal.
+
+```sh
 8ball ask --spec greeting --state "hey there"
 ```
 
-For a shared server, set `EIGHTBALL_URL` and `EIGHTBALL_API_KEY`, then run `8ball doctor`. For CPU inference, use `EIGHTBALL_DEV_NGL=0 dev/models.sh up`.
+For a shared server, set `EIGHTBALL_URL` and `EIGHTBALL_API_KEY`. Then run `8ball doctor`. To run the models on a CPU, use `EIGHTBALL_DEV_NGL=0 dev/models.sh up`.
 
 ## Docs
 
@@ -121,9 +138,9 @@ For a shared server, set `EIGHTBALL_URL` and `EIGHTBALL_API_KEY`, then run `8bal
 | [CLI](docs/cli.md) | Commands, flags, exit codes |
 | [HTTP and MCP API](docs/http-api.md) | Routes, authentication, MCP tools |
 | [Configuration](docs/configuration.md) | TOML file, environment variables, thinking chat models |
-| [Calibration and learning](docs/calibration.md) | Labels, bands, and the learning loop |
+| [Calibration and learning](docs/calibration.md) | Use known answers to improve decisions |
 | [MCP clients](docs/mcp-clients.md) | Claude Code, Codex, Cursor, qwen-code, OpenCode |
 | [Container image and Helm chart](docs/deploy.md) | Run it on a server or in Kubernetes |
 | [Privacy](docs/privacy.md) | What is stored and where requests go |
-| [Hermes pilot](docs/hermes-triage.md) | GitOps digest pre-check and holdout replay |
+| [Hermes pilot](docs/hermes-triage.md) | Test which GitOps updates are worth a closer look |
 | [Development](docs/development.md) | Checks, dev models, live tests |

@@ -1,6 +1,10 @@
 # Configuration
 
-The default path is `$XDG_CONFIG_HOME/8ball/config.toml`, otherwise `$HOME/.config/8ball/config.toml`. 8-ball rejects unknown fields at the top level, in `[endpoints.*]`, `[embedder]`, and `[learning]`. It ignores unknown fields in `[specs.*]`, but rejects invalid questions.
+8-ball looks for `$XDG_CONFIG_HOME/8ball/config.toml` by default. If `XDG_CONFIG_HOME` is unset, it looks for `$HOME/.config/8ball/config.toml`.
+
+An endpoint is a model server that 8-ball can call. A spec is a saved question. The example gives both a name so that you can refer to them later.
+
+8-ball rejects unknown top-level fields and unknown fields in `[endpoints.*]`, `[embedder]`, and `[learning]`. In `[specs.*]`, it ignores unknown fields and still checks that each question is valid.
 
 ```toml
 default = "d3"            # required: name of the endpoint used when none is given
@@ -37,7 +41,17 @@ recalibrate_after = 20          # refit an endpoint's bands each time its labell
 ad_hoc = true                   # also learn ad-hoc questions, by their exact text
 ```
 
-`[embedder]` also takes an optional `api_key_env`. `concurrency` must be positive. `rerank` supports noul only. A reranker scores how well the state matches the topic of the question, not if the answer is yes. So its answers stay `unsure` until you [calibrate](calibration.md) the question. `decisions` sends System One questions, with `model`, to a hosted `/v1/decisions` API. Auto-detection reads `/props` and `/v1/models`. If the first detection cannot reach the server, times out, or gets a 502 or 503 from `/props` while the server loads a model or restarts, the request fails, and the next request detects again. A later check that fails keeps the known model. A hosted catalog that lists each model's `endpoints` selects `decisions` or `logprob` for the configured `model`. 8-ball tries a request once more after a 429 response with a `Retry-After` of 10 seconds or less (it waits at least 1 second), or after a 502 or 503 response. If a state exceeds `max_state_chars`, 8-ball removes its middle. The order of choice options and score levels matters.
+`[embedder]` also accepts `api_key_env`. Set `concurrency` to a positive number. If you omit `kind`, 8-ball reads `/props` and `/v1/models` to detect the server type.
+
+The `decisions` backend sends System One questions and `model` to a hosted `/v1/decisions` API. If the hosted catalog lists each model's `endpoints`, 8-ball picks `decisions` or `logprob` for the configured `model`.
+
+If the first detection cannot reach the server, times out, or gets 502 or 503 from `/props`, the request fails. The next request tries detection again. If a later check fails, 8-ball keeps the known model.
+
+8-ball retries a request once after a 502 or 503 response. It also retries a 429 response if `Retry-After` is at most 10 seconds. It waits at least 1 second before the 429 retry.
+
+A reranker scores how well input text matches the topic of a question. The `rerank` backend only supports yes-or-no questions (`noul`). It returns `unsure` until you [calibrate](calibration.md) the question.
+
+If the input text is longer than `max_state_chars`, 8-ball removes text from the middle. For `choice` and `score`, the order of options and levels matters.
 
 ## Escalation
 
@@ -58,12 +72,12 @@ The escalation endpoint is usually a chat model with `kind = "logprob"` and thin
 
 ## Environment variables
 
-A flag overrides its variable.
+If you set both a flag and its environment variable, the flag takes priority.
 
 | Variable | Flag | Purpose |
 | --- | --- | --- |
 | `EIGHTBALL_CONFIG` | `--config` | Configuration path for `serve` and `mcp` |
-| `EIGHTBALL_CONFIG_TOML` | `--config-toml` | Configuration TOML text for `serve` and `mcp`, instead of a file. You cannot also set `EIGHTBALL_CONFIG`. |
+| `EIGHTBALL_CONFIG_TOML` | `--config-toml` | TOML text for `serve` and `mcp`. Leave `EIGHTBALL_CONFIG` unset when you use this variable. |
 | `EIGHTBALL_LISTEN` | `--listen` | `serve` listen address (default `127.0.0.1:8080`, image default `0.0.0.0:8080`) |
 | `EIGHTBALL_DB` | `--db` | SQLite path for `serve` and `mcp` (default `$XDG_STATE_HOME/8ball/8ball.db`, otherwise `$HOME/.local/state/8ball/8ball.db`) |
 | `EIGHTBALL_API_KEY` | `--api-key` | Bearer key for the server and the client. `serve` rejects an empty key. |
@@ -72,4 +86,6 @@ A flag overrides its variable.
 
 ## Thinking chat models
 
-The logprob backend needs a one-token answer, so you must disable reasoning. Set `extra_body = { reasoning_effort = "none" }`. For Qwen on vLLM, set `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. The pinned local Qwen server also starts with `--reasoning-budget 0`.
+The `logprob` backend needs a one-token answer. Turn off reasoning with `extra_body = { reasoning_effort = "none" }`.
+
+For Qwen on vLLM, set `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. The local Qwen server in the development setup also starts with `--reasoning-budget 0`.

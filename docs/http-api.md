@@ -1,29 +1,33 @@
 # HTTP and MCP API
 
-If `EIGHTBALL_API_KEY` is set on the server, the protected routes need `Authorization: Bearer <key>`. A missing or wrong key returns 401. Without a key, `/mcp` and `/v1` accept only the hosts `localhost`, `127.0.0.1`, and `::1`, and other hosts get 403. This check stops a web page from reaching a local server through DNS rebinding. To serve other hosts, set a key.
+If the server has `EIGHTBALL_API_KEY` set, send `Authorization: Bearer <key>` to use a protected route. The server returns 401 if the key is missing or wrong.
+
+Without a key, `/mcp` and `/v1` accept only the hosts `localhost`, `127.0.0.1`, and `::1`. Other hosts get 403. This restriction stops a web page from reaching the local server through DNS rebinding. To serve other hosts, set a key.
 
 | Route | Protected | Purpose |
 | --- | --- | --- |
-| `POST /v1/ask`, `POST /v1/triage` | Yes | Take the input of `decision_ask` and `decision_triage`. |
-| `POST /v1/label`, `POST /v1/calibrate` | Yes | Take the CLI arguments as JSON: `id`, `value`, `spec`, `precision`, `dry_run`. |
-| `POST /v1/questions`, `POST /v1/decisions` | Yes | Take the CLI arguments as JSON: `limit`, `spec`, `question`, `unlabelled`. `limit` is 1 to 500, and 50 by default. Each `/v1/decisions` row has the `endpoint` that answered. |
+| `POST /v1/ask`, `POST /v1/triage` | Yes | Accept the same input as `decision_ask` and `decision_triage`, respectively. |
+| `POST /v1/label`, `POST /v1/calibrate` | Yes | Accept the CLI arguments as JSON. Use `id` and `value` for a label. Use `spec`, `precision`, and `dry_run` for calibration. |
+| `POST /v1/questions`, `POST /v1/decisions` | Yes | Accept the CLI arguments as JSON, including `limit`, `spec`, `question`, and `unlabelled` where applicable. Set `limit` from 1 to 500. The default is 50. Every `/v1/decisions` row includes the `endpoint` that answered. |
 | `GET /v1/doctor` | Yes | Return the `doctor` report. |
 | `/mcp` | Yes | Serve HTTP MCP. |
 | `GET /healthz` | No | Return `ok`. |
-| `GET /metrics` | No | Return OpenMetrics: `eightball_decisions_total` (with a `cached` label), `eightball_backend_errors_total` (missed request deadlines included), `eightball_trimmed_states_total`, `eightball_escalations_total` (with `endpoint` and `outcome`: `decided`, `unsure`, `error`, `budget`), and the histogram `eightball_backend_request_duration_seconds`. |
+| `GET /metrics` | No | Return OpenMetrics. Counters include `eightball_decisions_total` (with `cached`), `eightball_backend_errors_total` (including missed deadlines), and `eightball_trimmed_states_total`. The `eightball_escalations_total` counter has `endpoint` and `outcome` labels. Its outcomes are `decided`, `unsure`, `error`, and `budget`. The histogram is `eightball_backend_request_duration_seconds`. |
 | `POST /register`, `GET /.well-known/{*rest}` | No | Return 404, because 8-ball does not use OAuth. |
 
-Service, authentication, and host errors are JSON with an `error` field. Rejected request bodies return plain text.
+The server returns a JSON `error` field for service, authentication, and host errors. If it rejects the request body, it returns plain text.
 
 ## MCP tools
 
+The state is the input text. A spec is a saved question.
+
 | Tool | Purpose |
 | --- | --- |
-| `decision_ask` | Ask typed questions about `state`. It takes `spec` or `questions`, and an optional `endpoint`, `learn`, and `escalate`. |
-| `decision_triage` | Judge at most 64 `items` with one `spec` or `question`. It also takes optional `context`, `keep`, `top_k`, `endpoint`, `learn`, and `escalate`. Every index is in exactly one of `kept`, `unsure`, `rejected`, or `prefiltered` (the items that `top_k` leaves out). Identical items share one decision. |
-| `decision_questions` | List the stored questions with their decision, `unsure`, and label counts. |
-| `decision_review` | List the unlabeled decisions of a `spec` with their ids and states. It leaves out the model's answer, so a label stays independent. |
-| `decision_label` | Label a decision `id` with a `value`, as `label` does. Agents call it for each decision with `report: true`, after the work. |
+| `decision_ask` | Ask questions about `state`. Pass `spec` for a saved question or `questions` to define your own. The `endpoint`, `learn`, and `escalate` fields are optional. |
+| `decision_triage` | Judge up to 64 `items` with one `spec` or `question`. The `context`, `keep`, `top_k`, `endpoint`, `learn`, and `escalate` fields are optional. Each index appears once in `kept`, `unsure`, `rejected`, or `prefiltered`. The `prefiltered` group holds the items that `top_k` left out. Identical items share one decision. |
+| `decision_questions` | List saved questions with counts for decisions, `unsure` answers, and labels. |
+| `decision_review` | List unlabeled decisions for a `spec`, with their ids and input text. The tool hides the model's answer so that you can label the decision independently. |
+| `decision_label` | Save a label `value` for a decision `id`, as with the CLI `label` command. After you do the work, call this for each decision with `report: true`. |
 
 ## Decisions
 
