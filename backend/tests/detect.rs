@@ -5,7 +5,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 use backend::Endpoint;
 use domain::config::BackendKind;
 
-#[path = "support/common.rs"]
+#[path = "utils/common.rs"]
 mod common;
 
 async fn models(server: &MockServer, body: serde_json::Value) {

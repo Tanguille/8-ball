@@ -7,7 +7,7 @@ use service::Service;
 
 use common::requests;
 
-#[path = "../../service/tests/support/common.rs"]
+#[path = "../../service/tests/utils/common.rs"]
 mod common;
 
 struct App {

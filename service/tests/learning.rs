@@ -6,7 +6,7 @@ use service::{Decision, TriageResponse};
 
 use common::{indices, label_under_old_model, requests};
 
-#[path = "support/common.rs"]
+#[path = "utils/common.rs"]
 mod common;
 
 struct App {

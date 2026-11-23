@@ -7,9 +7,9 @@ use backend::{Endpoint, embed};
 use domain::{config::Config, question::Question, verdict};
 use service::Service;
 
-#[path = "../../service/tests/support/common.rs"]
+#[path = "../../service/tests/utils/common.rs"]
 mod common;
-#[path = "support/server.rs"]
+#[path = "utils/server.rs"]
 mod server;
 
 async fn require(port: u16) {

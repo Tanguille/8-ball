@@ -3,7 +3,7 @@ use serde_json::json;
 use tempfile::Builder;
 use wiremock::MockServer;
 
-#[path = "support/common.rs"]
+#[path = "utils/common.rs"]
 mod common;
 
 async fn serve(mock: &MockServer, database_path: &std::path::Path) -> String {

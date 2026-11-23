@@ -8,7 +8,7 @@ use service::TriageResponse;
 
 use common::{indices, requests};
 
-#[path = "../../service/tests/support/common.rs"]
+#[path = "../../service/tests/utils/common.rs"]
 mod common;
 
 async fn app(embed: Option<bool>) -> (String, MockServer, MockServer, tempfile::TempDir) {
