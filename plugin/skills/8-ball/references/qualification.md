@@ -28,7 +28,7 @@ On the remaining cases, run the question with `learn: false` to exclude remember
 
 Once the user accepts the wording, use a named spec (`[specs.<name>]`) for repeated runs. If fitting thresholds, use `decision_review` to get unlabeled spec states without predictions. Send confirmed development labels with `decision_label` using the saved row id and `yes`/`no`, the option name, or the score index. A saved label can become the answer the next time that state appears. Keep unresolved and held-out cases out of this step.
 
-Preview a fit with `8ball calibrate <spec> --dry-run`. At the default 0.95 precision target a side needs at least 20 decided labels. Check the counts and warnings. If fitting is appropriate, save the fit with `8ball calibrate <spec>` in the test setup. Calibration changes which answers are decisive. A fit cannot teach the model what the user finds funny.
+Preview a fit with `8ball calibrate <spec> --dry-run`. At the default 0.95 precision target a side needs at least 20 decided labels. Check the counts and warnings. If fitting is appropriate, save the fit with `8ball calibrate <spec>` on the same server that received the labels; if that is a separate test server, point the CLI at it with `--url` and set `recalibrate_after = 0` in its config. Calibration changes which answers are decisive. A fit cannot teach the model what the user finds funny.
 
 ## Test the frozen rule and decide together
 
