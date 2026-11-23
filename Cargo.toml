@@ -26,7 +26,7 @@ domain = { path = "domain" }
 service = { path = "service" }
 store = { path = "store" }
 
-anyhow = "1.0.104"
+anyhow = "1.0.105"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 clap = "4.6.9"
 constant_time_eq = "0.6.1"
