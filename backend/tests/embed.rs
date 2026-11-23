@@ -102,3 +102,27 @@ async fn missing_or_duplicate_indices_are_errors() {
         );
     }
 }
+
+#[tokio::test]
+async fn malformed_embedding_responses_return_errors() {
+    for (body, error) in [
+        (json!([]), "embedder returned no data"),
+        (json!(42), "embedder returned no data"),
+        (json!({"data":[null]}), "embedder returned invalid index"),
+        (json!({"data":[{"index":0}]}), "invalid type: null"),
+    ] {
+        let mock = MockServer::start().await;
+        Mock::given(matchers::method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&mock)
+            .await;
+        assert!(
+            embedder(&mock)
+                .embed(&["a".into()])
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(error)
+        );
+    }
+}

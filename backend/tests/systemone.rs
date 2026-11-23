@@ -14,6 +14,7 @@ use domain::question::Question;
 
 use common::posts;
 
+#[path = "utils/common.rs"]
 mod common;
 
 fn question() -> Question {

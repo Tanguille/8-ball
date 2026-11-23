@@ -527,7 +527,7 @@ async fn triage(args: TriageArgs) -> Result<i32> {
         merge(&mut merged, &mut warnings, response, start);
     }
     merged.warning = (!warnings.is_empty()).then(|| warnings.join("; "));
-    println!("{}", json!(merged));
+    println!("{}", serde_json::to_string(&merged)?);
 
     Ok(0)
 }

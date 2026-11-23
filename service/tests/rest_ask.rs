@@ -1,6 +1,7 @@
 use reqwest::Client;
 use serde_json::{Value, json};
 
+#[path = "utils/common.rs"]
 mod common;
 
 async fn app() -> (String, wiremock::MockServer, tempfile::TempDir) {

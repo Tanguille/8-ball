@@ -13,7 +13,9 @@ on:
       # Quoted: a leading * starts a YAML alias.
       - "*/src/**"
       - "*/Cargo.toml"
+      - Cargo.toml
       - Cargo.lock
+      - store/migrations/**
       - dev/**
       - .github/workflows/bench-hosted.yaml
   schedule:

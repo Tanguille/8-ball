@@ -4,9 +4,11 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
     fs,
-    io::Write as _,
+    io::{self, BufRead as _, Read as _, Write as _},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::mpsc,
+    thread,
     time::Duration,
 };
 
@@ -17,8 +19,6 @@ use parquet::{
     record::Field,
 };
 use serde_json::{Map, Value, json};
-
-const URL: &str = "http://127.0.0.1:8098";
 
 /// A yes/no gate over a public dataset. `yes` holds the labels where the answer is yes.
 struct Task {
@@ -137,32 +137,15 @@ async fn main() -> Result<()> {
     let db = tmp.path().join("bench.db");
     // The report for stdout. page.md gets the same text without the rows of excluded methods.
     let mut text = String::new();
-    let mut server = eightball()?
-        .args([
-            "serve",
-            "--config-toml",
-            &config,
-            "--listen",
-            URL.trim_start_matches("http://"),
-        ])
-        .arg("--db")
-        .arg(&db)
-        .stderr(Stdio::null())
-        .spawn()
-        .context("start 8ball serve")?;
-    let result = async {
-        wait_for_server().await?;
-        let doctor = doctor().await?;
+    let (methods, runs) = {
+        let server = Server::start(eightball()?, &config, &db)?;
+        let doctor = doctor(&server.url).await?;
         args.endpoints = available(&args, &doctor, &mut text)?;
         let methods = methods(&args, &doctor)?;
-        let runs = run(&args, methods.cascade).await?;
+        let runs = run(&server.url, &args, methods.cascade).await?;
 
-        Ok::<_, anyhow::Error>((methods, runs))
-    }
-    .await;
-    server.kill().ok();
-    server.wait().ok();
-    let (methods, runs) = result?;
+        (methods, runs)
+    };
 
     let saved: BTreeMap<_, BTreeMap<_, _>> = methods
         .names
@@ -191,7 +174,11 @@ async fn main() -> Result<()> {
     }
     let mut page = text.clone();
     report(&mut text, &methods, &runs, &[])?;
-    report(&mut page, &methods, &runs, &excluded)?;
+    if excluded.is_empty() {
+        page.clone_from(&text);
+    } else {
+        report(&mut page, &methods, &runs, &excluded)?;
+    }
     // A baseline error comes after the tables are printed and the page is written, so the run still reports.
     // The result comes from the full comparison, so a regression of an excluded method still fails the run.
     let ok = args.baseline.as_ref().map_or(Ok(true), |path| {
@@ -219,18 +206,16 @@ fn eightball() -> Result<Command> {
     );
     let mut command = Command::new(path);
     // The private server needs no key, and doctor() sends none.
-    command
-        .env("EIGHTBALL_URL", URL)
-        .env_remove("EIGHTBALL_API_KEY");
+    command.env_remove("EIGHTBALL_API_KEY");
 
     Ok(command)
 }
 
-async fn doctor() -> Result<Value> {
+async fn doctor(url: &str) -> Result<Value> {
     Ok(reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()?
-        .get(format!("{URL}/v1/doctor"))
+        .get(format!("{url}/v1/doctor"))
         .send()
         .await?
         .error_for_status()?
@@ -238,14 +223,80 @@ async fn doctor() -> Result<Value> {
         .await?)
 }
 
-async fn wait_for_server() -> Result<()> {
-    for _ in 0..50 {
-        if reqwest::get(format!("{URL}/healthz")).await.is_ok() {
-            return Ok(());
+struct Server {
+    child: std::process::Child,
+    reader: Option<thread::JoinHandle<()>>,
+    url: String,
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    bail!("8ball serve did not start on {URL}")
+}
+
+impl Server {
+    fn start(mut command: Command, config: &str, db: &Path) -> Result<Self> {
+        let child = command
+            .args([
+                "serve",
+                "--config-toml",
+                config,
+                "--listen",
+                "127.0.0.1:0",
+                "--db",
+            ])
+            .arg(db)
+            .env("RUST_LOG", "info")
+            .env_remove("EIGHTBALL_CONFIG")
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("start 8ball serve")?;
+        let mut server = Self {
+            child,
+            reader: None,
+            url: String::new(),
+        };
+        let mut stderr = io::BufReader::new(server.child.stderr.take().context("server stderr")?);
+        let (send, receive) = mpsc::channel();
+        server.reader = Some(thread::spawn(move || {
+            let result = listening_url(&mut stderr);
+            let _ = send.send(result);
+            // Keep the child writable while doctor and evaluate run.
+            let _ = io::copy(&mut stderr, &mut io::sink());
+        }));
+        server.url = receive
+            .recv_timeout(Duration::from_secs(10))
+            .context("waiting for 8ball serve to announce its listening address")??;
+
+        Ok(server)
+    }
+}
+
+fn listening_url(stderr: &mut impl io::BufRead) -> Result<String> {
+    let mut line = Vec::new();
+    let mut last = String::new();
+    loop {
+        line.clear();
+        if stderr.by_ref().take(4096).read_until(b'\n', &mut line)? == 0 {
+            bail!("8ball serve exited before listening: {last}");
+        }
+        let message = String::from_utf8_lossy(&line);
+        if let Some((_, address)) = message.split_once("listening on ")
+            && let Ok(address) = address.trim().parse::<std::net::SocketAddrV4>()
+            && address.ip().is_loopback()
+            && address.port() != 0
+        {
+            return Ok(format!("http://{address}"));
+        }
+        if !message.trim().is_empty() {
+            message.trim_end().clone_into(&mut last);
+        }
+    }
 }
 
 fn doctor_endpoint<'a>(doctor: &'a Value, name: &str) -> Option<&'a Value> {
@@ -323,7 +374,7 @@ fn methods(args: &Args, doctor: &Value) -> Result<Methods> {
     })
 }
 
-async fn run(args: &Args, cascade_pair: Option<(usize, usize)>) -> Result<Vec<Runs>> {
+async fn run(url: &str, args: &Args, cascade_pair: Option<(usize, usize)>) -> Result<Vec<Runs>> {
     let mut runs: Vec<Runs> = vec![Vec::new(); args.endpoints.len()];
     for task in &TASKS {
         let mut lines = String::new();
@@ -333,7 +384,7 @@ async fn run(args: &Args, cascade_pair: Option<(usize, usize)>) -> Result<Vec<Ru
         }
         for (endpoint, by_task) in args.endpoints.iter().zip(&mut runs) {
             eprintln!("{} / {endpoint} ...", task.spec);
-            let mut observations = evaluate(task.spec, endpoint, &lines)?;
+            let mut observations = evaluate(url, task.spec, endpoint, &lines)?;
             // Keep the text with each answer, so misses can be read in observations.json.
             for (o, case) in observations.iter_mut().zip(&cases) {
                 o["item"] = case["item"].clone();
@@ -440,8 +491,9 @@ fn read_rows(
     Ok(())
 }
 
-fn evaluate(spec: &str, endpoint: &str, lines: &str) -> Result<Vec<Value>> {
+fn evaluate(url: &str, spec: &str, endpoint: &str, lines: &str) -> Result<Vec<Value>> {
     let mut child = eightball()?
+        .env("EIGHTBALL_URL", url)
         .args([
             "evaluate",
             "--spec",
@@ -891,6 +943,16 @@ fn hardware() -> String {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn startup_failure_reports_child_stderr() {
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "echo invalid-config >&2; echo >&2; exit 1", "--"]);
+        let error = super::Server::start(command, "", std::path::Path::new("unused"))
+            .err()
+            .expect("the child exited before listening");
+        assert!(format!("{error:#}").contains("invalid-config"));
+    }
 
     #[test]
     fn paired_difference_is_zero_for_equal_methods_and_brackets_a_real_gap() {

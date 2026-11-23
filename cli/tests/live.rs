@@ -7,8 +7,9 @@ use backend::{Endpoint, embed};
 use domain::{config::Config, question::Question, verdict};
 use service::Service;
 
-#[path = "../../service/tests/common.rs"]
+#[path = "../../service/tests/utils/common.rs"]
 mod common;
+#[path = "utils/server.rs"]
 mod server;
 
 async fn require(port: u16) {
@@ -395,12 +396,7 @@ async fn live_doctor() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_cache_skips_model() {
     require(9931).await;
-    let mut config = dev_config();
-    config.specs.insert(
-        "greeting".into(),
-        toml::from_str("type='noul'\ninstructions='Is this message a greeting?'").unwrap(),
-    );
-    let (service, _, _directory) = common::service(config).await;
+    let (service, _, _directory) = common::service(dev_config()).await;
     let request = spec_request("hi there, how are you?", "greeting");
     let first = service.ask(request.clone()).await.unwrap();
     let start = std::time::Instant::now();

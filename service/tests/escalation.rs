@@ -8,6 +8,7 @@ use service::{Decision, TriageResponse};
 
 use common::{indices, requests};
 
+#[path = "utils/common.rs"]
 mod common;
 
 struct App {
