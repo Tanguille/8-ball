@@ -19,6 +19,7 @@ api_key_env = "TYPESAFE_KEY"    # optional: NAME of an env var whose value is se
 max_state_chars = 2000          # optional: default 2000 for systemone, decisions and rerank, no limit for logprob
 timeout_secs = 20               # optional: seconds per HTTP attempt once it has a slot (a retry gets its own); waiting for a slot is not counted
 extra_body = { reasoning_effort = "none" }   # optional: merged into logprob request JSON
+# reasoning_tokens = 256        # optional: logprob only, instead of turning thinking off. Tokens the model may think before it answers. Unset or 0 asks for one token.
 requests_per_minute = 30        # optional: space requests evenly, for a hosted provider's rate limit; must be positive
 
 [embedder]                      # optional table
@@ -68,7 +69,7 @@ When `[escalation]` exists, 8-ball re-asks every `unsure` answer on the escalati
 
 An escalation that fails, times out, or goes over `per_minute` keeps the `unsure` answer and logs a warning. The request deadlines also bound it; see [Decisions](http-api.md#decisions).
 
-The escalation endpoint is usually a chat model with `kind = "logprob"` and thinking off, for example the 27B Qwen with `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. Do not use a router that can turn thinking on: the first token is then `<think>`, and the logprob answer breaks.
+The escalation endpoint is usually a chat model with `kind = "logprob"`. If the model can turn thinking off, do that. If it cannot, set `reasoning_tokens`: see [Thinking chat models](#thinking-chat-models).
 
 ## Environment variables
 
@@ -86,6 +87,9 @@ A flag takes priority over its environment variable.
 
 ## Thinking chat models
 
-The `logprob` backend needs a one-token answer. Turn off reasoning with `extra_body = { reasoning_effort = "none" }`.
+The logprob backend scores the first token of the answer. Pick one way to make that token the answer:
 
-For Qwen on vLLM, set `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. The local Qwen server in the development setup also starts with `--reasoning-budget 0`.
+- **Thinking off.** Set `extra_body = { reasoning_effort = "none" }`, or for Qwen on vLLM `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. 8-ball asks for one token. The local Qwen server in the development setup also starts with `--reasoning-budget 0`.
+- **Thinking on.** Some models always think. Set `reasoning_tokens`, for example `reasoning_tokens = 256`. 8-ball asks for `reasoning_tokens + 4` tokens, then scores the first token after the last `</think>` in `logprobs.content`. It skips tokens that are only whitespace. If the model has not answered when the budget ends, the request fails with `no answer within reasoning_tokens`, and an escalation keeps the `unsure` answer. Raise the number.
+
+Thinking costs time. A request takes about `reasoning_tokens` divided by the server's tokens per second. The [request deadlines](http-api.md#decisions) stay fixed: 20 seconds for an `ask`, escalation included, and 90 for a triage. A thinking endpoint on `ask` must therefore finish inside 20 seconds whatever `timeout_secs` says; raising it above that helps only a triage. Set `reasoning_tokens` above the model's p95 thinking length and keep the time it needs inside those deadlines.

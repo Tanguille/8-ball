@@ -11,8 +11,10 @@ pub async fn ask(
     futures::future::try_join_all(questions.iter().map(|question| async move {
         let (prompt, labels) = prompt(question, state)?;
         let noul = matches!(question.kind, Kind::Noul { .. });
+        let reasoning = endpoint.config.reasoning_tokens.unwrap_or(0);
         let mut body = serde_json::json!({
-            "max_tokens": 1,
+            // A few spare tokens after the thinking: the answer can follow whitespace tokens.
+            "max_tokens": if reasoning == 0 { 1 } else { reasoning + 4 },
             "temperature": 0,
             "logprobs": true,
             "top_logprobs": 20,
@@ -25,9 +27,24 @@ pub async fn ask(
             body[key] = value.clone();
         }
         let response = endpoint.post_json(info, "/v1/chat/completions", body).await?;
-        let entries = response["choices"][0]["logprobs"]["content"][0]["top_logprobs"]
+        let choice = &response["choices"][0];
+        let generated = choice["logprobs"]["content"]
             .as_array()
             .ok_or_else(|| BackendError("missing top_logprobs".into()))?;
+        let answer = if reasoning == 0 {
+            generated.first()
+        } else {
+            answer_token(generated, choice["finish_reason"] == "length")
+        };
+        let entries = answer
+            .and_then(|answer| answer["top_logprobs"].as_array())
+            .ok_or_else(|| {
+                BackendError(if reasoning == 0 {
+                    "missing top_logprobs".into()
+                } else {
+                    format!("no answer within reasoning_tokens = {reasoning}; raise it")
+                })
+            })?;
         let mut probabilities = vec![0.0; labels.len()];
         for entry in entries {
             let token = entry["token"]
@@ -59,6 +76,27 @@ pub async fn ask(
         Ok(probabilities)
     }))
     .await
+}
+
+/// The first token after the thinking. Servers differ in whether `logprobs.content` holds the thinking tokens,
+/// so: start after the last end-of-thinking marker if one is there, else at the first token. Whitespace-only tokens are skipped.
+/// A reply cut off at `max_tokens` with no marker never left the thinking, so it has no answer.
+fn answer_token(generated: &[serde_json::Value], truncated: bool) -> Option<&serde_json::Value> {
+    let marker = generated.iter().rposition(|entry| {
+        entry["token"]
+            .as_str()
+            .is_some_and(|token| token.contains("</think>"))
+    });
+    if truncated && marker.is_none() {
+        return None;
+    }
+    let start = marker.map_or(0, |marker| marker + 1);
+
+    generated[start..].iter().find(|entry| {
+        entry["token"]
+            .as_str()
+            .is_none_or(|token| !token.trim().is_empty())
+    })
 }
 
 fn prompt(question: &Question, state: &str) -> Result<(String, Vec<String>), BackendError> {
