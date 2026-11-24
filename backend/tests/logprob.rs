@@ -149,11 +149,11 @@ async fn invalid_logprobs_are_rejected_even_for_non_labels() {
 fn entry(token: &str, probability: f64) -> Value {
     json!({"token":token,"logprob":0.0,"top_logprobs":[{"token":token,"logprob":probability.ln()},{"token":"no","logprob":(1.0 - probability).ln()}]})
 }
-async fn reasoning_endpoint(content: Vec<Value>) -> (Endpoint, MockServer) {
+async fn reasoning_endpoint(content: Vec<Value>, finish_reason: &str) -> (Endpoint, MockServer) {
     let mock = MockServer::start().await;
     Mock::given(matchers::method("POST"))
         .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"choices":[{"finish_reason":"length","logprobs":{"content":content}}]}),
+            json!({"choices":[{"finish_reason":finish_reason,"logprobs":{"content":content}}]}),
         ))
         .mount(&mock)
         .await;
@@ -166,7 +166,7 @@ async fn reasoning_endpoint(content: Vec<Value>) -> (Endpoint, MockServer) {
 }
 #[tokio::test]
 async fn reasoning_budget_sets_max_tokens() {
-    let (endpoint, mock) = reasoning_endpoint(vec![entry("yes", 0.9)]).await;
+    let (endpoint, mock) = reasoning_endpoint(vec![entry("yes", 0.9)], "stop").await;
     endpoint.ask("hi", &[question("noul")]).await.unwrap();
     let body: Value = serde_json::from_slice(&posts(&mock).await[0].body).unwrap();
     assert_eq!(body["max_tokens"], 132);
@@ -174,20 +174,24 @@ async fn reasoning_budget_sets_max_tokens() {
 #[tokio::test]
 async fn answer_after_the_end_of_thinking_marker_is_scored() {
     // The thinking tokens would score as an answer ("yes" inside the thought) if the marker were ignored.
-    let (endpoint, _mock) = reasoning_endpoint(vec![
-        entry("yes", 0.1),
-        entry("</think>", 1.0),
-        entry("\n\n", 1.0),
-        entry(" ", 1.0),
-        entry("yes", 0.8),
-    ])
+    let (endpoint, _mock) = reasoning_endpoint(
+        vec![
+            entry("yes", 0.1),
+            entry("</think>", 1.0),
+            entry("\n\n", 1.0),
+            entry(" ", 1.0),
+            entry("yes", 0.8),
+        ],
+        "stop",
+    )
     .await;
     let probabilities = endpoint.ask("hi", &[question("noul")]).await.unwrap();
     assert!((probabilities[0][0] - 0.8).abs() < 1e-9);
 }
 #[tokio::test]
 async fn content_only_logprobs_skip_whitespace_without_a_marker() {
-    let (endpoint, _mock) = reasoning_endpoint(vec![entry("\n", 1.0), entry("yes", 0.8)]).await;
+    let (endpoint, _mock) =
+        reasoning_endpoint(vec![entry("\n", 1.0), entry("yes", 0.8)], "stop").await;
     let probabilities = endpoint.ask("hi", &[question("noul")]).await.unwrap();
     assert!((probabilities[0][0] - 0.8).abs() < 1e-9);
 }
@@ -200,8 +204,10 @@ async fn exhausted_reasoning_budget_errors() {
             entry("</think>", 1.0),
             entry("\n\n", 1.0),
         ],
+        // A thought cut off at the budget with a label-shaped token: no marker, so it must not be scored.
+        vec![entry(" No", 0.9), entry(",", 0.5)],
     ] {
-        let (endpoint, _mock) = reasoning_endpoint(content).await;
+        let (endpoint, _mock) = reasoning_endpoint(content, "length").await;
         let error = endpoint
             .ask("hi", &[question("noul")])
             .await

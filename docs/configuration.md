@@ -19,7 +19,7 @@ api_key_env = "TYPESAFE_KEY"    # optional: NAME of an env var whose value is se
 max_state_chars = 2000          # optional: default 2000 for systemone, decisions and rerank, no limit for logprob
 timeout_secs = 20               # optional: seconds per HTTP attempt once it has a slot (a retry gets its own); waiting for a slot is not counted
 extra_body = { reasoning_effort = "none" }   # optional: merged into logprob request JSON
-reasoning_tokens = 256          # optional: logprob only. Tokens the model may think before it answers. Unset or 0 asks for one token.
+# reasoning_tokens = 256        # optional: logprob only, instead of turning thinking off. Tokens the model may think before it answers. Unset or 0 asks for one token.
 requests_per_minute = 30        # optional: space requests evenly, for a hosted provider's rate limit; must be positive
 
 [embedder]                      # optional table
@@ -92,4 +92,4 @@ The logprob backend scores the first token of the answer. Pick one way to make t
 - **Thinking off.** Set `extra_body = { reasoning_effort = "none" }`, or for Qwen on vLLM `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. 8-ball asks for one token. The local Qwen server in the development setup also starts with `--reasoning-budget 0`.
 - **Thinking on.** Some models always think. Set `reasoning_tokens`, for example `reasoning_tokens = 256`. 8-ball asks for `reasoning_tokens + 4` tokens, then scores the first token after the last `</think>` in `logprobs.content`. It skips tokens that are only whitespace. If the model has not answered when the budget ends, the request fails with `no answer within reasoning_tokens`, and an escalation keeps the `unsure` answer. Raise the number.
 
-Thinking costs time. A request takes about `reasoning_tokens` divided by the server's tokens per second, so raise `timeout_secs` to match. The [request deadlines](http-api.md#decisions) stay fixed (20 seconds for an `ask`, 90 for a triage), and an escalation that misses one keeps the `unsure` answer. Set `reasoning_tokens` above the model's p95 thinking length, with a deadline that still fits.
+Thinking costs time. A request takes about `reasoning_tokens` divided by the server's tokens per second. The [request deadlines](http-api.md#decisions) stay fixed: 20 seconds for an `ask`, escalation included, and 90 for a triage. A thinking endpoint on `ask` must therefore finish inside 20 seconds whatever `timeout_secs` says; raising it above that helps only a triage. Set `reasoning_tokens` above the model's p95 thinking length and keep the time it needs inside those deadlines.

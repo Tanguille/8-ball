@@ -27,13 +27,14 @@ pub async fn ask(
             body[key] = value.clone();
         }
         let response = endpoint.post_json(info, "/v1/chat/completions", body).await?;
-        let generated = response["choices"][0]["logprobs"]["content"]
+        let choice = &response["choices"][0];
+        let generated = choice["logprobs"]["content"]
             .as_array()
             .ok_or_else(|| BackendError("missing top_logprobs".into()))?;
         let answer = if reasoning == 0 {
             generated.first()
         } else {
-            answer_token(generated)
+            answer_token(generated, choice["finish_reason"] == "length")
         };
         let entries = answer
             .and_then(|answer| answer["top_logprobs"].as_array())
@@ -79,15 +80,17 @@ pub async fn ask(
 
 /// The first token after the thinking. Servers differ in whether `logprobs.content` holds the thinking tokens,
 /// so: start after the last end-of-thinking marker if one is there, else at the first token. Whitespace-only tokens are skipped.
-fn answer_token(generated: &[serde_json::Value]) -> Option<&serde_json::Value> {
-    let start = generated
-        .iter()
-        .rposition(|entry| {
-            entry["token"]
-                .as_str()
-                .is_some_and(|token| token.contains("</think>"))
-        })
-        .map_or(0, |marker| marker + 1);
+/// A reply cut off at `max_tokens` with no marker never left the thinking, so it has no answer.
+fn answer_token(generated: &[serde_json::Value], truncated: bool) -> Option<&serde_json::Value> {
+    let marker = generated.iter().rposition(|entry| {
+        entry["token"]
+            .as_str()
+            .is_some_and(|token| token.contains("</think>"))
+    });
+    if truncated && marker.is_none() {
+        return None;
+    }
+    let start = marker.map_or(0, |marker| marker + 1);
 
     generated[start..].iter().find(|entry| {
         entry["token"]
