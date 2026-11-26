@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use domain::verdict;
-use service::{AskRequest, Service};
+use service::{AskRequest, Service, TriageRequest};
 
 #[path = "utils/common.rs"]
 mod common;
@@ -43,14 +43,8 @@ async fn rejects_unknown_spec_and_mixed_question_sources() {
     let (service, _store, _mock, _dir) = fixture(false).await;
     let request: AskRequest =
         serde_json::from_value(json!({"spec":"unknown","state":"hi"})).unwrap();
-    assert!(
-        service
-            .ask(request)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("unknown spec unknown")
-    );
+    let unknown = service.ask(request).await.unwrap_err().to_string();
+    assert!(unknown.contains("unknown spec unknown; configured specs: greeting, greeting-copy"));
     let request: AskRequest = serde_json::from_value(json!({"spec":"greeting","state":"hi","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}))
     .unwrap();
     assert!(
@@ -59,8 +53,11 @@ async fn rejects_unknown_spec_and_mixed_question_sources() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("use spec or questions, not both")
+            .contains("use spec or ad-hoc questions, not both")
     );
+    let neither: TriageRequest = serde_json::from_value(json!({"items":["hi"]})).unwrap();
+    let neither = service.triage(neither).await.unwrap_err().to_string();
+    assert!(neither.contains("use spec (a configured name) or ad-hoc questions"));
 }
 #[tokio::test]
 async fn spec_uses_bands_but_ad_hoc_uses_defaults() {

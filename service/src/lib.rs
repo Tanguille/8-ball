@@ -115,9 +115,10 @@ pub struct TriageRequest {
     /// Shared evidence for every item, treated as data. Contextual inputs must fit the endpoint limit.
     #[serde(default)]
     pub context: Option<String>,
-    /// A named spec, OR `question` for an ad-hoc question.
+    /// Name of a configured spec (the server instructions list them). Leave it out when you pass `question`.
     #[serde(default)]
     pub spec: Option<String>,
+    /// An ad-hoc question {id, type, instructions}. Leave it out when you pass `spec`.
     #[serde(default)]
     pub question: Option<Question>,
     /// Verdict to keep: default "yes" (noul); an option name (choice); a minimum level index like "2" (score).
@@ -427,6 +428,8 @@ impl Service {
 
     fn backend_error(&self, name: &str, error: backend::BackendError) -> ServiceError {
         self.metrics.record_backend_error(name);
+        // Callers fail open, so without this line a backend outage shows up only in their logs.
+        tracing::warn!(endpoint = %name, error = %error.0, "backend call failed");
 
         ServiceError::Backend {
             endpoint: name.into(),
@@ -476,7 +479,11 @@ impl Service {
             .store
             .endpoints(spec.as_deref(), &question_hash, &state_hash)
             .await?;
-        for name in &endpoints {
+        // An endpoint removed from the config keeps its labelled rows, but it has no bands to refit.
+        for name in endpoints
+            .iter()
+            .filter(|name| self.endpoints.contains_key(name.as_str()))
+        {
             if let Err(e) = self
                 .maybe_recalibrate(spec.as_deref(), &question, name)
                 .await
@@ -937,11 +944,6 @@ impl Service {
             let message = format!("at most {MAX_TRIAGE_ITEMS} items");
             return Err(ServiceError::BadRequest(message));
         }
-        if request.spec.is_some() == request.question.is_some() {
-            return Err(ServiceError::BadRequest(
-                "use spec or question, exclusively".into(),
-            ));
-        }
         let (questions, endpoint) = self.resolve_questions(
             request.spec.as_deref(),
             request.question.as_slice(),
@@ -1209,19 +1211,22 @@ impl Service {
         let questions = if let Some(name) = spec {
             if !questions.is_empty() {
                 return Err(ServiceError::BadRequest(
-                    "use spec or questions, not both".into(),
+                    "use spec or ad-hoc questions, not both".into(),
                 ));
             }
-            let spec = self
-                .config
-                .specs
-                .get(name)
-                .ok_or_else(|| ServiceError::BadRequest(format!("unknown spec {name}")))?;
+            let spec = self.config.specs.get(name).ok_or_else(|| {
+                let names: Vec<&str> = self.config.specs.keys().map(String::as_str).collect();
+                let names = names.join(", ");
+                ServiceError::BadRequest(format!("unknown spec {name}; configured specs: {names}"))
+            })?;
             vec![Question {
                 id: name.into(),
                 instructions: spec.instructions.clone(),
                 kind: spec.kind.clone(),
             }]
+        } else if questions.is_empty() {
+            let message = "use spec (a configured name) or ad-hoc questions";
+            return Err(ServiceError::BadRequest(message.into()));
         } else {
             questions.to_vec()
         };
