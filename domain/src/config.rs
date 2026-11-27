@@ -225,9 +225,13 @@ pub fn default_config_path() -> PathBuf {
     xdg_path("XDG_CONFIG_HOME", ".config", "8ball/config.toml")
 }
 
-/// `$variable/relative`, else `$HOME/fallback/relative` when the XDG variable is unset or empty.
 #[must_use]
-pub fn xdg_path(variable: &str, fallback: &str, relative: &str) -> PathBuf {
+pub fn default_db_path() -> PathBuf {
+    xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
+}
+
+/// `$variable/relative`, else `$HOME/fallback/relative` when the XDG variable is unset or empty.
+fn xdg_path(variable: &str, fallback: &str, relative: &str) -> PathBuf {
     env::var_os(variable)
         .filter(|value| !value.is_empty())
         .map_or_else(

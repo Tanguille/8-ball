@@ -192,10 +192,7 @@ impl ConfigArgs {
             Some(text) => Config::parse(&text, "EIGHTBALL_CONFIG_TOML")?,
             None => Config::load(&self.config.unwrap_or_else(config::default_config_path))?,
         };
-        let store = store::Store::open(&self.db.unwrap_or_else(|| {
-            config::xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
-        }))
-        .await?;
+        let store = store::Store::open(&self.db.unwrap_or_else(config::default_db_path)).await?;
         let pruned = store.prune(config.retention_days).await?;
         info!("pruned {pruned} old decisions");
 
