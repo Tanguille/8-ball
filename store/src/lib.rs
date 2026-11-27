@@ -1,6 +1,6 @@
 use std::{fs, os::unix::fs::OpenOptionsExt};
 
-use sqlx::SqlSafeStr;
+use sqlx::{SqlSafeStr, types::Json};
 
 use domain::{
     Probs,
@@ -64,12 +64,6 @@ impl From<std::io::Error> for StoreError {
     }
 }
 
-impl From<serde_json::Error> for StoreError {
-    fn from(e: serde_json::Error) -> Self {
-        Self(e.to_string())
-    }
-}
-
 impl Store {
     /// Creates the file privately before SQLite creates its WAL and shared-memory files.
     pub async fn open(path: &std::path::Path) -> Result<Self, StoreError> {
@@ -125,7 +119,6 @@ impl Store {
                 .bind(decision.question)
                 .execute(&mut *transaction)
                 .await?;
-            let answer = serde_json::to_string(&decision.answer)?;
             let result = sqlx::query(
                 "INSERT INTO decisions (spec,question_hash,calibration_id,state_hash,state,answer,verdict,endpoint) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
             )
@@ -134,7 +127,7 @@ impl Store {
             .bind(decision.calibration_id)
             .bind(decision.state_hash)
             .bind(decision.state)
-            .bind(answer)
+            .bind(Json(decision.answer))
             .bind(decision.verdict)
             .bind(decision.endpoint)
             .execute(&mut *transaction)
@@ -152,7 +145,7 @@ impl Store {
         state_hash: &str,
         spec: Option<&str>,
     ) -> Result<Option<(i64, Probs)>, StoreError> {
-        let row: Option<(i64, String)> = sqlx::query_as(
+        let row: Option<(i64, Json<Probs>)> = sqlx::query_as(
             "SELECT id,answer FROM decisions WHERE calibration_id=?1 AND state_hash=?2 AND spec IS ?3 ORDER BY id DESC LIMIT 1",
         )
         .bind(calibration_id)
@@ -161,8 +154,7 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(|(id, answer)| Ok((id, serde_json::from_str(&answer)?)))
-            .transpose()
+        Ok(row.map(|(id, Json(answer))| (id, answer)))
     }
 
     /// Returns `(spec, question_hash, state_hash)`.
@@ -237,7 +229,7 @@ impl Store {
         question_hash: &str,
         state_hash: &str,
     ) -> Result<Option<(i64, Probs, String)>, StoreError> {
-        let row: Option<(i64, String, String)> = sqlx::query_as(
+        let row: Option<(i64, Json<Probs>, String)> = sqlx::query_as(
             "SELECT id,answer,label FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND state_hash=?3 AND label IS NOT NULL ORDER BY id DESC LIMIT 1",
         )
         .bind(spec)
@@ -246,8 +238,7 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(|(id, answer, label)| Ok((id, serde_json::from_str(&answer)?, label)))
-            .transpose()
+        Ok(row.map(|(id, Json(answer), label)| (id, answer, label)))
     }
 
     /// Labelled states of a question that have an answer cached under `calibration_id`: the examples a refit of
@@ -285,8 +276,8 @@ impl Store {
         .bind(verdict::calibration_key(calibration_id, spec))
         // The column is NOT NULL: an ad-hoc calibration stores an empty spec.
         .bind(spec.unwrap_or(""))
-        .bind(serde_json::to_string(bands)?)
-        .bind(serde_json::to_string(report)?)
+        .bind(Json(bands))
+        .bind(Json(report))
         .execute(&self.pool)
         .await?;
 
@@ -298,19 +289,13 @@ impl Store {
         calibration_id: &str,
         spec: Option<&str>,
     ) -> Result<Option<(Bands, Report)>, StoreError> {
-        let row: Option<(String, String)> =
+        let row: Option<(Json<Bands>, Json<Report>)> =
             sqlx::query_as("SELECT bands,report FROM calibrations WHERE calibration_id=?1")
                 .bind(verdict::calibration_key(calibration_id, spec))
                 .fetch_optional(&self.pool)
                 .await?;
 
-        row.map(|(bands, report)| {
-            Ok((
-                serde_json::from_str(&bands)?,
-                serde_json::from_str(&report)?,
-            ))
-        })
-        .transpose()
+        Ok(row.map(|(Json(bands), Json(report))| (bands, report)))
     }
 
     /// Deletes old unlabelled rows, but keeps every row of a labelled state: each endpoint that answered it refits
@@ -389,7 +374,15 @@ impl Store {
         unlabelled: bool,
         limit: u32,
     ) -> Result<Vec<DecisionRow>, StoreError> {
-        type Row = (i64, String, String, String, String, Option<String>, String);
+        type Row = (
+            i64,
+            String,
+            String,
+            Json<Probs>,
+            String,
+            Option<String>,
+            String,
+        );
         let rows: Vec<Row> = sqlx::query_as(
             "SELECT id,ts,verdict,answer,state,label,endpoint FROM decisions d \
              WHERE spec IS ?1 AND question_hash=?2 \
@@ -408,19 +401,20 @@ impl Store {
         .fetch_all(&self.pool)
         .await?;
 
-        rows.into_iter()
-            .map(|(id, at, verdict, answer, state, label, endpoint)| {
-                Ok(DecisionRow {
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, at, verdict, Json(answer), state, label, endpoint)| DecisionRow {
                     id,
                     at,
                     verdict,
-                    answer: serde_json::from_str(&answer)?,
+                    answer,
                     state,
                     label,
                     endpoint,
-                })
-            })
-            .collect()
+                },
+            )
+            .collect())
     }
 }
 

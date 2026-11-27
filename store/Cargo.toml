@@ -11,8 +11,7 @@ workspace = true
 [dependencies]
 domain = { workspace = true }
 
-serde_json = { workspace = true }
-sqlx = { workspace = true, features = ["runtime-tokio", "sqlite-bundled", "migrate"] }
+sqlx = { workspace = true, features = ["json", "runtime-tokio", "sqlite-bundled", "migrate"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
