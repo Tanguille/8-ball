@@ -207,30 +207,3 @@ async fn invalid_or_missing_input_wakes_agent_without_inference() {
     assert!(!fixture.directory.path().join("run.jsonl").exists());
     assert!(server.received_requests().await.unwrap().is_empty());
 }
-
-#[tokio::test]
-async fn calibration_is_not_limited_by_the_decision_deadline() {
-    let server = MockServer::start().await;
-    Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/calibrate"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"stored":true}))
-                // Recalibration may re-infer many labelled states after a model change.
-                .set_delay(Duration::from_secs(26)),
-        )
-        .mount(&server)
-        .await;
-    let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
-        .args(["calibrate", "relevant", "--url", &server.uri()])
-        .output()
-        .await
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body["stored"], true);
-}

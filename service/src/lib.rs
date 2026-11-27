@@ -293,7 +293,7 @@ pub const MAX_TRIAGE_ITEMS: usize = 64;
 // ponytail: one deadline for the whole triage, prefilter included; items still unjudged when it passes fail open
 // to `unsure`. At 64 items, 2 slots and the 2.7 s p90 call this leaves room; a request field if callers need another
 // value.
-const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
+pub const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
 
 // ponytail: one deadline for a single ask, escalation included, below the 25 s that the plugin skill's script waits.
 // The primary answer fails the request when it misses it; an escalation that misses it keeps the primary `unsure`.

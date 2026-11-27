@@ -1,14 +1,14 @@
 use std::{
     fs,
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
     os::unix::fs::OpenOptionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
 };
 
-use anyhow::{Result, bail};
-use clap::{Args, Parser, Subcommand};
+use anyhow::{Context, Result, bail};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use reqwest::Client;
 use rmcp::ServiceExt;
 use serde_json::{Value, json};
@@ -22,6 +22,9 @@ use service::{MAX_TRIAGE_ITEMS, Service, TriageResponse};
 
 mod evaluate;
 
+/// The observe and evaluate deadline: the server's triage deadline plus a margin for endpoint info and saving.
+const DECISION_TIMEOUT_MS: u64 = service::TRIAGE_DEADLINE.as_secs() * 1000 + 30_000;
+
 #[derive(Parser)]
 #[command(
     name = "8ball",
@@ -33,10 +36,18 @@ struct Cli {
     command: Command,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum QuestionKind {
+    Noul,
+    Choice,
+    Score,
+}
+
 #[derive(Args)]
 struct AskArgs {
-    #[arg(value_parser = ["noul", "choice", "score"])]
-    kind: Option<String>,
+    #[arg(required_unless_present = "spec")]
+    kind: Option<QuestionKind>,
+    #[arg(required_unless_present = "spec")]
     instructions: Option<String>,
     #[arg(long, conflicts_with_all = ["kind", "instructions", "options", "levels"])]
     spec: Option<String>,
@@ -69,10 +80,12 @@ struct TriageArgs {
     /// UTF-8 file containing shared evidence for every item.
     #[arg(long)]
     context_file: Option<PathBuf>,
-    #[arg(long = "type", default_value = "noul", value_parser = ["noul", "choice", "score"])]
-    kind: String,
+    #[arg(long = "type", default_value = "noul")]
+    kind: QuestionKind,
+    /// choice option, repeatable: name or name=description
     #[arg(long = "option")]
     options: Vec<String>,
+    /// score level, repeatable, lowest first
     #[arg(long = "level")]
     levels: Vec<String>,
     #[arg(long)]
@@ -118,7 +131,7 @@ struct ObserveArgs {
 /// Where the CLI client finds the `8ball serve` REST API.
 #[derive(Args)]
 struct Remote {
-    /// Total request deadline; defaults to 25000 for observe/evaluate, otherwise unset.
+    /// Total request deadline; defaults to the server's triage deadline plus 30 s for observe/evaluate, otherwise unset.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     timeout_ms: Option<u64>,
     #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
@@ -278,7 +291,11 @@ enum Command {
 
 #[derive(Subcommand)]
 enum ConfigAction {
-    Check { path: Option<PathBuf> },
+    /// Validate a config file without a server.
+    Check {
+        #[arg(env = "EIGHTBALL_CONFIG")]
+        path: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -406,14 +423,14 @@ async fn serve(config: ConfigArgs, listen: String, api_key: Option<String>) -> R
 }
 
 fn make_question(
-    kind: &str,
+    kind: QuestionKind,
     instructions: String,
     options: Vec<String>,
     levels: Vec<String>,
 ) -> Question {
     let kind = match kind {
-        "noul" => Kind::Noul { criteria: None },
-        "choice" => Kind::Choice {
+        QuestionKind::Noul => Kind::Noul { criteria: None },
+        QuestionKind::Choice => Kind::Choice {
             criteria: options
                 .into_iter()
                 .map(|text| {
@@ -422,8 +439,7 @@ fn make_question(
                 })
                 .collect(),
         },
-        "score" => Kind::Score { criteria: levels },
-        _ => unreachable!("clap validates kind"),
+        QuestionKind::Score => Kind::Score { criteria: levels },
     };
 
     Question {
@@ -447,16 +463,18 @@ async fn ask(
         remote,
     }: AskArgs,
 ) -> Result<i32> {
-    let questions = if spec.is_some() {
-        Vec::new()
-    } else {
-        let (Some(kind), Some(instructions)) = (kind, instructions) else {
-            bail!("give --spec or <kind> <instructions>");
-        };
-
-        vec![make_question(&kind, instructions, options, levels)]
+    // Clap gives either --spec or both positionals, so a spec leaves this empty.
+    let questions: Vec<_> = kind
+        .zip(instructions)
+        .map(|(kind, instructions)| make_question(kind, instructions, options, levels))
+        .into_iter()
+        .collect();
+    let state = match state {
+        Some(state) => state,
+        None => stdin("the state from stdin; end with Ctrl-D, or give --state")?
+            .trim_end_matches('\n')
+            .to_owned(),
     };
-    let state = state.map_or_else(|| io::read_to_string(io::stdin()), Ok)?;
     let body = remote
         .post(
             "/v1/ask",
@@ -474,6 +492,19 @@ async fn ask(
     } else {
         i32::from(verdict == "no" && body["results"][0]["type"] == "noul")
     })
+}
+
+/// Reads all of stdin. It waits for EOF, so on a terminal it first says what it reads and how to end it.
+fn stdin(hint: &str) -> Result<String> {
+    if io::stdin().is_terminal() {
+        eprintln!("8ball: reading {hint}");
+    }
+
+    Ok(io::read_to_string(io::stdin())?)
+}
+
+fn read(path: &Path) -> Result<String> {
+    fs::read_to_string(path).with_context(|| format!("read {}", path.display()))
 }
 
 async fn doctor(remote: &Remote) -> Result<i32> {
@@ -501,9 +532,11 @@ async fn doctor(remote: &Remote) -> Result<i32> {
 async fn triage(args: TriageArgs) -> Result<i32> {
     let question = args
         .instructions
-        .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
-    let context = args.context_file.map(fs::read_to_string).transpose()?;
-    let items: Vec<Value> = serde_json::from_str(&io::read_to_string(io::stdin())?)?;
+        .map(|instructions| make_question(args.kind, instructions, args.options, args.levels));
+    let context = args.context_file.as_deref().map(read).transpose()?;
+    let context = context.as_deref().map(|text| text.trim_end_matches('\n'));
+    let items: Vec<Value> =
+        serde_json::from_str(&stdin("a JSON array from stdin; end with Ctrl-D")?)?;
     let mut body = json!({
         "context":context, "spec":args.spec, "question":question, "keep":args.keep,
         "top_k":args.top_k, "endpoint":args.endpoint, "learn":!args.no_learn
@@ -563,8 +596,9 @@ fn merge(
 }
 
 async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
-    args.remote.timeout_ms.get_or_insert(25_000);
-    let cases = evaluate::parse(&io::read_to_string(io::stdin())?)?;
+    // Set here, not in Remote::client, so that calibrate is not limited by it.
+    args.remote.timeout_ms.get_or_insert(DECISION_TIMEOUT_MS);
+    let cases = evaluate::parse(&stdin("JSONL cases from stdin; end with Ctrl-D")?)?;
     let client = args.remote.client()?;
     let mut observations = Vec::with_capacity(cases.len());
     for case in cases {
@@ -592,10 +626,11 @@ async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
 }
 
 async fn observe(mut args: ObserveArgs) -> Result<i32> {
-    args.remote.timeout_ms.get_or_insert(25_000);
+    // Set here, not in Remote::client, so that calibrate is not limited by it.
+    args.remote.timeout_ms.get_or_insert(DECISION_TIMEOUT_MS);
     let mut context = json!({"mode":"observe"});
     let snapshot = (|| -> Result<Value> {
-        let snapshot: Value = serde_json::from_str(&fs::read_to_string(&args.input)?)?;
+        let snapshot: Value = serde_json::from_str(&read(&args.input)?)?;
         anyhow::ensure!(
             snapshot["context"].is_string()
                 && snapshot["items"]

@@ -85,7 +85,7 @@ async fn binary_stdio_lists_tools_and_preserves_fail_open_errors() {
             .env_remove("EIGHTBALL_CONFIG")
             .env_remove("EIGHTBALL_CONFIG_TOML")
             .kill_on_drop(true);
-        // Cover both config sources: a file when the model answers, the environment when it fails.
+        // Cover both config sources: a file for the 200 responses, the environment for the 500.
         if status == 200 {
             let endpoint_config = directory.path().join("config.toml");
             std::fs::write(&endpoint_config, text).unwrap();

@@ -1,6 +1,7 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
+use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 #[path = "../../service/tests/utils/common.rs"]
@@ -84,25 +85,30 @@ async fn spec_exit_codes_do_not_probe_doctor() {
     }
 }
 #[tokio::test]
-async fn no_learn_sends_learn_false() {
+async fn no_learn_and_stdin_state_without_trailing_newlines() {
     let mock = MockServer::start().await;
     Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/ask"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results":[]})))
         .mount(&mock)
         .await;
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
-        .args(["ask", "--spec", "named", "--state", "hi", "--no-learn"])
-        .args(["--url", &mock.uri()])
-        .output()
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+        .args(["ask", "--spec", "named", "--no-learn", "--url", &mock.uri()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"hi\n\n")
         .await
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(common::requests(&mock).await[0]["learn"], false);
+    assert!(child.wait().await.unwrap().success());
+    let request = &common::requests(&mock).await[0];
+    assert_eq!(request["learn"], false);
+    assert_eq!(request["state"], "hi");
 }
 #[tokio::test]
 async fn choice_prints_billing() {
@@ -134,9 +140,6 @@ async fn choice_prints_billing() {
 }
 #[test]
 fn dead_server_exits_four() {
-    let unused = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let dead = unused.local_addr().unwrap();
-    drop(unused);
     let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
@@ -145,7 +148,7 @@ fn dead_server_exits_four() {
             "--state",
             "hi",
             "--url",
-            &format!("http://{dead}"),
+            "http://127.0.0.1:9",
         ])
         .output()
         .unwrap();
@@ -178,6 +181,7 @@ fn invalid_arguments_exit_two() {
         &[
             "ask", "--spec", "named", "--option", "a", "--state", "hi", "--url", dead,
         ],
+        &["ask", "--state", "hi", "--url", dead],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args(args)
@@ -191,4 +195,26 @@ fn invalid_arguments_exit_two() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+#[test]
+fn config_check_reads_eightball_config() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("8ball.toml");
+    std::fs::write(
+        &path,
+        "default='d3'\n[endpoints.d3]\nurl='http://127.0.0.1:9'",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
+        .args(["config", "check"])
+        .env("EIGHTBALL_CONFIG", &path)
+        // An empty config home, so the default path cannot pass by accident.
+        .env("XDG_CONFIG_HOME", directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
