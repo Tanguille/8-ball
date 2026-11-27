@@ -245,7 +245,7 @@ pub struct ReviewItem {
 pub struct LabelRequest {
     /// A decision id from `review` or `decisions`.
     pub id: i64,
-    /// yes or no for a noul question, else an option or level name.
+    /// yes or no for a noul question, an option name for choice, or a zero-based level index such as "2" for score.
     pub value: String,
 }
 #[derive(Debug, Serialize, JsonSchema)]
