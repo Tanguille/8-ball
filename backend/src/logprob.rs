@@ -14,7 +14,7 @@ pub async fn ask(
         let reasoning = endpoint.config.reasoning_tokens.unwrap_or(0);
         let mut body = serde_json::json!({
             // A few spare tokens after the thinking: the answer can follow whitespace tokens.
-            "max_tokens": if reasoning == 0 { 1 } else { reasoning + 4 },
+            "max_tokens": if reasoning == 0 { 1 } else { reasoning.saturating_add(4) },
             "temperature": 0,
             "logprobs": true,
             "top_logprobs": 20,
