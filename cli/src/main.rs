@@ -22,6 +22,9 @@ use service::{MAX_TRIAGE_ITEMS, Service, TriageResponse};
 
 mod evaluate;
 
+/// The observe and evaluate deadline: the server's triage deadline plus a margin for endpoint info and saving.
+const DECISION_TIMEOUT_MS: u64 = service::TRIAGE_DEADLINE.as_secs() * 1000 + 30_000;
+
 #[derive(Parser)]
 #[command(
     name = "8ball",
@@ -118,7 +121,7 @@ struct ObserveArgs {
 /// Where the CLI client finds the `8ball serve` REST API.
 #[derive(Args)]
 struct Remote {
-    /// Total request deadline; defaults to 25000 for observe/evaluate, otherwise unset.
+    /// Total request deadline; defaults to the server's triage deadline plus 30 s for observe/evaluate, otherwise unset.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     timeout_ms: Option<u64>,
     #[arg(long, env = "EIGHTBALL_URL", default_value = "http://127.0.0.1:8080")]
@@ -563,7 +566,8 @@ fn merge(
 }
 
 async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
-    args.remote.timeout_ms.get_or_insert(25_000);
+    // Set here, not in Remote::client, so that calibrate is not limited by it.
+    args.remote.timeout_ms.get_or_insert(DECISION_TIMEOUT_MS);
     let cases = evaluate::parse(&io::read_to_string(io::stdin())?)?;
     let client = args.remote.client()?;
     let mut observations = Vec::with_capacity(cases.len());
@@ -592,7 +596,8 @@ async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
 }
 
 async fn observe(mut args: ObserveArgs) -> Result<i32> {
-    args.remote.timeout_ms.get_or_insert(25_000);
+    // Set here, not in Remote::client, so that calibrate is not limited by it.
+    args.remote.timeout_ms.get_or_insert(DECISION_TIMEOUT_MS);
     let mut context = json!({"mode":"observe"});
     let snapshot = (|| -> Result<Value> {
         let snapshot: Value = serde_json::from_str(&fs::read_to_string(&args.input)?)?;
