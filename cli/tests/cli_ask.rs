@@ -140,9 +140,6 @@ async fn choice_prints_billing() {
 }
 #[test]
 fn dead_server_exits_four() {
-    let unused = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let dead = unused.local_addr().unwrap();
-    drop(unused);
     let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
         .args([
             "ask",
@@ -151,7 +148,7 @@ fn dead_server_exits_four() {
             "--state",
             "hi",
             "--url",
-            &format!("http://{dead}"),
+            "http://127.0.0.1:9",
         ])
         .output()
         .unwrap();

@@ -9,13 +9,10 @@ async fn service(
     tempfile::TempDir,
 ) {
     let mock = common::systemone().await;
-    let unused = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let dead = unused.local_addr().unwrap();
-    drop(unused);
     let config: domain::config::Config =
         toml::from_str(
             &format!(
-                "default='{default}'\n[endpoints.healthy]\nurl='{}'\nkind='systemone'\n[endpoints.dead]\nurl='http://{dead}'",
+                "default='{default}'\n[endpoints.healthy]\nurl='{}'\nkind='systemone'\n[endpoints.dead]\nurl='http://127.0.0.1:9'",
                 mock.uri(),
             ),
         )
