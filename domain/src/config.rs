@@ -178,6 +178,12 @@ impl Config {
             if endpoint.kind == Some(BackendKind::Logprob) && endpoint.model.is_none() {
                 return Err(format!("endpoint {name}: logprob needs model"));
             }
+            // Fewer keeps no characters from either end of a long state.
+            if endpoint.max_state_chars.is_some_and(|maximum| maximum < 2) {
+                return Err(format!(
+                    "endpoint {name}: max_state_chars must be at least 2"
+                ));
+            }
         }
         if let Some(escalation) = &self.escalation {
             let endpoint = &escalation.endpoint;

@@ -156,3 +156,14 @@ fn spec_escalate_parses() {
     assert_eq!(spec("escalate = false\n"), Some(false));
     assert_eq!(spec(""), None);
 }
+
+#[test]
+fn max_state_chars_below_two_rejected() {
+    for maximum in [0, 1] {
+        let text = format!("{MINIMAL}max_state_chars = {maximum}\n");
+        assert!(
+            error(&text).contains("max_state_chars must be at least 2"),
+            "{maximum}"
+        );
+    }
+}
