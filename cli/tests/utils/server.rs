@@ -30,9 +30,11 @@ pub fn serve(args: &[&str]) -> Server {
         .arg("--db")
         .arg(directory.path().join("db.sqlite"))
         .args(["--listen", "127.0.0.1:0"])
-        // Config variables from the developer's shell would conflict with the config in `args`.
+        // Config variables from the developer's shell would conflict with the config in `args`, and a log filter
+        // could hide the "listening on" line that this waits for.
         .env_remove("EIGHTBALL_CONFIG")
         .env_remove("EIGHTBALL_CONFIG_TOML")
+        .env_remove("RUST_LOG")
         .stderr(std::process::Stdio::piped());
     let mut server = Server {
         child: command.spawn().unwrap(),
