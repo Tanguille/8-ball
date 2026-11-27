@@ -310,3 +310,14 @@ fn rerank_side_without_evidence_stays_undecided() {
     // Falling back to the generic 0.15 would let raw topic scores answer `no` again.
     assert!(no_at < 0.0);
 }
+#[test]
+fn minimum_side_is_exact_at_target_0_9() {
+    // 1 / (1 - 0.9) is 10, so 10 correct examples are enough.
+    let examples: Vec<_> = (0..10).map(|_| example(0.97, "yes")).collect();
+    let (bands, _) =
+        verdict::calibrate(&noul(), BackendKind::Systemone, &examples, 0.9, None).unwrap();
+    let Bands::Noul { yes_at, .. } = bands else {
+        panic!("noul bands")
+    };
+    assert!((yes_at - 0.97).abs() < 1e-9, "yes_at = {yes_at}");
+}

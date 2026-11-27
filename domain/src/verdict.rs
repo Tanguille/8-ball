@@ -323,7 +323,8 @@ fn threshold(
         candidates.reverse();
     }
     candidates.dedup();
-    let min_side = (1.0 / (1.0 - target)).ceil();
+    // 1 - 0.9 is not exact in f64, so 1 / (1 - 0.9) is just above 10 and would round up to 11.
+    let min_side = (1.0 / (1.0 - target) - 1e-9).ceil();
 
     candidates.into_iter().find(|threshold| {
         let (selected, correct) = data
