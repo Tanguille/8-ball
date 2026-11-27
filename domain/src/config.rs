@@ -98,7 +98,8 @@ pub struct EmbedderConfig {
     pub api_key_env: Option<String>,
 }
 
-// No deny_unknown_fields here: it doesn't work together with #[serde(flatten)].
+// No deny_unknown_fields here: it doesn't work together with #[serde(flatten)]. `unknown` catches
+// what the other fields do not, and `validate` rejects it.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SpecConfig {
     pub instructions: String,
@@ -107,6 +108,9 @@ pub struct SpecConfig {
     pub endpoint: Option<String>,
     /// False keeps this spec's `unsure` answers; default true when `[escalation]` exists.
     pub escalate: Option<bool>,
+    /// Also holds `type` and `criteria`, which `kind` reads as well.
+    #[serde(flatten)]
+    unknown: IndexMap<String, serde::de::IgnoredAny>,
 }
 
 impl SpecConfig {
@@ -205,6 +209,13 @@ impl Config {
                 || !characters.all(|character| alphanumeric(character) || character == '-')
             {
                 return Err(format!("invalid spec name {name}"));
+            }
+            if let Some(key) = spec
+                .unknown
+                .keys()
+                .find(|key| !["type", "criteria"].contains(&key.as_str()))
+            {
+                return Err(format!("spec {name}: unknown field {key}"));
             }
             if let Some(endpoint) = &spec.endpoint
                 && !self.endpoints.contains_key(endpoint)

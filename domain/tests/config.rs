@@ -158,6 +158,12 @@ fn spec_escalate_parses() {
 }
 
 #[test]
+fn unknown_spec_key_rejected() {
+    let text = format!("{MINIMAL}\n[specs.s]\ntype = 'noul'\ninstructions = 'x'\nendpont = 'd3'\n");
+    assert!(error(&text).contains("spec s: unknown field endpont"));
+}
+
+#[test]
 fn max_state_chars_below_two_rejected() {
     for maximum in [0, 1] {
         let text = format!("{MINIMAL}max_state_chars = {maximum}\n");
