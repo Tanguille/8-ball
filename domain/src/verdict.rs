@@ -136,6 +136,8 @@ pub fn question_hash(question: &crate::question::Question) -> String {
 }
 
 /// Identity of question + exact model. The url is excluded so a hostname change keeps calibrations.
+///
+/// Do not rename a `BackendKind` variant: its Debug name is hashed here, so stored calibrations and cached answers would be lost.
 #[must_use]
 pub fn calibration_id(question_hash: &str, kind: BackendKind, fingerprint: &str) -> String {
     short_hash(&format!("{question_hash}\n{kind:?}\n{fingerprint}"))

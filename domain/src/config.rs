@@ -79,6 +79,7 @@ pub struct EndpointConfig {
     pub timeout_secs: Option<std::num::NonZeroU64>,
 }
 
+/// Do not rename a variant, even by case: `verdict::calibration_id` hashes its Debug name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
