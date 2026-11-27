@@ -1,13 +1,13 @@
 use std::{
     fs,
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
     os::unix::fs::OpenOptionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use reqwest::Client;
 use rmcp::ServiceExt;
@@ -459,7 +459,12 @@ async fn ask(
 
         vec![make_question(&kind, instructions, options, levels)]
     };
-    let state = state.map_or_else(|| io::read_to_string(io::stdin()), Ok)?;
+    let state = match state {
+        Some(state) => state,
+        None => stdin("the state from stdin; end with Ctrl-D, or give --state")?
+            .trim_end_matches('\n')
+            .to_owned(),
+    };
     let body = remote
         .post(
             "/v1/ask",
@@ -477,6 +482,19 @@ async fn ask(
     } else {
         i32::from(verdict == "no" && body["results"][0]["type"] == "noul")
     })
+}
+
+/// Reads all of stdin. It waits for EOF, so on a terminal it first says what it reads and how to end it.
+fn stdin(hint: &str) -> Result<String> {
+    if io::stdin().is_terminal() {
+        eprintln!("8ball: reading {hint}");
+    }
+
+    Ok(io::read_to_string(io::stdin())?)
+}
+
+fn read(path: &Path) -> Result<String> {
+    fs::read_to_string(path).with_context(|| format!("read {}", path.display()))
 }
 
 async fn doctor(remote: &Remote) -> Result<i32> {
@@ -505,8 +523,10 @@ async fn triage(args: TriageArgs) -> Result<i32> {
     let question = args
         .instructions
         .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
-    let context = args.context_file.map(fs::read_to_string).transpose()?;
-    let items: Vec<Value> = serde_json::from_str(&io::read_to_string(io::stdin())?)?;
+    let context = args.context_file.as_deref().map(read).transpose()?;
+    let context = context.as_deref().map(|text| text.trim_end_matches('\n'));
+    let items: Vec<Value> =
+        serde_json::from_str(&stdin("a JSON array from stdin; end with Ctrl-D")?)?;
     let mut body = json!({
         "context":context, "spec":args.spec, "question":question, "keep":args.keep,
         "top_k":args.top_k, "endpoint":args.endpoint, "learn":!args.no_learn
@@ -568,7 +588,7 @@ fn merge(
 async fn evaluate(mut args: EvaluateArgs) -> Result<i32> {
     // Set here, not in Remote::client, so that calibrate is not limited by it.
     args.remote.timeout_ms.get_or_insert(DECISION_TIMEOUT_MS);
-    let cases = evaluate::parse(&io::read_to_string(io::stdin())?)?;
+    let cases = evaluate::parse(&stdin("JSONL cases from stdin; end with Ctrl-D")?)?;
     let client = args.remote.client()?;
     let mut observations = Vec::with_capacity(cases.len());
     for case in cases {
@@ -600,7 +620,7 @@ async fn observe(mut args: ObserveArgs) -> Result<i32> {
     args.remote.timeout_ms.get_or_insert(DECISION_TIMEOUT_MS);
     let mut context = json!({"mode":"observe"});
     let snapshot = (|| -> Result<Value> {
-        let snapshot: Value = serde_json::from_str(&fs::read_to_string(&args.input)?)?;
+        let snapshot: Value = serde_json::from_str(&read(&args.input)?)?;
         anyhow::ensure!(
             snapshot["context"].is_string()
                 && snapshot["items"]

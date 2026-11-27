@@ -1,6 +1,7 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
+use tokio::io::AsyncWriteExt;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 #[path = "../../service/tests/utils/common.rs"]
@@ -84,25 +85,30 @@ async fn spec_exit_codes_do_not_probe_doctor() {
     }
 }
 #[tokio::test]
-async fn no_learn_sends_learn_false() {
+async fn no_learn_and_stdin_state_without_trailing_newlines() {
     let mock = MockServer::start().await;
     Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/ask"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results":[]})))
         .mount(&mock)
         .await;
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
-        .args(["ask", "--spec", "named", "--state", "hi", "--no-learn"])
-        .args(["--url", &mock.uri()])
-        .output()
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_8ball"))
+        .args(["ask", "--spec", "named", "--no-learn", "--url", &mock.uri()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"hi\n\n")
         .await
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(common::requests(&mock).await[0]["learn"], false);
+    assert!(child.wait().await.unwrap().success());
+    let request = &common::requests(&mock).await[0];
+    assert_eq!(request["learn"], false);
+    assert_eq!(request["state"], "hi");
 }
 #[tokio::test]
 async fn choice_prints_billing() {
