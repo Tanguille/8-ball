@@ -26,13 +26,7 @@ Each model state is the JSON object `{"context": ..., "item": ...}`. Instruction
 
 For contextual requests, each serialized context and item pair must fit the endpoint's `max_state_chars` ([configuration](configuration.md)). If one pair does not fit, 8-ball rejects the whole batch before any judgment. Supply compact, current evidence. Do not silently remove details to make an assertion pass.
 
-Responses keep `kept` and `unsure`, and report the other items in these fields:
-
-- `rejected`: Model-judged items that did not match `keep`, with their decisions and original indices.
-- `prefiltered`: Original indices that embedding similarity excluded, without a model judgment.
-- `dropped`: The sum of the two groups above.
-
-A request takes up to 64 items. `8ball triage` splits a larger array into requests of 64. Items that fail come back in `unsure` with an `error` field.
+[HTTP API](http-api.md#mcp-tools) lists the response fields, and [CLI](cli.md) explains how `8ball triage` splits more than 64 items.
 
 Do not interpret a prefiltered item as a confident rejection. Items with identical serialized state share one decision, and each keeps its own index. 8-ball preserves the JSON object key order in contextual and context-free requests, so reordered objects stay distinct model inputs. This pilot never sets `top_k`, because you must judge every candidate to measure missed candidates.
 
@@ -63,12 +57,7 @@ Hermes supports pre-check scripts through its [native cron `script` interface](h
 
 ## Replay a separate labeled holdout
 
-A holdout is a labeled set that calibration never sees. Prepare JSONL with a unique id, the original item, its original context, and an independently reviewed `expected_keep` boolean:
-
-```json
-{"id":"restore-change","item":{"title":"Kopiur restore compatibility change"},"context":"We use kopiur.","expected_keep":true}
-{"id":"unused-component","item":{"title":"VolSync maintenance release"},"context":"We use kopiur; VolSync is not installed.","expected_keep":false}
-```
+A holdout is a labeled set that calibration never sees. Prepare JSONL with a unique id, the original item, its original context, and an independently reviewed `expected_keep` boolean, as in `examples/hermes/holdout.jsonl`.
 
 The label records whether investigation was worthwhile, not whether Hermes happened to investigate. Review a sample of rejected and `unsure` items as well as kept items. Split by source, event, or time so that duplicate or near-duplicate items do not leak between calibration and evaluation. Never fit bands (the calibrated verdict thresholds) on the holdout. Keep the endpoint, spec, and calibration fixed during a comparison. Set `recalibrate_after = 0` in `[learning]`, so that new labels do not refit the bands.
 
