@@ -141,12 +141,19 @@ impl Endpoint {
                 .await
                 .map_err(timed_out)?;
             let status = response.status();
-            let retry_after = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|value| value.to_str().ok()?.trim().parse::<u64>().ok())
-                .map_or(MIN_RETRY, Duration::from_secs)
-                .max(MIN_RETRY);
+            // An HTTP-date counts as too long: reading it would need a date crate.
+            let retry_after =
+                response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .map_or(MIN_RETRY, |value| {
+                        value
+                            .to_str()
+                            .ok()
+                            .and_then(|text| text.trim().parse().ok())
+                            .map_or(Duration::MAX, Duration::from_secs)
+                            .max(MIN_RETRY)
+                    });
             let text = response.text().await.map_err(timed_out)?;
             drop(permit);
             // One retry: a short 429 after its wait, and a 502 or 503, which a hosted gateway may answer from another upstream the next time.

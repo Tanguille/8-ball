@@ -113,6 +113,24 @@ async fn a_long_429_fails_at_once() {
 }
 
 #[tokio::test]
+async fn a_429_with_a_date_fails_at_once() {
+    let server = MockServer::start().await;
+    decisions(
+        &server,
+        ResponseTemplate::new(429).insert_header("Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT"),
+    )
+    .await;
+    let endpoint = decisions_endpoint(&server, "");
+    let error = endpoint
+        .ask("hi", &[question()])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("429"), "{error}");
+    assert_eq!(posts(&server).await.len(), 1);
+}
+
+#[tokio::test]
 async fn requests_per_minute_spaces_requests() {
     let server = MockServer::start().await;
     decisions(&server, answer()).await;
