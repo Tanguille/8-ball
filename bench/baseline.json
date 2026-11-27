@@ -5,18 +5,18 @@
     "d3": {
       "spam": {
         "cases": 200,
-        "decided": 199,
+        "decided": 196,
         "wrong": 0
       },
       "positive": {
         "cases": 200,
-        "decided": 181,
-        "wrong": 4
+        "decided": 162,
+        "wrong": 10
       },
       "lost-card": {
         "cases": 200,
-        "decided": 193,
-        "wrong": 3
+        "decided": 185,
+        "wrong": 0
       }
     },
     "rerank": {

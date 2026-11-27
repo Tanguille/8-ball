@@ -1,7 +1,9 @@
 # Local llama.cpp servers for the live tests. Use the same image digest and pinned models as the
-# deployed model servers, and bump them together.
+# deployed model servers, and bump them together. One exception: d3 stays vllm-d3-nano, while the deployed d3
+# runs Decider Flash v1.3. On the 4-CPU runners Flash took 1.75 times as long and passed the 20 s backend timeout
+# (docs/benchmark.md, Decider Flash v1.3).
 x-llama: &llama
-  image: ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:3d21475ecd4383a9649ea21737d07044399d0995490b5ce5c6d89326dc7c7771
+  image: ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:1ba441f2843f86e99ec64a218c427bd2d391393a73b39b9ec2c2e69a0ae9be4e
   user: "${EIGHTBALL_DEV_UID}:${EIGHTBALL_DEV_GID}"
   devices:
     - /dev/dri:/dev/dri
@@ -18,11 +20,10 @@ x-llama: &llama
     retries: 120          # the first start downloads the model
 
 services:
-  # Perplexity Decider Flash v1.3, the model behind the deployed d3-nano Service.
   d3:
     <<: *llama
     ports: ["127.0.0.1:9931:8080"]
-    command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/pplx-decider-flash-v1.3-Q4_K_M.gguf", "-mu", "https://huggingface.co/fxoz/pplx-decider-flash-v1.3-GGUF/resolve/6ff75cda62a1cbbceda5d0a24b81dab874a28b85/pplx-decider-flash-v1.3-Q4_K_M.gguf",
+    command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/vllm-d3-nano-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/resolve/50dea2057df10c4b393559a155ab3bf0bc7532c6/vllm-d3-nano-Q8_0.gguf",
               "-c", "8192", "-ub", "2048", "-np", "2"]
   embed:
     <<: *llama

@@ -70,7 +70,7 @@ The `bench` crate prints these tables, with your hardware and the model files. I
 
 ## Decider Flash v1.3
 
-Since 2026-11-23 the deployed d3 Service runs Perplexity Decider Flash v1.3 (Q4_K_M). `dev/compose.yaml` pins the same file, so CI tests the deployed model. The tables above are from vllm-d3-nano, the model before it.
+Since 2026-11-23 the deployed d3 Service runs Perplexity Decider Flash v1.3 (Q4_K_M). The tables above are from vllm-d3-nano, the model before it. CI keeps vllm-d3-nano, because Flash is too slow on the CPU of the runners (see below).
 
 On the deployed RTX 2070, Flash answered the 600 test cases (100 per side) with 0 errors, on 2026-11-27:
 
@@ -81,7 +81,7 @@ On the deployed RTX 2070, Flash answered the 600 test cases (100 per side) with 
 
 Flash decides more cases and gets fewer wrong. Per task (decided, wrong): spam 199, 0; positive 183, 5; lost-card 193, 3. The mean time includes a `kubectl port-forward` from a laptop.
 
-On 4 CPU threads, Flash took 1.3 to 1.6 times as long per case as nano (2380 and 2375 ms against 1785 and 1507 ms, 120 cases in two runs). Both gave the same verdicts in both runs. So the d3 part of the CI benchmark takes about 1.5 times as long.
+On 4 CPU threads, Flash took 1.3 to 1.6 times as long per case as nano (2380 and 2375 ms against 1785 and 1507 ms, 120 cases in two runs). We tried Flash in CI ([#103](https://github.com/Tanguille/8-ball/pull/103)). On a slow runner the live tests took 968 s instead of nano's 555 s median. The 64-item triage took 225 s of its 240 s limit, and a 2,000-character state passed the 20 s backend timeout. On a faster runner, one benchmark case timed out. So CI keeps nano, and Flash is checked against the deployed GPU by hand. To repeat that check, run `kubectl -n ai port-forward svc/d3-nano 19931:8080` and benchmark an endpoint at that address with `--config`.
 
 ## D3 v3.1 on llama.cpp
 
