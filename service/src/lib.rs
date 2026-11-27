@@ -86,7 +86,7 @@ impl Decision {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct AskResponse {
     pub results: Vec<Decision>,
 }
