@@ -253,7 +253,8 @@ impl Store {
             "INSERT INTO calibrations (calibration_id,spec,bands,report) VALUES (?1,?2,?3,?4) ON CONFLICT(calibration_id) DO UPDATE SET bands=excluded.bands,report=excluded.report",
         )
         .bind(verdict::calibration_key(calibration_id, spec))
-        // The column is NOT NULL: an ad-hoc calibration stores an empty spec.
+        // The column is NOT NULL: an ad-hoc calibration stores an empty spec. Nothing reads it, and specs with the same
+        // question share one row, which names the first. Keep it: an older binary still inserts into it.
         .bind(spec.unwrap_or(""))
         .bind(Json(bands))
         .bind(Json(report))
