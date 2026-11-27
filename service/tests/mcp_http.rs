@@ -7,14 +7,11 @@ use wiremock::MockServer;
 mod common;
 
 async fn serve(mock: &MockServer, database_path: &std::path::Path) -> String {
-    let config: domain::config::Config =
-        toml::from_str(
-            &format!(
-                "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[specs.greeting]\ntype='noul'\ninstructions='Greeting?'",
-                mock.uri(),
-            ),
-        )
-        .unwrap();
+    let config = toml::from_str(&common::config(
+        &mock.uri(),
+        "[specs.greeting]\ntype='noul'\ninstructions='Greeting?'",
+    ))
+    .unwrap();
     let service = service::Service::new(config, store::Store::open(database_path).await.unwrap());
 
     common::serve(std::sync::Arc::new(service), Some("k")).await
@@ -49,9 +46,8 @@ async fn mcp_over_http_with_key_reads_cache_after_restart() {
 }
 #[tokio::test]
 async fn bearer_allows_non_loopback_host_header() {
-    let mock = MockServer::start().await;
-    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
-    let url = serve(&mock, &directory.path().join("db.sqlite")).await;
+    let (service, _store, _mock, _directory) = common::d3("").await;
+    let url = common::serve(service, Some("k")).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/mcp"))
         .header("Host", "8ball.example")
@@ -65,9 +61,8 @@ async fn bearer_allows_non_loopback_host_header() {
 }
 #[tokio::test]
 async fn bearer_scheme_is_case_insensitive() {
-    let mock = MockServer::start().await;
-    let directory = Builder::new().prefix("8ball-").tempdir().unwrap();
-    let url = serve(&mock, &directory.path().join("db.sqlite")).await;
+    let (service, _store, _mock, _directory) = common::d3("").await;
+    let url = common::serve(service, Some("k")).await;
     let response = reqwest::Client::new()
         .post(format!("{url}/v1/questions"))
         .header("Authorization", "bearer k")

@@ -21,20 +21,15 @@ async fn app() -> (
     (service, url, mock, directory)
 }
 
-async fn ask(service: &Service, request: Value) {
-    let request: service::AskRequest = serde_json::from_value(request).unwrap();
-    service.ask(request).await.unwrap();
-}
-
 #[tokio::test]
 async fn questions_review_and_label_close_the_loop() {
     let (service, url, _mock, _dir) = app().await;
     for state in ["hi", "hello", "invoice attached"] {
-        ask(&service, json!({"state":state,"spec":"greeting"})).await;
+        common::ask(&service, json!({"state":state,"spec":"greeting"})).await;
     }
     let urgent = json!({"id":"q","type":"noul","instructions":"Is this urgent?"});
     for state in ["server down", "lunch?"] {
-        ask(&service, json!({"state":state,"questions":[urgent]})).await;
+        common::ask(&service, json!({"state":state,"questions":[urgent]})).await;
     }
 
     let questions = service

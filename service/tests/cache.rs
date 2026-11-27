@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{Value, json};
 
 use domain::verdict;
 use service::{AskRequest, Service};
@@ -19,17 +19,14 @@ async fn fixture(
     ))
     .await
 }
-fn request(state: &str) -> AskRequest {
-    serde_json::from_value(json!({"spec":"greeting","state":state})).unwrap()
-}
-async fn ask_one(service: &Service, request: AskRequest) -> service::Decision {
-    service.ask(request).await.unwrap().results.remove(0)
+fn request(state: &str) -> Value {
+    json!({"spec":"greeting","state":state})
 }
 #[tokio::test]
 async fn cache_hashes_exactly_the_fitted_state() {
     let (service, _store, mock, _dir) = fixture(false).await;
-    let first = ask_one(&service, request("abcde first middle z0123")).await;
-    let second = ask_one(&service, request("abcde different middle z0123")).await;
+    let first = common::ask(&service, request("abcde first middle z0123")).await;
+    let second = common::ask(&service, request("abcde different middle z0123")).await;
     assert!(first.id > 0);
     assert!(!first.cached);
     assert!(second.cached);
@@ -100,21 +97,10 @@ async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
         )
         .await
         .unwrap();
-    let spec = ask_one(&service, request("hi")).await;
+    let spec = common::ask(&service, request("hi")).await;
     assert!(spec.calibrated);
     assert_eq!(spec.verdict, "unsure");
-    let adhoc = ask_one(
-        &service,
-        AskRequest {
-            state: "hi".into(),
-            spec: None,
-            questions: vec![question],
-            endpoint: None,
-            learn: true,
-            escalate: None,
-        },
-    )
-    .await;
+    let adhoc = common::ask(&service, json!({"state":"hi","questions":[question]})).await;
     assert!(!adhoc.calibrated);
     assert!(!adhoc.cached);
     assert_eq!(adhoc.verdict, "yes");
@@ -123,22 +109,21 @@ async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
 #[tokio::test]
 async fn cache_ids_and_labels_stay_in_the_requested_scope() {
     let (service, store, _mock, _dir) = fixture(false).await;
-    let adhoc_request: AskRequest = serde_json::from_value(json!({
-        "state":"hello", "questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]
-    }))
-    .unwrap();
-    let adhoc = ask_one(&service, adhoc_request).await;
-    let named = ask_one(&service, request("hello")).await;
+    let adhoc = common::ask(
+        &service,
+        json!({"state":"hello","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}),
+    )
+    .await;
+    let named = common::ask(&service, request("hello")).await;
     assert!(!named.cached);
     assert_ne!(adhoc.id, named.id);
     service.label(named.id, "yes".into()).await.unwrap();
-    let copy_request: AskRequest =
-        serde_json::from_value(json!({"spec":"greeting-copy","state":"hello"})).unwrap();
-    let copy = ask_one(&service, copy_request.clone()).await;
+    let copy_request = json!({"spec":"greeting-copy","state":"hello"});
+    let copy = common::ask(&service, copy_request.clone()).await;
     assert!(!copy.cached);
     assert_ne!(named.id, copy.id);
     service.label(copy.id, "no".into()).await.unwrap();
-    let again = ask_one(&service, copy_request).await;
+    let again = common::ask(&service, copy_request).await;
     assert!(again.cached);
     assert_eq!(again.id, copy.id);
     let question_hash = verdict::question_hash(&common::greeting());
