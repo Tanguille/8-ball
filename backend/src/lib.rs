@@ -30,6 +30,7 @@ pub struct Endpoint {
 // its 5 s GETs and by the deadline of the request.
 const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
 // A new model behind the same URL gets its own fingerprint, and so its own cache and calibration, within this time.
+// Only /props shows a new model: an endpoint without it keeps its first identity, at the cost of one GET a minute.
 const INFO_TTL: Duration = Duration::from_secs(60);
 // A 429 that asks for a longer wait fails at once instead of holding the caller that long.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
