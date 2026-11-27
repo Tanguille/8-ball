@@ -207,7 +207,7 @@ async fn live_detect_d3() {
     assert_eq!(info.concurrency, 2);
     // The model file alone, without the llama.cpp build.
     assert!(
-        info.fingerprint.ends_with("/vllm-d3-nano-Q8_0.gguf"),
+        info.fingerprint.ends_with("/pplx-decider-flash-v1.3-Q4_K_M.gguf"),
         "{}",
         info.fingerprint
     );

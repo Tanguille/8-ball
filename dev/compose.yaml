@@ -18,10 +18,11 @@ x-llama: &llama
     retries: 120          # the first start downloads the model
 
 services:
+  # Perplexity Decider Flash v1.3, the model behind the deployed d3-nano Service.
   d3:
     <<: *llama
     ports: ["127.0.0.1:9931:8080"]
-    command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/vllm-d3-nano-Q8_0.gguf", "-mu", "https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/resolve/50dea2057df10c4b393559a155ab3bf0bc7532c6/vllm-d3-nano-Q8_0.gguf",
+    command: ["--host", "0.0.0.0", "--port", "8080","-m", "/cache/pplx-decider-flash-v1.3-Q4_K_M.gguf", "-mu", "https://huggingface.co/fxoz/pplx-decider-flash-v1.3-GGUF/resolve/6ff75cda62a1cbbceda5d0a24b81dab874a28b85/pplx-decider-flash-v1.3-Q4_K_M.gguf",
               "-c", "8192", "-ub", "2048", "-np", "2"]
   embed:
     <<: *llama
