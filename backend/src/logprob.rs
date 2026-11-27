@@ -1,3 +1,5 @@
+use serde_json::Value;
+
 use domain::question::{Kind, Question};
 
 use crate::BackendError;
@@ -81,7 +83,7 @@ pub async fn ask(
 /// The first token after the thinking. Servers differ in whether `logprobs.content` holds the thinking tokens,
 /// so: start after the last end-of-thinking marker if one is there, else at the first token. Whitespace-only tokens are skipped.
 /// A reply cut off at `max_tokens` with no marker never left the thinking, so it has no answer.
-fn answer_token(generated: &[serde_json::Value], truncated: bool) -> Option<&serde_json::Value> {
+fn answer_token(generated: &[Value], truncated: bool) -> Option<&Value> {
     let marker = generated.iter().rposition(|entry| {
         entry["token"]
             .as_str()
