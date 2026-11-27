@@ -31,6 +31,6 @@ curl -fsS --retry 3 -H "Authorization: Bearer ${HOSTED_API_KEY:?set HOSTED_API_K
         else empty end
       else empty end
     | "[endpoints.hosted-\(.id | ascii_downcase | gsub("[^a-z0-9]+"; "-"))]\n"
-      + "url = \"\($url)\"\nkind = \"\(.kind)\"\nmodel = \"\(.id)\"\n"
+      + "url = \($url | @json)\nkind = \"\(.kind)\"\nmodel = \(.id | @json)\n"
       + "api_key_env = \"HOSTED_API_KEY\"\nrequests_per_minute = \($per_minute)\nconcurrency = 1\n"
       + (.extra // "")'
