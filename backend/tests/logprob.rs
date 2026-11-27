@@ -235,7 +235,9 @@ async fn exhausted_reasoning_budget_errors() {
         // A thought cut off at the budget with a label-shaped token: no marker, so it must not be scored.
         vec![entry(" No", 0.9), entry(",", 0.5)],
     ] {
-        let (endpoint, _mock) = reasoning_endpoint(content, "length").await;
+        // Radiance counts all but the last token of a cut-off thought as reasoning; that must not count as an end.
+        let usage = json!({"completion_tokens":content.len(),"completion_tokens_details":{"reasoning_tokens":content.len().saturating_sub(1)}});
+        let (endpoint, _mock) = reasoning_endpoint_with_usage(content, "length", usage).await;
         let error = endpoint
             .ask("hi", &[question("noul")])
             .await

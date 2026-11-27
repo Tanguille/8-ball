@@ -81,7 +81,7 @@ pub async fn ask(
 /// The first token after the thinking. Servers differ in whether `logprobs.content` holds the thinking tokens,
 /// so: start after the last end-of-thinking marker if one is there, else after the reasoning tokens that `usage`
 /// counts, else at the first token. Whitespace-only tokens are skipped.
-/// A reply cut off at `max_tokens` with no end of thinking never left the thinking, so it has no answer.
+/// A reply cut off at `max_tokens` with no marker never left the thinking, so it has no answer.
 fn answer_token<'a>(
     generated: &'a [serde_json::Value],
     usage: &serde_json::Value,
@@ -99,10 +99,11 @@ fn answer_token<'a>(
         .as_u64()
         .filter(|&count| all_tokens && count > 0)
         .and_then(|count| usize::try_from(count).ok());
+    // A cut-off reply without a marker is still thinking, whatever usage counts (radiance counts all but the last token).
     let start = match (marker, counted) {
         (Some(marker), _) => marker + 1,
+        (None, _) if truncated => return None,
         (None, Some(count)) => count,
-        (None, None) if truncated => return None,
         (None, None) => 0,
     };
 
