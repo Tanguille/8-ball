@@ -48,7 +48,7 @@ The `decisions` backend sends System One questions and `model` to a hosted `/v1/
 
 If the first detection fails to connect, times out, or gets 502 or 503 from `/props`, the request fails. The next request tries again. If a later check fails, 8-ball keeps the known model.
 
-8-ball retries a request once after a 502 or 503 response. It also retries a 429 response if `Retry-After` is at most 10 seconds. It waits at least 1 second before the 429 retry.
+8-ball retries a request once after a 502 or 503 response. It also retries a 429 response if `Retry-After` is a number of seconds that is at most 10. A `Retry-After` date is not retried. It waits at least 1 second before the 429 retry.
 
 A reranker scores how well input text matches the topic of a question. The `rerank` backend only supports yes-or-no questions (`noul`). It returns `unsure` until you [calibrate](calibration.md) the question.
 
