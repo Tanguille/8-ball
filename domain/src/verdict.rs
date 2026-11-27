@@ -172,7 +172,6 @@ pub struct Report {
     pub precision: f64,
     pub coverage: f64,
     pub target: f64,
-    pub in_sample: bool,
     pub warnings: Vec<String>,
 }
 
@@ -246,7 +245,6 @@ pub fn calibrate(
         precision: ratio(correct, decided),
         coverage: ratio(decided, examples.len()),
         target,
-        in_sample: true,
         warnings,
     };
 

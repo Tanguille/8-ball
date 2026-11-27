@@ -86,7 +86,6 @@ async fn spec_bands_and_ad_hoc_defaults(learning_ad_hoc: bool) {
         precision: 0.0,
         coverage: 0.0,
         target: 0.95,
-        in_sample: true,
         warnings: vec![],
     };
     store

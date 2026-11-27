@@ -52,7 +52,6 @@ const fn report() -> Report {
         precision: 1.0,
         coverage: 1.0,
         target: 0.95,
-        in_sample: true,
         warnings: vec![],
     }
 }
