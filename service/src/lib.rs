@@ -390,8 +390,15 @@ pub struct Service {
 impl Service {
     #[must_use]
     pub fn new(config: Config, store: Store) -> Self {
-        let key =
-            |variable: &Option<String>| variable.as_ref().and_then(|name| std::env::var(name).ok());
+        let key = |variable: &Option<String>| {
+            let name = variable.as_ref()?;
+            let value = std::env::var(name).ok();
+            if value.is_none() {
+                tracing::warn!(variable = %name, "api_key_env is not set; sending no API key");
+            }
+
+            value
+        };
         let endpoints = config
             .endpoints
             .iter()
