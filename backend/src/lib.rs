@@ -173,14 +173,13 @@ impl Endpoint {
             }
         };
         if !status.is_success() {
-            let text: String = text.chars().take(500).collect();
             let hint = if status == StatusCode::NOT_IMPLEMENTED {
                 "; not a decision model"
             } else {
                 ""
             };
 
-            return Err(BackendError(format!("HTTP {status}: {text}{hint}")));
+            return Err(http_error(status, &text, hint));
         }
 
         serde_json::from_str(&text).map_err(|e| BackendError(e.to_string()))
@@ -306,6 +305,13 @@ impl Endpoint {
             BackendKind::Rerank => rerank::ask(self, &info, state, questions).await,
         }
     }
+}
+
+/// Keeps the first 500 characters of the body.
+pub(crate) fn http_error(status: StatusCode, text: &str, hint: &str) -> BackendError {
+    let text: String = text.chars().take(500).collect();
+
+    BackendError(format!("HTTP {status}: {text}{hint}"))
 }
 
 pub fn authed(request: RequestBuilder, key: Option<&str>) -> RequestBuilder {

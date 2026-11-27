@@ -126,3 +126,13 @@ async fn malformed_embedding_responses_return_errors() {
         );
     }
 }
+#[tokio::test]
+async fn an_error_keeps_the_response_body() {
+    let mock = MockServer::start().await;
+    Mock::given(matchers::method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_string("input too long"))
+        .mount(&mock)
+        .await;
+    let error = embedder(&mock).embed(&["x".into()]).await.unwrap_err();
+    assert!(error.to_string().contains("input too long"), "{error}");
+}
