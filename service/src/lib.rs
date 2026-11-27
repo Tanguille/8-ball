@@ -479,20 +479,23 @@ impl Service {
         if !self.store.set_label(id, &value).await? {
             return Err(ServiceError::BadRequest(format!("no decision {id}")));
         }
-        if self.config.learning.recalibrate_after == 0 {
-            return Ok(LabelResponse { id, label: value });
-        }
-        // A label serves every endpoint that answered this state, an escalated one's primary included.
-        let endpoints = self
-            .store
-            .endpoints(spec.as_deref(), &question_hash, &state_hash)
-            .await?;
-        for name in &endpoints {
-            if let Err(e) = self
-                .maybe_recalibrate(spec.as_deref(), &question, name)
-                .await
+        if self.config.learning.recalibrate_after > 0 {
+            // A label serves every endpoint that answered this state, an escalated one's primary included, while it
+            // is still configured.
+            let endpoints = self
+                .store
+                .endpoints(spec.as_deref(), &question_hash, &state_hash)
+                .await?;
+            for name in endpoints
+                .iter()
+                .filter(|name| self.endpoints.contains_key(name.as_str()))
             {
-                tracing::warn!(error = %e, endpoint = %name, "automatic recalibration failed");
+                if let Err(e) = self
+                    .maybe_recalibrate(spec.as_deref(), &question, name)
+                    .await
+                {
+                    tracing::warn!(error = %e, endpoint = %name, "automatic recalibration failed");
+                }
             }
         }
 
