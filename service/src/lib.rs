@@ -725,6 +725,8 @@ impl Service {
         precision: Option<f64>,
         dry_run: bool,
     ) -> Result<CalibrateResponse, ServiceError> {
+        // Check before judging: the fit below re-asks the model for every labelled state.
+        verdict::check_target(precision.unwrap_or(0.95)).map_err(ServiceError::BadRequest)?;
         let (questions, name) = self.resolve_questions(Some(spec), &[], None)?;
 
         self.calibrate_question(Some(spec), &questions[0], &name, precision, dry_run, None)

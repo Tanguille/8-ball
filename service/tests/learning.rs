@@ -230,6 +230,15 @@ async fn calibrate_reasks_the_model_instead_of_remembering() {
 }
 
 #[tokio::test]
+async fn a_bad_precision_asks_no_model() {
+    let app = fixture("").await;
+    label_under_old_model(&app.store, "yes-old", "yes").await;
+    let error = app.service.calibrate("greeting", Some(2.0), true).await;
+    assert!(matches!(error, Err(service::ServiceError::BadRequest(_))));
+    assert!(requests(&app.mock).await.is_empty());
+}
+
+#[tokio::test]
 async fn ad_hoc_questions_learn_by_their_stored_text() {
     let urgent = json!({"id":"q","type":"noul","instructions":"Urgent?"});
     let app = fixture("").await;

@@ -177,6 +177,15 @@ pub struct Report {
     pub warnings: Vec<String>,
 }
 
+/// A NaN fails too.
+pub fn check_target(target: f64) -> Result<(), String> {
+    if (0.5..=0.99).contains(&target) {
+        Ok(())
+    } else {
+        Err("precision must be between 0.5 and 0.99".into())
+    }
+}
+
 pub fn calibrate(
     kind: &Kind,
     backend: BackendKind,
@@ -184,9 +193,7 @@ pub fn calibrate(
     target: f64,
     previous: Option<Bands>,
 ) -> Result<(Bands, Report), String> {
-    if !(0.5..=0.99).contains(&target) {
-        return Err("precision must be between 0.5 and 0.99".into());
-    }
+    check_target(target)?;
     let mut warnings = Vec::new();
     let labels = kind.labels();
     let bands = if matches!(kind, Kind::Noul { .. }) {
