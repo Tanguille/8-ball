@@ -6,8 +6,8 @@ A spec is a named question in the configuration. The state is the text to judge.
 | --- | --- |
 | `serve` | Run REST and HTTP MCP. |
 | `mcp` | Serve MCP over stdin and stdout. |
-| `ask [<kind> <instructions>]` | Ask one ad-hoc question or a `--spec`, not both. `--state` gives the state. The default is stdin. `--exit-code` enables exit codes 1 and 3. |
-| `triage [<instructions>]` | Judge a JSON array from stdin with one question or a `--spec`, not both. `--type` sets the question type (default `noul`). `--context-file` names a UTF-8 file with shared evidence for every item. `--top-k` judges only the items most similar to the question and needs `[embedder]`. An array of more than 64 items goes in requests of 64, one after another, and the output keeps the input indices. `--top-k` and identical items work within each group of 64. If one request fails, `triage` stops, prints nothing and exits 4. A new run gets the groups that were judged before the failure from the cache. |
+| `ask [<kind> <instructions>]` | Ask one ad-hoc question or a `--spec`, not both. `--state` gives the state. The default is stdin, without its trailing newlines. `--exit-code` enables exit codes 1 and 3. |
+| `triage [<instructions>]` | Judge a JSON array from stdin with one question or a `--spec`, not both. `--type` sets the question type (default `noul`). `--context-file` names a UTF-8 file with shared evidence for every item. Its trailing newlines are removed. `--top-k` judges only the items most similar to the question and needs `[embedder]`. An array of more than 64 items goes in requests of 64, one after another, and the output keeps the input indices. `--top-k` and identical items work within each group of 64. If one request fails, `triage` stops, prints nothing and exits 4. A new run gets the groups that were judged before the failure from the cache. |
 | `observe` | Record the triage decisions of a snapshot in a private file. Print JSON with `wakeAgent: true` and every candidate. It requires `--spec`, `--input` (JSON with `context` text and at most 64 `items`), and `--observations` (a new JSONL file, never overwritten). |
 | `evaluate` | Replay labeled JSONL cases from stdin against a required `--spec`. Report misses, `unsure` verdicts, errors, and latency. Calibration does not change. |
 | `questions` | List the stored questions with their decision, `unsure`, and label counts. Find ad-hoc questions that come back often, and save them as specs. |
@@ -15,7 +15,7 @@ A spec is a named question in the configuration. The state is the text to judge.
 | `label <id> <value>` | Label a saved decision of a current spec, or of an ad-hoc question when `learning.ad_hoc` is on. The value is `yes`, `no`, an option name, or a level index. |
 | `calibrate <spec>` | Fit bands (decision thresholds) from labeled states. `--precision` takes 0.5 to 0.99 and defaults to 0.95. `--dry-run` reports without a save. |
 | `doctor` | Report endpoint detection, health, model fingerprints, and spec calibration. |
-| `config check [<path>]` | Make sure that a TOML file is valid, without a server. `<path>` defaults to the [configuration path](configuration.md), not `EIGHTBALL_CONFIG`. |
+| `config check [<path>]` | Make sure that a TOML file is valid, without a server. `<path>` defaults to `EIGHTBALL_CONFIG`, then the [configuration path](configuration.md). |
 
 | Shared flag | Commands | Purpose |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ A spec is a named question in the configuration. The state is the text to judge.
 | `--keep <value>` | `triage`, `evaluate` | Keep `yes` (default), `no`, an option name, or a minimum level index. The default works for noul only, so choice and score questions need `--keep`. |
 | `--no-learn` | `ask`, `triage` | Turn off remembered labels, exploration, and reports. It sends `"learn": false`. |
 | `--limit <n>` | `questions`, `decisions` | List at most this many rows, 1 to 500. The default is 50. |
-| `--timeout-ms <ms>` | All that call a server | Total request deadline, at least 1. The default is 25,000 for `observe` and `evaluate`, otherwise none. |
+| `--timeout-ms <ms>` | All that call a server | Total request deadline, at least 1. The default is 120,000 for `observe` and `evaluate` (the server's triage deadline plus 30 seconds), otherwise none. |
 
 [Environment variables](configuration.md#environment-variables) lists the other flags. `8ball --version` prints the version.
 
@@ -34,7 +34,7 @@ A spec is a named question in the configuration. The state is the text to judge.
 | 1 | With `--exit-code`, the noul verdict is `no`. |
 | 2 | The argument parser rejected the arguments. |
 | 3 | With `--exit-code`, the verdict is `unsure`. |
-| 4 | Any other error, for example `ask` with neither `--spec` nor `<kind> <instructions>`. For `doctor`, the default endpoint failed. For `evaluate`, a case failed. |
+| 4 | Any other error, for example an unreachable server. For `doctor`, the default endpoint failed. For `evaluate`, a case failed. |
 
 `observe` exits 0 after input, model, and write errors. Its JSON reports them.
 
