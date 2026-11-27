@@ -294,6 +294,19 @@ const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
 // The primary answer fails the request when it misses it; an escalation that misses it keeps the primary `unsure`.
 const ASK_DEADLINE: Duration = Duration::from_secs(20);
 
+/// A bad request that lists the valid values, unless `value` is a label of `kind`.
+fn check_label(kind: &Kind, what: &str, value: &str) -> Result<(), ServiceError> {
+    let labels = kind.labels();
+    if labels.iter().any(|label| label == value) {
+        return Ok(());
+    }
+
+    Err(ServiceError::BadRequest(format!(
+        "invalid {what} {value}; use one of {}",
+        labels.join(", ")
+    )))
+}
+
 /// The result of `future`, or the error of `passed` once `deadline` is reached.
 async fn within<T, E>(
     deadline: tokio::time::Instant,
@@ -459,9 +472,7 @@ impl Service {
                 _ => return Err(ServiceError::BadRequest("label must be yes or no".into())),
             }
         } else {
-            if !question.kind.labels().contains(&value) {
-                return Err(ServiceError::BadRequest(format!("invalid label {value}")));
-            }
+            check_label(&question.kind, "label", &value)?;
 
             value
         };
@@ -951,11 +962,7 @@ impl Service {
         )?;
         let question = questions.into_iter().next().expect("one triage question");
         let keep = request.keep.as_deref().unwrap_or("yes");
-        if !question.kind.labels().iter().any(|label| label == keep) {
-            return Err(ServiceError::BadRequest(format!(
-                "invalid keep value: {keep}"
-            )));
-        }
+        check_label(&question.kind, "keep value:", keep)?;
         let spec = request.spec.as_deref();
         let pass = self.pass(
             spec,
