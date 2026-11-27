@@ -184,6 +184,7 @@ fn invalid_arguments_exit_two() {
         &[
             "ask", "--spec", "named", "--option", "a", "--state", "hi", "--url", dead,
         ],
+        &["ask", "--state", "hi", "--url", dead],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
             .args(args)

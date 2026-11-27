@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use reqwest::Client;
 use rmcp::ServiceExt;
 use serde_json::{Value, json};
@@ -36,10 +36,18 @@ struct Cli {
     command: Command,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum QuestionKind {
+    Noul,
+    Choice,
+    Score,
+}
+
 #[derive(Args)]
 struct AskArgs {
-    #[arg(value_parser = ["noul", "choice", "score"])]
-    kind: Option<String>,
+    #[arg(required_unless_present = "spec")]
+    kind: Option<QuestionKind>,
+    #[arg(required_unless_present = "spec")]
     instructions: Option<String>,
     #[arg(long, conflicts_with_all = ["kind", "instructions", "options", "levels"])]
     spec: Option<String>,
@@ -72,8 +80,8 @@ struct TriageArgs {
     /// UTF-8 file containing shared evidence for every item.
     #[arg(long)]
     context_file: Option<PathBuf>,
-    #[arg(long = "type", default_value = "noul", value_parser = ["noul", "choice", "score"])]
-    kind: String,
+    #[arg(long = "type", default_value = "noul")]
+    kind: QuestionKind,
     #[arg(long = "option")]
     options: Vec<String>,
     #[arg(long = "level")]
@@ -409,14 +417,14 @@ async fn serve(config: ConfigArgs, listen: String, api_key: Option<String>) -> R
 }
 
 fn make_question(
-    kind: &str,
+    kind: QuestionKind,
     instructions: String,
     options: Vec<String>,
     levels: Vec<String>,
 ) -> Question {
     let kind = match kind {
-        "noul" => Kind::Noul { criteria: None },
-        "choice" => Kind::Choice {
+        QuestionKind::Noul => Kind::Noul { criteria: None },
+        QuestionKind::Choice => Kind::Choice {
             criteria: options
                 .into_iter()
                 .map(|text| {
@@ -425,8 +433,7 @@ fn make_question(
                 })
                 .collect(),
         },
-        "score" => Kind::Score { criteria: levels },
-        _ => unreachable!("clap validates kind"),
+        QuestionKind::Score => Kind::Score { criteria: levels },
     };
 
     Question {
@@ -450,15 +457,12 @@ async fn ask(
         remote,
     }: AskArgs,
 ) -> Result<i32> {
-    let questions = if spec.is_some() {
-        Vec::new()
-    } else {
-        let (Some(kind), Some(instructions)) = (kind, instructions) else {
-            bail!("give --spec or <kind> <instructions>");
-        };
-
-        vec![make_question(&kind, instructions, options, levels)]
-    };
+    // Clap gives either --spec or both positionals, so a spec leaves this empty.
+    let questions: Vec<_> = kind
+        .zip(instructions)
+        .map(|(kind, instructions)| make_question(kind, instructions, options, levels))
+        .into_iter()
+        .collect();
     let state = match state {
         Some(state) => state,
         None => stdin("the state from stdin; end with Ctrl-D, or give --state")?
@@ -522,7 +526,7 @@ async fn doctor(remote: &Remote) -> Result<i32> {
 async fn triage(args: TriageArgs) -> Result<i32> {
     let question = args
         .instructions
-        .map(|instructions| make_question(&args.kind, instructions, args.options, args.levels));
+        .map(|instructions| make_question(args.kind, instructions, args.options, args.levels));
     let context = args.context_file.as_deref().map(read).transpose()?;
     let context = context.as_deref().map(|text| text.trim_end_matches('\n'));
     let items: Vec<Value> =
