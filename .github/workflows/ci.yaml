@@ -106,7 +106,7 @@ jobs:
   # never runs for a pull request.
   publish:
     needs: models
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: ${{ !cancelled() && needs.models.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-26.04
     permissions:
       actions: read

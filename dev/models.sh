@@ -29,14 +29,7 @@ case "${1:-status}" in
   up) docker compose up -d --wait ;;
   bench) docker compose --profile bench up -d --wait big ;;
   down) docker compose --profile bench down ;;
-  status)
-    docker compose ps
-    for p in 9931 9932 9933 9934; do
-      printf '%s ' "$p"
-      curl -fsS "http://127.0.0.1:$p/health" || printf 'DOWN'
-      echo
-    done
-    ;;
+  status) docker compose --profile bench ps ;;
   logs) docker compose logs --tail=100 ${2:+"$2"} ;;
   *)
     echo "usage: $0 up|bench|down|status|logs [service]" >&2

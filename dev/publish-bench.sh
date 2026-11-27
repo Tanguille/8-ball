@@ -10,7 +10,7 @@ gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" 
 # The bench writes page.md without the methods that it excluded (errors on more than 1% of their cases), and decides
 # in summary.json whether the page is worth publishing.
 if ! jq -e .publish "$dir/summary.json" >/dev/null; then
-  echo "::warning::$page not updated: d3 or all hosted models had errors on more than 1% of their cases."
+  echo "::warning::$page not updated: d3 was excluded, or fewer than 2 methods were left (see summary.json)."
   exit 0
 fi
 {

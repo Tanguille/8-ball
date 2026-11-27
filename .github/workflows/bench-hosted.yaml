@@ -105,7 +105,8 @@ jobs:
           echo "ENDPOINTS=d3,$endpoints" >> "$GITHUB_ENV"
           echo "Hosted endpoints: $endpoints"
       # The last saved run of this mode is the baseline.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - if: env.SKIP != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: baseline
           key: ${{ env.BASELINE_PREFIX }}-${{ github.run_id }}
@@ -133,14 +134,14 @@ jobs:
             cargo run --release -p bench -- "${args[@]}" 2> bench.err | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
             cat bench.err >&2
             if [ "$status" = 0 ] || [ "$MODE" = matrix ] || ! grep -q 'failed its doctor probe' bench.err; then break; fi
-            [ "$attempt" = 3 ] || sleep 120
+            if [ "$attempt" = 3 ]; then
+              echo "::warning::The provider failed its doctor probe three times; skipping the hosted benchmark."
+              echo "SKIP=true" >> "$GITHUB_ENV"
+              echo "skipped=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 120
           done
-          if [ "$status" != 0 ] && [ "$MODE" != matrix ] && grep -q 'failed its doctor probe' bench.err; then
-            echo "::warning::The provider failed its doctor probe three times; skipping the hosted benchmark."
-            echo "SKIP=true" >> "$GITHUB_ENV"
-            echo "skipped=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           if [ "$status" != 0 ] && [ "$MODE" = matrix ]; then
             echo "::warning::A hosted model got worse than last week; see the job summary."
           elif [ "$status" != 0 ]; then
