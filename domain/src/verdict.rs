@@ -34,23 +34,21 @@ impl Bands {
     }
 }
 
-#[must_use]
-pub fn confidence_choice(probabilities: &[f64]) -> f64 {
+fn confidence_choice(probabilities: &[f64]) -> f64 {
     if probabilities.len() < 2 {
         return 1.0;
     }
-    let count = f64::from(u32::try_from(probabilities.len()).expect("option count fits u32"));
+    let count = float(probabilities.len());
 
     ((probabilities[argmax(probabilities)] - 1.0 / count) / (1.0 - 1.0 / count)).max(0.0)
 }
 
-#[must_use]
-pub fn confidence_score(probabilities: &[f64]) -> f64 {
+fn confidence_score(probabilities: &[f64]) -> f64 {
     if probabilities.len() < 2 {
         return 1.0;
     }
-    let count = f64::from(u32::try_from(probabilities.len()).expect("level count fits u32"));
-    let mode = f64::from(u32::try_from(argmax(probabilities)).expect("level index fits u32"));
+    let count = float(probabilities.len());
+    let mode = float(argmax(probabilities));
     let distance: f64 = (0_u32..)
         .zip(probabilities)
         .map(|(index, probability)| probability * (f64::from(index) - mode).abs())
@@ -340,9 +338,7 @@ fn threshold(
             .fold((0, 0), |(selected, correct), (_, is_correct)| {
                 (selected + 1, correct + usize::from(*is_correct))
             });
-        let count = f64::from(u32::try_from(selected).expect("example count fits u32"));
-
-        count >= min_side && ratio(correct, selected) >= target
+        float(selected) >= min_side && ratio(correct, selected) >= target
     })
 }
 
@@ -351,6 +347,9 @@ fn ratio(numerator: usize, denominator: usize) -> f64 {
         return 0.0;
     }
 
-    f64::from(u32::try_from(numerator).expect("example count fits u32"))
-        / f64::from(u32::try_from(denominator).expect("example count fits u32"))
+    float(numerator) / float(denominator)
+}
+
+fn float(count: usize) -> f64 {
+    f64::from(u32::try_from(count).expect("count fits u32"))
 }
