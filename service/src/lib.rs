@@ -956,9 +956,6 @@ impl Service {
                 "invalid keep value: {keep}"
             )));
         }
-        let (mut items, firsts) = self
-            .triage_items(&endpoint, request.items, request.context.as_deref())
-            .await?;
         let spec = request.spec.as_deref();
         let pass = self.pass(
             spec,
@@ -968,6 +965,9 @@ impl Service {
             "triage",
             self.triage_deadline,
         );
+        let (mut items, firsts) = self
+            .triage_items(&pass, request.items, request.context.as_deref())
+            .await?;
         let warning = match request.top_k {
             Some(top_k) => self.prefilter(&question, &mut items, top_k, &pass).await?,
             None => None,
@@ -1083,7 +1083,7 @@ impl Service {
     /// The distinct item states with the index of their first copy, and for every item the index of its first copy.
     async fn triage_items(
         &self,
-        endpoint: &str,
+        pass: &Pass<'_>,
         items: Vec<Value>,
         context: Option<&str>,
     ) -> Result<(Vec<(usize, String)>, Vec<usize>), ServiceError> {
@@ -1102,11 +1102,12 @@ impl Service {
             .map(|(text, index)| (index, text))
             .collect();
         if context.is_some() && !items.is_empty() {
-            let backend = &self.endpoints[endpoint];
-            let info = backend
-                .info()
-                .await
-                .map_err(|e| self.backend_error(endpoint, e))?;
+            let backend = &self.endpoints[pass.endpoint];
+            let info = within(pass.deadline, backend.info(), || {
+                backend::BackendError(pass.passed.clone())
+            })
+            .await
+            .map_err(|e| self.backend_error(pass.endpoint, e))?;
             if items
                 .iter()
                 .any(|(_, text)| backend.fitted(&info, text) != *text)

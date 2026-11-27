@@ -378,3 +378,16 @@ async fn a_missed_triage_deadline_is_a_counted_backend_error() {
         "{metrics}"
     );
 }
+
+#[tokio::test]
+async fn the_triage_deadline_bounds_endpoint_detection() {
+    let app = fixture(30, "").await;
+    wiremock::Mock::given(matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_delay(Duration::from_secs(3)))
+        .mount(&app.d3)
+        .await;
+    let request =
+        serde_json::from_value(json!({"spec":"greeting","context":"c","items":["yes-1"]})).unwrap();
+    let error = app.service.triage(request).await.unwrap_err().to_string();
+    assert!(error.contains("triage deadline"), "{error}");
+}
