@@ -2,6 +2,10 @@ use domain::config::Config;
 
 const MINIMAL: &str = "default = 'd3'\n[endpoints.d3]\nurl = 'http://h:1/v1/'\n";
 
+fn error(text: &str) -> String {
+    Config::parse(text, "test").unwrap_err().to_string()
+}
+
 #[test]
 fn minimal_ok() {
     let endpoint_config = Config::parse(MINIMAL, "test").unwrap();
@@ -10,25 +14,12 @@ fn minimal_ok() {
 
 #[test]
 fn unknown_key_rejected() {
-    assert!(
-        Config::parse(&format!("{MINIMAL}colour = 'red'\n"), "test")
-            .unwrap_err()
-            .to_string()
-            .contains("colour")
-    );
+    assert!(error(&format!("{MINIMAL}colour = 'red'\n")).contains("colour"));
 }
 
 #[test]
 fn default_must_exist() {
-    assert!(
-        Config::parse(
-            &MINIMAL.replace("default = 'd3'", "default = 'nope'"),
-            "test"
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("nope")
-    );
+    assert!(error(&MINIMAL.replace("default = 'd3'", "default = 'nope'")).contains("nope"));
 }
 
 #[test]
@@ -43,29 +34,26 @@ fn spec_parses() {
 #[test]
 fn bad_spec_name() {
     assert!(
-        Config::parse(
-            &format!("{MINIMAL}\n[specs.Bad_Name]\ntype = 'noul'\ninstructions = 'x'\n"),
-            "test"
-        )
-        .unwrap_err()
-        .to_string()
+        error(&format!(
+            "{MINIMAL}\n[specs.Bad_Name]\ntype = 'noul'\ninstructions = 'x'\n"
+        ))
         .contains("Bad_Name")
     );
 }
 
 #[test]
 fn logprob_needs_model() {
-    assert!(
-        Config::parse(&format!("{MINIMAL}kind = 'logprob'\n"), "test")
-            .unwrap_err()
-            .to_string()
-            .contains("model")
-    );
+    assert!(error(&format!("{MINIMAL}kind = 'logprob'\n")).contains("model"));
 }
 
 #[test]
-fn zero_concurrency() {
-    assert!(Config::parse(&format!("{MINIMAL}concurrency = 0\n"), "test").is_err());
+fn zero_rejected() {
+    for field in ["concurrency", "timeout_secs", "requests_per_minute"] {
+        assert!(
+            error(&format!("{MINIMAL}{field} = 0\n")).contains("nonzero"),
+            "{field}"
+        );
+    }
 }
 
 #[test]
@@ -74,27 +62,20 @@ fn retention_default() {
 }
 
 #[test]
-fn learning_defaults() {
+fn learning_defaults_and_overrides() {
     let learning = Config::parse(MINIMAL, "test").unwrap().learning;
     assert!(learning.report);
     assert!(learning.remember);
     assert!((learning.explore - 0.05).abs() < 1e-9);
     assert_eq!(learning.recalibrate_after, 20);
     assert!(learning.ad_hoc);
-}
-
-#[test]
-fn learning_overrides() {
     let learning = Config::parse(
         &format!("{MINIMAL}[learning]\nexplore = 0.0\nad_hoc = false\n"),
         "test",
     )
     .unwrap()
     .learning;
-    assert!(learning.report);
-    assert!(learning.remember);
     assert!(learning.explore.abs() < 1e-9);
-    assert_eq!(learning.recalibrate_after, 20);
     assert!(!learning.ad_hoc);
 }
 
@@ -102,13 +83,8 @@ fn learning_overrides() {
 fn learning_explore_range() {
     for explore in ["1.5", "-0.1", "nan"] {
         assert!(
-            Config::parse(
-                &format!("{MINIMAL}[learning]\nexplore = {explore}\n"),
-                "test"
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("learning.explore must be between 0 and 1"),
+            error(&format!("{MINIMAL}[learning]\nexplore = {explore}\n"))
+                .contains("learning.explore must be between 0 and 1"),
             "explore = {explore}"
         );
     }
@@ -116,32 +92,7 @@ fn learning_explore_range() {
 
 #[test]
 fn learning_unknown_key_rejected() {
-    assert!(
-        Config::parse(&format!("{MINIMAL}[learning]\ncolour = 1\n"), "test")
-            .unwrap_err()
-            .to_string()
-            .contains("colour")
-    );
-}
-
-#[test]
-fn zero_timeout_rejected() {
-    assert!(
-        Config::parse(&format!("{MINIMAL}timeout_secs = 0\n"), "test")
-            .unwrap_err()
-            .to_string()
-            .contains("nonzero")
-    );
-}
-
-#[test]
-fn zero_requests_per_minute_rejected() {
-    assert!(
-        Config::parse(&format!("{MINIMAL}requests_per_minute = 0\n"), "test")
-            .unwrap_err()
-            .to_string()
-            .contains("nonzero")
-    );
+    assert!(error(&format!("{MINIMAL}[learning]\ncolour = 1\n")).contains("colour"));
 }
 
 /// The CLI prints errors with `{e:#}`, which appends the source; the message must not repeat it.
@@ -156,12 +107,7 @@ const TWO_ENDPOINTS: &str =
     "default = 'd3'\n[endpoints.d3]\nurl = 'http://h:1'\n[endpoints.big]\nurl = 'http://h:2'\n";
 
 fn escalation_error(escalation: &str) -> String {
-    Config::parse(
-        &format!("{TWO_ENDPOINTS}[escalation]\n{escalation}"),
-        "test",
-    )
-    .unwrap_err()
-    .to_string()
+    error(&format!("{TWO_ENDPOINTS}[escalation]\n{escalation}"))
 }
 
 #[test]
