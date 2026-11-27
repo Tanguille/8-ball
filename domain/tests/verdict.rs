@@ -321,3 +321,26 @@ fn minimum_side_is_exact_at_target_0_9() {
     };
     assert!((yes_at - 0.97).abs() < 1e-9, "yes_at = {yes_at}");
 }
+#[test]
+fn level_cutoff_ignores_wrong_examples() {
+    // A cutoff at the wrong example's confidence adds a wrong answer and no correct one.
+    let examples: Vec<_> = (0..100)
+        .map(|_| example(0.9, "a"))
+        .chain([example(0.75, "b")])
+        .collect();
+    let (bands, _) = verdict::calibrate(
+        &choice(&["a", "b"]),
+        BackendKind::Systemone,
+        &examples,
+        0.95,
+        None,
+    )
+    .unwrap();
+    let Bands::Level { min_confidence } = bands else {
+        panic!("level bands")
+    };
+    assert!(
+        (min_confidence - 0.8).abs() < 1e-9,
+        "min_confidence = {min_confidence}"
+    );
+}

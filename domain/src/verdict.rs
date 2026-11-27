@@ -195,11 +195,11 @@ pub fn calibrate(
                 .map(|example| (example.probs[0], example.label == label))
                 .collect()
         };
-        let yes_at = threshold(&side("yes"), true, true, target).unwrap_or_else(|| {
+        let yes_at = threshold(&side("yes"), true, target).unwrap_or_else(|| {
             warnings.push("yes side: not enough evidence for the target".into());
             1.01
         });
-        let no_at = threshold(&side("no"), false, true, target).unwrap_or_else(|| {
+        let no_at = threshold(&side("no"), false, target).unwrap_or_else(|| {
             warnings.push("no side: not enough evidence for the target".into());
             -0.01
         });
@@ -215,7 +215,7 @@ pub fn calibrate(
                 )
             })
             .collect();
-        let min_confidence = threshold(&data, true, false, target).unwrap_or_else(|| {
+        let min_confidence = threshold(&data, true, target).unwrap_or_else(|| {
             warnings.push("not enough evidence for the target".into());
             1.01
         });
@@ -307,15 +307,11 @@ fn merge(fitted: Bands, previous: Bands, default: Bands) -> Bands {
     }
 }
 
-fn threshold(
-    data: &[(f64, bool)],
-    above: bool,
-    correct_candidates_only: bool,
-    target: f64,
-) -> Option<f64> {
+/// Only correct values are candidates: a cutoff at a wrong value adds a wrong answer and no correct one.
+fn threshold(data: &[(f64, bool)], above: bool, target: f64) -> Option<f64> {
     let mut candidates: Vec<_> = data
         .iter()
-        .filter(|(_, correct)| !correct_candidates_only || *correct)
+        .filter(|(_, correct)| *correct)
         .map(|(value, _)| *value)
         .collect();
     candidates.sort_by(f64::total_cmp);
