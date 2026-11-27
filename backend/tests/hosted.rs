@@ -77,24 +77,6 @@ async fn a_hosted_catalog_detects_decisions_and_chat_models() {
 }
 
 #[tokio::test]
-async fn a_short_429_is_retried_after_its_retry_after() {
-    let server = MockServer::start().await;
-    Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/decisions"))
-        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "1"))
-        .up_to_n_times(1)
-        .with_priority(1)
-        .mount(&server)
-        .await;
-    decisions(&server, answer()).await;
-    let endpoint = decisions_endpoint(&server, "");
-    let start = Instant::now();
-    endpoint.ask("hi", &[question()]).await.unwrap();
-    assert!(start.elapsed() >= Duration::from_secs(1));
-    assert_eq!(posts(&server).await.len(), 2);
-}
-
-#[tokio::test]
 async fn a_long_429_fails_at_once() {
     let server = MockServer::start().await;
     decisions(
@@ -164,17 +146,24 @@ async fn a_second_429_is_not_retried_and_retry_after_0_waits_a_second() {
 }
 
 #[tokio::test]
-async fn a_502_is_retried_once() {
-    let server = MockServer::start().await;
-    Mock::given(matchers::method("POST"))
-        .and(matchers::path("/v1/decisions"))
-        .respond_with(ResponseTemplate::new(502))
-        .up_to_n_times(1)
-        .with_priority(1)
-        .mount(&server)
-        .await;
-    decisions(&server, answer()).await;
-    let endpoint = decisions_endpoint(&server, "");
-    endpoint.ask("hi", &[question()]).await.unwrap();
-    assert_eq!(posts(&server).await.len(), 2);
+async fn a_short_429_and_a_502_are_retried_once() {
+    for template in [
+        ResponseTemplate::new(429).insert_header("Retry-After", "1"),
+        ResponseTemplate::new(502),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(matchers::method("POST"))
+            .and(matchers::path("/v1/decisions"))
+            .respond_with(template)
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        decisions(&server, answer()).await;
+        let endpoint = decisions_endpoint(&server, "");
+        let start = Instant::now();
+        endpoint.ask("hi", &[question()]).await.unwrap();
+        assert!(start.elapsed() >= Duration::from_secs(1));
+        assert_eq!(posts(&server).await.len(), 2);
+    }
 }
