@@ -199,3 +199,25 @@ fn invalid_arguments_exit_two() {
         );
     }
 }
+#[test]
+fn config_check_reads_eightball_config() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("8ball.toml");
+    std::fs::write(
+        &path,
+        "default='d3'\n[endpoints.d3]\nurl='http://127.0.0.1:9'",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_8ball"))
+        .args(["config", "check"])
+        .env("EIGHTBALL_CONFIG", &path)
+        // An empty config home, so the default path cannot pass by accident.
+        .env("XDG_CONFIG_HOME", directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

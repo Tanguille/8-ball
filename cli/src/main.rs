@@ -289,7 +289,11 @@ enum Command {
 
 #[derive(Subcommand)]
 enum ConfigAction {
-    Check { path: Option<PathBuf> },
+    /// Validate a config file without a server.
+    Check {
+        #[arg(env = "EIGHTBALL_CONFIG")]
+        path: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
