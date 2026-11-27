@@ -109,6 +109,17 @@ pub struct SpecConfig {
     pub escalate: Option<bool>,
 }
 
+impl SpecConfig {
+    #[must_use]
+    pub fn question(&self, name: &str) -> crate::question::Question {
+        crate::question::Question {
+            id: name.into(),
+            instructions: self.instructions.clone(),
+            kind: self.kind.clone(),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     // thiserror makes `source` the error's source, which `{e:#}` prints after this message.
@@ -194,13 +205,9 @@ impl Config {
             {
                 return Err(format!("spec {name}: unknown endpoint {endpoint}"));
             }
-            crate::question::Question {
-                id: name.clone(),
-                instructions: spec.instructions.clone(),
-                kind: spec.kind.clone(),
-            }
-            .validate()
-            .map_err(|e| format!("spec {name}: {e}"))?;
+            spec.question(name)
+                .validate()
+                .map_err(|e| format!("spec {name}: {e}"))?;
         }
 
         Ok(())

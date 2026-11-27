@@ -1208,7 +1208,7 @@ impl Service {
         questions: &[Question],
         endpoint: Option<&str>,
     ) -> Result<(Vec<Question>, String), ServiceError> {
-        let questions = if let Some(name) = spec {
+        let (questions, spec_endpoint) = if let Some(name) = spec {
             if !questions.is_empty() {
                 return Err(ServiceError::BadRequest(
                     "use spec or questions, not both".into(),
@@ -1219,19 +1219,13 @@ impl Service {
                 .specs
                 .get(name)
                 .ok_or_else(|| ServiceError::BadRequest(format!("unknown spec {name}")))?;
-            vec![Question {
-                id: name.into(),
-                instructions: spec.instructions.clone(),
-                kind: spec.kind.clone(),
-            }]
+            (vec![spec.question(name)], spec.endpoint.as_deref())
         } else {
-            questions.to_vec()
+            (questions.to_vec(), None)
         };
         domain::question::validate_all(&questions)
             .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-        let name = endpoint
-            .or_else(|| spec.and_then(|name| self.config.specs.get(name)?.endpoint.as_deref()))
-            .unwrap_or(&self.config.default);
+        let name = endpoint.or(spec_endpoint).unwrap_or(&self.config.default);
         if !self.endpoints.contains_key(name) {
             return Err(ServiceError::BadRequest(format!("unknown endpoint {name}")));
         }
