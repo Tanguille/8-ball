@@ -82,8 +82,10 @@ struct TriageArgs {
     context_file: Option<PathBuf>,
     #[arg(long = "type", default_value = "noul")]
     kind: QuestionKind,
+    /// choice option, repeatable: name or name=description
     #[arg(long = "option")]
     options: Vec<String>,
+    /// score level, repeatable, lowest first
     #[arg(long = "level")]
     levels: Vec<String>,
     #[arg(long)]
