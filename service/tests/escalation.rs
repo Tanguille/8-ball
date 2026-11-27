@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use wiremock::{MockServer, matchers};
 
 use domain::config::BackendKind;
-use service::{Decision, TriageResponse};
+use service::Decision;
 
 use common::{indices, requests};
 
@@ -55,15 +55,16 @@ async fn fixture(per_minute: usize, learning: &str) -> App {
         .mount(&big)
         .await;
     // `big` may take 120 s per call, so only the ask or triage deadline bounds the slow escalation.
-    let config = format!(
-        "default='d3'\n[endpoints.d3]\nurl='{d3}'\nkind='systemone'\n\
-         [endpoints.big]\nurl='{big}'\nkind='logprob'\nmodel='big'\ntimeout_secs=120\n\
-         [escalation]\nendpoint='big'\nper_minute={per_minute}\n\
-         [specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n\
-         [specs.quiet]\ntype='noul'\ninstructions='Quiet?'\nescalate=false\n\
-         [learning]\nexplore=0.0\n{learning}",
-        d3 = d3.uri(),
-        big = big.uri(),
+    let config = common::config(
+        &d3.uri(),
+        &format!(
+            "[endpoints.big]\nurl='{big}'\nkind='logprob'\nmodel='big'\ntimeout_secs=120\n\
+             [escalation]\nendpoint='big'\nper_minute={per_minute}\n\
+             [specs.greeting]\ntype='noul'\ninstructions='Greeting?'\n\
+             [specs.quiet]\ntype='noul'\ninstructions='Quiet?'\nescalate=false\n\
+             [learning]\nexplore=0.0\n{learning}",
+            big = big.uri(),
+        ),
     );
     let (store, directory) = common::store().await;
     let service = service::Service::new(toml::from_str(&config).unwrap(), store.clone())
@@ -79,22 +80,8 @@ async fn fixture(per_minute: usize, learning: &str) -> App {
     }
 }
 
-async fn ask_all(app: &App, request: Value) -> Vec<Decision> {
-    let request: service::AskRequest = serde_json::from_value(request).unwrap();
-    app.service.ask(request).await.unwrap().results
-}
-
-async fn ask(app: &App, request: Value) -> Decision {
-    ask_all(app, request).await.remove(0)
-}
-
 async fn greeting(app: &App, state: &str) -> Decision {
-    ask(app, json!({"spec":"greeting","state":state})).await
-}
-
-async fn triage(app: &App, request: Value) -> TriageResponse {
-    let request: service::TriageRequest = serde_json::from_value(request).unwrap();
-    app.service.triage(request).await.unwrap()
+    common::ask(&app.service, json!({"spec":"greeting","state":state})).await
 }
 
 /// Stored rows as `(id, endpoint, state_hash)`, oldest first.
@@ -143,16 +130,16 @@ async fn budget_caps_escalations() {
 #[tokio::test]
 async fn request_and_spec_switches() {
     let app = fixture(30, "").await;
-    let off = ask(
-        &app,
+    let off = common::ask(
+        &app.service,
         json!({"spec":"greeting","state":"maybe-yes-1","escalate":false}),
     )
     .await;
     assert!(!off.escalated);
-    let quiet = ask(&app, json!({"spec":"quiet","state":"maybe-yes-1"})).await;
+    let quiet = common::ask(&app.service, json!({"spec":"quiet","state":"maybe-yes-1"})).await;
     assert!(!quiet.escalated);
-    let on = ask(
-        &app,
+    let on = common::ask(
+        &app.service,
         json!({"spec":"quiet","state":"maybe-yes-2","escalate":true}),
     )
     .await;
@@ -172,14 +159,12 @@ async fn repeat_is_cached_on_both_endpoints() {
 #[tokio::test]
 async fn only_unsure_questions_of_an_ask_are_escalated() {
     let app = fixture(30, "").await;
-    let results = ask_all(
-        &app,
-        json!({"state":"maybe-yes-1","questions":[
-            {"id":"q","type":"noul","instructions":"Official?"},
-            {"id":"c","type":"choice","instructions":"Bucket?","criteria":{"a":"","b":""}}
-        ]}),
-    )
-    .await;
+    let request = serde_json::from_value(json!({"state":"maybe-yes-1","questions":[
+        {"id":"q","type":"noul","instructions":"Official?"},
+        {"id":"c","type":"choice","instructions":"Bucket?","criteria":{"a":"","b":""}}
+    ]}))
+    .unwrap();
+    let results = app.service.ask(request).await.unwrap().results;
     assert_eq!(results[0].verdict, "yes");
     assert!(results[0].escalated);
     assert_eq!(results[1].verdict, "a");
@@ -190,8 +175,8 @@ async fn only_unsure_questions_of_an_ask_are_escalated() {
 #[tokio::test]
 async fn triage_escalates_unsure_items() {
     let app = fixture(30, "").await;
-    let response = triage(
-        &app,
+    let response = common::triage(
+        &app.service,
         json!({"spec":"greeting","items":["yes-1","maybe-yes-1","maybe-no-1","no-1"]}),
     )
     .await;
@@ -246,8 +231,8 @@ async fn ask_deadline_keeps_the_primary_unsure() {
 #[tokio::test]
 async fn triage_deadline_keeps_the_primary_unsure() {
     let app = fixture(30, "").await;
-    let response = triage(
-        &app,
+    let response = common::triage(
+        &app.service,
         json!({"spec":"greeting","items":["yes-1","maybe-slow-1"]}),
     )
     .await;
@@ -359,7 +344,7 @@ async fn cached_escalations_do_not_spend_the_budget() {
     let app = fixture(2, "").await;
     let items = json!({"spec":"greeting","items":["maybe-yes-1"]});
     for _ in 0..2 {
-        let response = triage(&app, items.clone()).await;
+        let response = common::triage(&app.service, items.clone()).await;
         assert!(response.kept[0].decision.escalated);
     }
     assert_eq!(requests(&app.big).await.len(), 1);
@@ -369,7 +354,11 @@ async fn cached_escalations_do_not_spend_the_budget() {
 #[tokio::test]
 async fn a_missed_triage_deadline_is_a_counted_backend_error() {
     let app = fixture(30, "").await;
-    let response = triage(&app, json!({"spec":"greeting","items":["yes-1","slow-1"]})).await;
+    let response = common::triage(
+        &app.service,
+        json!({"spec":"greeting","items":["yes-1","slow-1"]}),
+    )
+    .await;
     let error = response.unsure[0].decision.error.as_deref().unwrap();
     assert!(error.contains("triage deadline"), "{error}");
     let metrics = app.service.metrics();
@@ -377,4 +366,17 @@ async fn a_missed_triage_deadline_is_a_counted_backend_error() {
         metrics.contains(r#"eightball_backend_errors_total{endpoint="d3"} 1"#),
         "{metrics}"
     );
+}
+
+#[tokio::test]
+async fn the_triage_deadline_bounds_endpoint_detection() {
+    let app = fixture(30, "").await;
+    wiremock::Mock::given(matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_delay(Duration::from_secs(3)))
+        .mount(&app.d3)
+        .await;
+    let request =
+        serde_json::from_value(json!({"spec":"greeting","context":"c","items":["yes-1"]})).unwrap();
+    let error = app.service.triage(request).await.unwrap_err().to_string();
+    assert!(error.contains("triage deadline"), "{error}");
 }

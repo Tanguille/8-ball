@@ -31,16 +31,20 @@ mod metrics;
 #[expect(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Decision {
-    pub id: i64,          // row id in the decisions table
-    pub question: String, // the question id
+    /// Row id in the decisions table.
+    pub id: i64,
+    /// The question id.
+    pub question: String,
     #[serde(rename = "type")]
     pub question_type: String,
     pub verdict: String,
     pub confidence: f64,
+    /// Label to probability, in label order.
     #[schemars(with = "std::collections::BTreeMap<String, f64>")]
-    pub probabilities: IndexMap<String, f64>, // label -> probability, label order
+    pub probabilities: IndexMap<String, f64>,
+    /// Score questions only: Σ i·p[i].
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub score: Option<f64>, // score questions only: Σ i·p[i]
+    pub score: Option<f64>,
     pub calibrated: bool,
     pub cached: bool,
     /// Do the work, then report what it showed with `label`.
@@ -82,7 +86,7 @@ impl Decision {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct AskResponse {
     pub results: Vec<Decision>,
 }
@@ -181,7 +185,8 @@ pub struct QuestionsResponse {
 pub struct QuestionSummary {
     pub spec: Option<String>,
     pub question_hash: String,
-    /// Instructions and kind. Null for an ad-hoc question that 8-ball answered before it stored question text.
+    /// Instructions and kind. Null when 8-ball answered it before it stored question text, unless it is the current
+    /// version of a configured spec.
     pub question: Option<Value>,
     pub decisions: u64,
     pub unsure: u64,
@@ -245,7 +250,7 @@ pub struct ReviewItem {
 pub struct LabelRequest {
     /// A decision id from `review` or `decisions`.
     pub id: i64,
-    /// yes or no for a noul question, else an option or level name.
+    /// yes or no for a noul question, an option name for choice, or a zero-based level index such as "2" for score.
     pub value: String,
 }
 #[derive(Debug, Serialize, JsonSchema)]
@@ -290,9 +295,22 @@ pub const MAX_TRIAGE_ITEMS: usize = 64;
 // value.
 const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
 
-// ponytail: one deadline for a single ask, escalation included, below the 25 s that the CLI and the plugin skill wait.
+// ponytail: one deadline for a single ask, escalation included, below the 25 s that the plugin skill's script waits.
 // The primary answer fails the request when it misses it; an escalation that misses it keeps the primary `unsure`.
 const ASK_DEADLINE: Duration = Duration::from_secs(20);
+
+/// A bad request that lists the valid values, unless `value` is a label of `kind`.
+fn check_label(kind: &Kind, what: &str, value: &str) -> Result<(), ServiceError> {
+    let labels = kind.labels();
+    if labels.iter().any(|label| label == value) {
+        return Ok(());
+    }
+
+    Err(ServiceError::BadRequest(format!(
+        "invalid {what} {value}; use one of {}",
+        labels.join(", ")
+    )))
+}
 
 /// The result of `future`, or the error of `passed` once `deadline` is reached.
 async fn within<T, E>(
@@ -377,8 +395,15 @@ pub struct Service {
 impl Service {
     #[must_use]
     pub fn new(config: Config, store: Store) -> Self {
-        let key =
-            |variable: &Option<String>| variable.as_ref().and_then(|name| std::env::var(name).ok());
+        let key = |variable: &Option<String>| {
+            let name = variable.as_ref()?;
+            let value = std::env::var(name).ok();
+            if value.is_none() {
+                tracing::warn!(variable = %name, "api_key_env is not set; sending no API key");
+            }
+
+            value
+        };
         let endpoints = config
             .endpoints
             .iter()
@@ -459,29 +484,30 @@ impl Service {
                 _ => return Err(ServiceError::BadRequest("label must be yes or no".into())),
             }
         } else {
-            if !question.kind.labels().contains(&value) {
-                return Err(ServiceError::BadRequest(format!("invalid label {value}")));
-            }
+            check_label(&question.kind, "label", &value)?;
 
             value
         };
         if !self.store.set_label(id, &value).await? {
             return Err(ServiceError::BadRequest(format!("no decision {id}")));
         }
-        if self.config.learning.recalibrate_after == 0 {
-            return Ok(LabelResponse { id, label: value });
-        }
-        // A label serves every endpoint that answered this state, an escalated one's primary included.
-        let endpoints = self
-            .store
-            .endpoints(spec.as_deref(), &question_hash, &state_hash)
-            .await?;
-        for name in &endpoints {
-            if let Err(e) = self
-                .maybe_recalibrate(spec.as_deref(), &question, name)
-                .await
+        if self.config.learning.recalibrate_after > 0 {
+            // A label serves every endpoint that answered this state, an escalated one's primary included, while it
+            // is still configured.
+            let endpoints = self
+                .store
+                .endpoints(spec.as_deref(), &question_hash, &state_hash)
+                .await?;
+            for name in endpoints
+                .iter()
+                .filter(|name| self.endpoints.contains_key(name.as_str()))
             {
-                tracing::warn!(error = %e, endpoint = %name, "automatic recalibration failed");
+                if let Err(e) = self
+                    .maybe_recalibrate(spec.as_deref(), &question, name)
+                    .await
+                {
+                    tracing::warn!(error = %e, endpoint = %name, "automatic recalibration failed");
+                }
             }
         }
 
@@ -951,14 +977,7 @@ impl Service {
         )?;
         let question = questions.into_iter().next().expect("one triage question");
         let keep = request.keep.as_deref().unwrap_or("yes");
-        if !question.kind.labels().iter().any(|label| label == keep) {
-            return Err(ServiceError::BadRequest(format!(
-                "invalid keep value: {keep}"
-            )));
-        }
-        let (mut items, firsts) = self
-            .triage_items(&endpoint, request.items, request.context.as_deref())
-            .await?;
+        check_label(&question.kind, "keep value:", keep)?;
         let spec = request.spec.as_deref();
         let pass = self.pass(
             spec,
@@ -968,6 +987,9 @@ impl Service {
             "triage",
             self.triage_deadline,
         );
+        let (mut items, firsts) = self
+            .triage_items(&pass, request.items, request.context.as_deref())
+            .await?;
         let warning = match request.top_k {
             Some(top_k) => self.prefilter(&question, &mut items, top_k, &pass).await?,
             None => None,
@@ -1083,7 +1105,7 @@ impl Service {
     /// The distinct item states with the index of their first copy, and for every item the index of its first copy.
     async fn triage_items(
         &self,
-        endpoint: &str,
+        pass: &Pass<'_>,
         items: Vec<Value>,
         context: Option<&str>,
     ) -> Result<(Vec<(usize, String)>, Vec<usize>), ServiceError> {
@@ -1102,11 +1124,12 @@ impl Service {
             .map(|(text, index)| (index, text))
             .collect();
         if context.is_some() && !items.is_empty() {
-            let backend = &self.endpoints[endpoint];
-            let info = backend
-                .info()
-                .await
-                .map_err(|e| self.backend_error(endpoint, e))?;
+            let backend = &self.endpoints[pass.endpoint];
+            let info = within(pass.deadline, backend.info(), || {
+                backend::BackendError(pass.passed.clone())
+            })
+            .await
+            .map_err(|e| self.backend_error(pass.endpoint, e))?;
             if items
                 .iter()
                 .any(|(_, text)| backend.fitted(&info, text) != *text)
@@ -1588,7 +1611,8 @@ fn refund(window: &mut (Instant, usize), granted_in: Instant, count: usize) {
     }
 }
 
-/// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
+/// Grants up to `wanted` escalations from a one-minute window. The first window starts at startup, each later one at
+/// the first call after the previous window ends.
 // ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
 // that ever matters.
 fn grant(window: &mut (Instant, usize), now: Instant, per_minute: usize, wanted: usize) -> usize {

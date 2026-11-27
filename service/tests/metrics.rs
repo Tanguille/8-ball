@@ -6,23 +6,18 @@ use service::AskRequest;
 mod common;
 
 async fn app() -> (
-    String,
     std::sync::Arc<service::Service>,
+    store::Store,
     wiremock::MockServer,
     tempfile::TempDir,
 ) {
-    let (service, _, mock, directory) =
-        common::d3("[specs.greeting]\ntype='noul'\ninstructions='Greeting?'").await;
-    let url = common::serve(service.clone(), None).await;
-
-    (url, service, mock, directory)
+    common::d3("[specs.greeting]\ntype='noul'\ninstructions='Greeting?'").await
 }
 #[tokio::test]
 async fn ad_hoc_decision_has_bounded_labels_and_openmetrics_type() {
-    let (url, service, _mock, _dir) = app().await;
-    let request: AskRequest = serde_json::from_value(json!({"state":"hi","questions":[{"id":"q","type":"choice","instructions":"Pick","criteria":{"private-client-label":"","another-client-label":""}}]}))
-    .unwrap();
-    service.ask(request).await.unwrap();
+    let (service, _store, _mock, _dir) = app().await;
+    let url = common::serve(service.clone(), None).await;
+    common::ask(&service, json!({"state":"hi","questions":[{"id":"q","type":"choice","instructions":"Pick","criteria":{"private-client-label":"","another-client-label":""}}]})).await;
     let response = reqwest::get(format!("{url}/metrics")).await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -41,7 +36,7 @@ async fn ad_hoc_decision_has_bounded_labels_and_openmetrics_type() {
 }
 #[tokio::test]
 async fn backend_errors_are_counted() {
-    let (_url, service, _mock, _dir) = app().await;
+    let (service, _store, _mock, _dir) = app().await;
     let request: AskRequest = serde_json::from_value(
         json!({"state":"fail","questions":[{"id":"q","type":"noul","instructions":"Greeting?"}]}),
     )
@@ -69,10 +64,12 @@ async fn backend_errors_are_counted() {
 }
 #[tokio::test]
 async fn trimmed_states_are_counted() {
-    let (_url, service, _mock, _dir) = app().await;
-    let request: AskRequest =
-        serde_json::from_value(json!({"state":"x".repeat(2001),"spec":"greeting"})).unwrap();
-    service.ask(request).await.unwrap();
+    let (service, _store, _mock, _dir) = app().await;
+    common::ask(
+        &service,
+        json!({"state":"x".repeat(2001),"spec":"greeting"}),
+    )
+    .await;
     let text = service.metrics();
     assert!(
         text.contains("eightball_trimmed_states_total{endpoint=\"d3\"} 1"),
@@ -81,11 +78,10 @@ async fn trimmed_states_are_counted() {
 }
 #[tokio::test]
 async fn spec_verdict_and_cache_hits_are_counted() {
-    let (_url, service, _mock, _dir) = app().await;
-    let request: AskRequest =
-        serde_json::from_value(json!({"state":"hi","spec":"greeting"})).unwrap();
-    service.ask(request.clone()).await.unwrap();
-    assert!(service.ask(request).await.unwrap().results[0].cached);
+    let (service, _store, _mock, _dir) = app().await;
+    let request = json!({"state":"hi","spec":"greeting"});
+    common::ask(&service, request.clone()).await;
+    assert!(common::ask(&service, request).await.cached);
     let text = service.metrics();
     for cached in ["false", "true"] {
         assert!(
