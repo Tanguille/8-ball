@@ -31,16 +31,20 @@ mod metrics;
 #[expect(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Decision {
-    pub id: i64,          // row id in the decisions table
-    pub question: String, // the question id
+    /// Row id in the decisions table.
+    pub id: i64,
+    /// The question id.
+    pub question: String,
     #[serde(rename = "type")]
     pub question_type: String,
     pub verdict: String,
     pub confidence: f64,
+    /// Label to probability, in label order.
     #[schemars(with = "std::collections::BTreeMap<String, f64>")]
-    pub probabilities: IndexMap<String, f64>, // label -> probability, label order
+    pub probabilities: IndexMap<String, f64>,
+    /// Score questions only: Σ i·p[i].
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub score: Option<f64>, // score questions only: Σ i·p[i]
+    pub score: Option<f64>,
     pub calibrated: bool,
     pub cached: bool,
     /// Do the work, then report what it showed with `label`.
@@ -181,7 +185,8 @@ pub struct QuestionsResponse {
 pub struct QuestionSummary {
     pub spec: Option<String>,
     pub question_hash: String,
-    /// Instructions and kind. Null for an ad-hoc question that 8-ball answered before it stored question text.
+    /// Instructions and kind. Null when 8-ball answered it before it stored question text, unless it is the current
+    /// version of a configured spec.
     pub question: Option<Value>,
     pub decisions: u64,
     pub unsure: u64,
@@ -290,7 +295,7 @@ pub const MAX_TRIAGE_ITEMS: usize = 64;
 // value.
 const TRIAGE_DEADLINE: Duration = Duration::from_secs(90);
 
-// ponytail: one deadline for a single ask, escalation included, below the 25 s that the CLI and the plugin skill wait.
+// ponytail: one deadline for a single ask, escalation included, below the 25 s that the plugin skill's script waits.
 // The primary answer fails the request when it misses it; an escalation that misses it keeps the primary `unsure`.
 const ASK_DEADLINE: Duration = Duration::from_secs(20);
 
@@ -1606,7 +1611,8 @@ fn refund(window: &mut (Instant, usize), granted_in: Instant, count: usize) {
     }
 }
 
-/// Grants up to `wanted` escalations from a one-minute window that starts at its first grant.
+/// Grants up to `wanted` escalations from a one-minute window. The first window starts at startup, each later one at
+/// the first call after the previous window ends.
 // ponytail: fixed window, so a burst across a window edge can spend 2 x per_minute within 60 s; a token bucket if
 // that ever matters.
 fn grant(window: &mut (Instant, usize), now: Instant, per_minute: usize, wanted: usize) -> usize {
