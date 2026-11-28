@@ -1,5 +1,7 @@
 # Local llama.cpp servers for the live tests. Use the same image digest and pinned models as the
-# deployed model servers, and bump them together.
+# deployed model servers, and bump them together. One exception: d3 stays vllm-d3-nano, while the deployed d3
+# runs Decider Flash v1.3. On the 4-CPU runners Flash took 1.75 times as long and passed the 20 s backend timeout
+# (docs/benchmark.md, Decider Flash v1.3).
 x-llama: &llama
   image: ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:1ba441f2843f86e99ec64a218c427bd2d391393a73b39b9ec2c2e69a0ae9be4e
   user: "${EIGHTBALL_DEV_UID}:${EIGHTBALL_DEV_GID}"

@@ -68,6 +68,21 @@ cargo run --release -p bench -- --split dev  # to try a question change
 
 The `bench` crate prints these tables, with your hardware and the model files. It uses the `8ball` binary from the same build. It saves each answer, with its text, to `target/bench/observations.json`, the counts per task to `target/bench/summary.json`, and the tables for the published page to `target/bench/page.md`. `cargo run -p bench -- --help` lists the options: other endpoints, a cascade, extra configuration, and `--baseline` to compare with an earlier `summary.json`.
 
+## Decider Flash v1.3
+
+Since 2026-11-23 the deployed d3 Service runs Perplexity Decider Flash v1.3 (Q4_K_M). The tables above are from vllm-d3-nano, the model before it. CI keeps vllm-d3-nano, because Flash is too slow on the CPU of the runners (see below).
+
+On the deployed RTX 2070, Flash answered the 600 test cases (100 per side) with 0 errors, on 2026-11-27:
+
+| Model | Decided | Wrong | Accuracy of decided | Correct of all | Mean time |
+| --- | --- | --- | --- | --- | --- |
+| Decider Flash v1.3 Q4_K_M, RTX 2070 | 575 (96%) | 8 | 98.6% | 567 (94.5%) | 85 ms |
+| vllm-d3-nano Q8_0, CI CPU baseline | 543 (90.5%) | 10 | 98.2% | 533 (88.8%) | - |
+
+Flash decides more cases and gets fewer wrong. Per task (decided, wrong): spam 199, 0; positive 183, 5; lost-card 193, 3. The mean time includes a `kubectl port-forward` from a laptop.
+
+On 4 CPU threads, Flash took 1.3 to 1.6 times as long per case as nano (2380 and 2375 ms against 1785 and 1507 ms, 120 cases in two runs). We tried Flash in CI ([#103](https://github.com/Tanguille/8-ball/pull/103)). On a slow runner the live tests took 968 s instead of nano's 555 s median. The 64-item triage took 225 s of its 240 s limit, and a 2,000-character state passed the 20 s backend timeout. On a faster runner, one benchmark case timed out. So CI keeps nano, and Flash is checked against the deployed GPU by hand. To repeat that check, run `kubectl -n ai port-forward svc/d3-nano 19931:8080` and benchmark an endpoint at that address with `--config`.
+
 ## D3 v3.1 on llama.cpp
 
 The D3 model in `dev/compose.yaml` already uses the v3.1.0 weights. The pinned Q8 file comes from conversion `50dea20`, whose source history includes the upstream v3.1.0 release. Its SHA-256 matched the local model file. [Pinned conversion](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/50dea2057df10c4b393559a155ab3bf0bc7532c6), [Source history](https://huggingface.co/vllm-sr/d3-nano/commits/462efc366229ea268cf4eed3738b3fc4415e4817)
