@@ -2,7 +2,7 @@
 
 Bands are score ranges for clear answers. Outside them, 8-ball returns `unsure`. Calibration adjusts the bands using known answers, called labels.
 
-Precision is the share of clear answers on one side that are correct. For each side, calibration picks the cutoff that answers the most labeled cases while meeting the target precision. Set the target with `--precision` (default 0.95).
+Precision is the share of clear answers on one side that are correct. For each side, calibration picks the cutoff that answers the most labeled cases while meeting the target precision. The cutoff is always the score of a correct case. Set the target with `--precision` (default 0.95).
 
 If the default bands are more precise than the target, calibration can trade some precision for more answers. To keep precision high, set a high target.
 

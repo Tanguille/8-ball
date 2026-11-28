@@ -31,13 +31,8 @@ async fn fixture(learning: &str) -> App {
     }
 }
 
-async fn ask(app: &App, request: Value) -> Decision {
-    let request: service::AskRequest = serde_json::from_value(request).unwrap();
-    app.service.ask(request).await.unwrap().results.remove(0)
-}
-
 async fn spec(app: &App, state: &str) -> Decision {
-    ask(app, json!({"spec":"greeting","state":state})).await
+    common::ask(&app.service, json!({"spec":"greeting","state":state})).await
 }
 
 /// The stored `greeting` fit on `d3`.
@@ -50,18 +45,13 @@ async fn fit(app: &App) -> Option<(verdict::Bands, verdict::Report)> {
     .await
 }
 
-async fn triage(app: &App, request: Value) -> TriageResponse {
-    let request: service::TriageRequest = serde_json::from_value(request).unwrap();
-    app.service.triage(request).await.unwrap()
-}
-
 #[tokio::test]
 async fn ask_reports_worked_and_unsure_decisions() {
     let app = fixture("explore = 0.0").await;
     let yes = spec(&app, "yes-1").await;
     let maybe = spec(&app, "maybe-1").await;
     let no = spec(&app, "no-1").await;
-    let bucket = ask(&app, json!({"spec":"bucket","state":"yes-1"})).await;
+    let bucket = common::ask(&app.service, json!({"spec":"bucket","state":"yes-1"})).await;
     assert_eq!(
         [&yes, &maybe, &no, &bucket].map(|decision| decision.verdict.as_str()),
         ["yes", "unsure", "no", "a"]
@@ -69,8 +59,8 @@ async fn ask_reports_worked_and_unsure_decisions() {
     assert!(yes.report && maybe.report);
     assert!(!no.report && !bucket.report);
     assert!(!no.explored && !yes.remembered);
-    let adhoc = ask(
-        &app,
+    let adhoc = common::ask(
+        &app.service,
         json!({"state":"maybe-1","questions":[{"id":"q","type":"noul","instructions":"Urgent?"}]}),
     )
     .await;
@@ -81,15 +71,15 @@ async fn ask_reports_worked_and_unsure_decisions() {
         let decision = spec(&app, state).await;
         assert!(!decision.report && !decision.explored, "{state}");
     }
-    let bucket = ask(&app, json!({"spec":"bucket","state":"yes-1"})).await;
+    let bucket = common::ask(&app.service, json!({"spec":"bucket","state":"yes-1"})).await;
     assert!(!bucket.report);
 }
 
 #[tokio::test]
 async fn triage_reports_kept_and_unsure_but_never_rejected() {
     let app = fixture("explore = 0.0").await;
-    let response = triage(
-        &app,
+    let response = common::triage(
+        &app.service,
         json!({"spec":"greeting","keep":"no","items":["no-1","no-2","yes-1","maybe-1"]}),
     )
     .await;
@@ -125,8 +115,8 @@ async fn exploration_returns_skipped_answers_as_unsure() {
     let yes = spec(&app, "yes-1").await;
     assert_eq!(yes.verdict, "yes");
     assert!(!yes.explored);
-    let response = triage(
-        &app,
+    let response = common::triage(
+        &app.service,
         json!({"spec":"greeting","keep":"yes","items":["no-1","no-2","yes-1"]}),
     )
     .await;
@@ -145,15 +135,15 @@ async fn exploration_returns_skipped_answers_as_unsure() {
 async fn learn_false_returns_the_model_alone() {
     let app = fixture("explore = 1.0").await;
     label_under_old_model(&app.store, "maybe-1", "yes").await;
-    let maybe = ask(
-        &app,
+    let maybe = common::ask(
+        &app.service,
         json!({"spec":"greeting","state":"maybe-1","learn":false}),
     )
     .await;
     assert_eq!(maybe.verdict, "unsure");
     assert!(!maybe.remembered && !maybe.explored && !maybe.report);
-    let no = ask(
-        &app,
+    let no = common::ask(
+        &app.service,
         json!({"spec":"greeting","state":"no-1","learn":false}),
     )
     .await;
@@ -230,12 +220,24 @@ async fn calibrate_reasks_the_model_instead_of_remembering() {
 }
 
 #[tokio::test]
+async fn a_bad_precision_asks_no_model() {
+    let app = fixture("").await;
+    label_under_old_model(&app.store, "yes-old", "yes").await;
+    let error = app.service.calibrate("greeting", Some(2.0), true).await;
+    assert!(matches!(error, Err(service::ServiceError::BadRequest(_))));
+    assert!(requests(&app.mock).await.is_empty());
+}
+
+#[tokio::test]
 async fn ad_hoc_questions_learn_by_their_stored_text() {
     let urgent = json!({"id":"q","type":"noul","instructions":"Urgent?"});
     let app = fixture("").await;
-    let id = ask(&app, json!({"state":"maybe-1","questions":[urgent]}))
-        .await
-        .id;
+    let id = common::ask(
+        &app.service,
+        json!({"state":"maybe-1","questions":[urgent]}),
+    )
+    .await
+    .id;
     assert!(app.service.label(id, "maybe".into()).await.is_err());
     assert_eq!(
         app.service.label(id, "true".into()).await.unwrap().label,
@@ -250,16 +252,22 @@ async fn ad_hoc_questions_learn_by_their_stored_text() {
     assert!(questions[0].spec.is_none() && questions[0].labelable);
 
     let app = fixture("ad_hoc = false").await;
-    let id = ask(&app, json!({"state":"maybe-1","questions":[urgent]}))
-        .await
-        .id;
+    let id = common::ask(
+        &app.service,
+        json!({"state":"maybe-1","questions":[urgent]}),
+    )
+    .await
+    .id;
     let error = app.service.label(id, "yes".into()).await.unwrap_err();
     assert!(error.to_string().contains("ad-hoc question"), "{error}");
 
     let app = fixture("").await;
-    let id = ask(&app, json!({"state":"maybe-1","questions":[urgent]}))
-        .await
-        .id;
+    let id = common::ask(
+        &app.service,
+        json!({"state":"maybe-1","questions":[urgent]}),
+    )
+    .await
+    .id;
     let mut connection = common::connection(&app.directory).await;
     sqlx::query("DELETE FROM questions")
         .execute(&mut connection)
@@ -275,8 +283,8 @@ async fn ad_hoc_questions_learn_by_their_stored_text() {
 #[tokio::test]
 async fn triage_lists_duplicates_under_their_first_decision() {
     let app = fixture("explore = 0.0").await;
-    let response = triage(
-        &app,
+    let response = common::triage(
+        &app.service,
         json!({"spec":"greeting","items":["yes-1","no-1","yes-1","maybe-1","no-1"]}),
     )
     .await;
@@ -314,11 +322,7 @@ async fn a_score_keep_is_a_minimum_level() {
         })
         .mount(&mock)
         .await;
-    let config = toml::from_str(&format!(
-        "default='d3'\n[endpoints.d3]\nurl='{}'\nkind='systemone'\n[learning]\nexplore = 0.0",
-        mock.uri()
-    ))
-    .unwrap();
+    let config = toml::from_str(&common::config(&mock.uri(), "[learning]\nexplore = 0.0")).unwrap();
     let (service, _store, _directory) = common::service(config).await;
     let question =
         json!({"id":"q","type":"score","instructions":"Urgent?","criteria":["low","mid","high"]});
@@ -365,7 +369,7 @@ async fn a_spec_refit_does_not_hold_back_its_ad_hoc_twin() {
     }
     for i in 1..=20 {
         let request = json!({"state":format!("yes-twin-{i}"),"questions":[twin]});
-        let id = ask(&app, request).await.id;
+        let id = common::ask(&app.service, request).await.id;
         app.service.label(id, "yes".into()).await.unwrap();
     }
     let calibration_id = verdict::calibration_id(

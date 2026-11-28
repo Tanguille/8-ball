@@ -4,7 +4,7 @@
 
 An endpoint is a model server. A spec is a saved question.
 
-8-ball rejects unknown top-level fields and unknown fields in `[endpoints.*]`, `[embedder]`, and `[learning]`. In `[specs.*]`, it ignores unknown fields and still checks that each question is valid.
+8-ball rejects unknown fields at the top level and in `[endpoints.*]`, `[embedder]`, `[learning]`, `[escalation]`, and `[specs.*]`. It also checks that each question is valid.
 
 ```toml
 default = "d3"            # required: name of the endpoint used when none is given
@@ -16,7 +16,7 @@ kind = "systemone"              # optional: "systemone" | "decisions" | "logprob
 concurrency = 1                 # optional: max parallel requests. Omitted = /props total_slots if positive, else 2.
 model = "qwen-3.8-fast"         # optional: sent as "model". Required for kind logprob.
 api_key_env = "TYPESAFE_KEY"    # optional: NAME of an env var whose value is sent as "Authorization: Bearer <value>"
-max_state_chars = 2000          # optional: default 2000 for systemone, decisions and rerank, no limit for logprob
+max_state_chars = 2000          # optional: at least 2. Default 2000 for systemone, decisions and rerank, no limit for logprob
 timeout_secs = 20               # optional: seconds per HTTP attempt once it has a slot (a retry gets its own); waiting for a slot is not counted
 extra_body = { reasoning_effort = "none" }   # optional: merged into logprob request JSON
 # reasoning_tokens = 256        # optional: logprob only, instead of turning thinking off. Tokens the model may think before it answers. Unset or 0 asks for one token.
@@ -48,7 +48,7 @@ The `decisions` backend sends System One questions and `model` to a hosted `/v1/
 
 If the first detection fails to connect, times out, or gets 502 or 503 from `/props`, the request fails. The next request tries again. If a later check fails, 8-ball keeps the known model.
 
-8-ball retries a request once after a 502 or 503 response. It also retries a 429 response if `Retry-After` is at most 10 seconds. It waits at least 1 second before the 429 retry.
+8-ball retries a request once after a 502 or 503 response. It also retries a 429 response if `Retry-After` is a number of seconds that is at most 10. A `Retry-After` date is not retried. It waits at least 1 second before the 429 retry.
 
 A reranker scores how well input text matches the topic of a question. The `rerank` backend only supports yes-or-no questions (`noul`). It returns `unsure` until you [calibrate](calibration.md) the question.
 
@@ -77,7 +77,7 @@ A flag takes priority over its environment variable.
 
 | Variable | Flag | Purpose |
 | --- | --- | --- |
-| `EIGHTBALL_CONFIG` | `--config` | Configuration path for `serve` and `mcp` |
+| `EIGHTBALL_CONFIG` | `--config` | Configuration path for `serve`, `mcp`, and `config check` |
 | `EIGHTBALL_CONFIG_TOML` | `--config-toml` | TOML text for `serve` and `mcp`. Leave `EIGHTBALL_CONFIG` unset when you use this variable. |
 | `EIGHTBALL_LISTEN` | `--listen` | `serve` listen address (default `127.0.0.1:8080`, image default `0.0.0.0:8080`) |
 | `EIGHTBALL_DB` | `--db` | SQLite path for `serve` and `mcp` (default `$XDG_STATE_HOME/8ball/8ball.db`, otherwise `$HOME/.local/state/8ball/8ball.db`) |
@@ -92,4 +92,4 @@ The logprob backend scores the first token of the answer. Pick one way to make t
 - **Thinking off.** Set `extra_body = { reasoning_effort = "none" }`, or for Qwen on vLLM `extra_body = { chat_template_kwargs = { enable_thinking = false } }`. 8-ball asks for one token. The local Qwen server in the development setup also starts with `--reasoning-budget 0`.
 - **Thinking on.** Some models always think. Set `reasoning_tokens`, for example `reasoning_tokens = 256`. 8-ball asks for `reasoning_tokens + 4` tokens, then scores the first token after the thinking in `logprobs.content`. That is the token after the last `</think>`. Some servers send the end marker as an empty token. If there is no marker, and `usage` counts every token of `logprobs.content`, 8-ball skips the reasoning tokens that `usage` reports. It skips tokens that are only whitespace. A reply cut off at the budget with no marker has no answer. If the model has not answered when the budget ends, the request fails with `no answer within reasoning_tokens`, and an escalation keeps the `unsure` answer. Raise the number.
 
-Thinking costs time. A request takes about `reasoning_tokens` divided by the server's tokens per second. The [request deadlines](http-api.md#decisions) stay fixed: 20 seconds for an `ask`, escalation included, and 90 for a triage. A thinking endpoint on `ask` must therefore finish inside 20 seconds whatever `timeout_secs` says; raising it above that helps only a triage. Set `reasoning_tokens` above the model's p95 thinking length and keep the time it needs inside those deadlines.
+Thinking costs time. A request takes about `reasoning_tokens` divided by the server's tokens per second. The [request deadlines](http-api.md#decisions) stay fixed. A thinking endpoint on `ask` must finish inside the `ask` deadline whatever `timeout_secs` says; raising it above that helps only a triage. Set `reasoning_tokens` above the model's p95 thinking length and keep the time it needs inside those deadlines.

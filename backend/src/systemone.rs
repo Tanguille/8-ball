@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use domain::question::Kind;
+use domain::{config::BackendKind, question::Kind};
 
 use crate::BackendError;
 
@@ -11,7 +11,7 @@ pub async fn ask(
     state: &str,
     requested_questions: &[domain::question::Question],
 ) -> Result<Vec<domain::Probs>, BackendError> {
-    let (path, answers) = if info.kind == crate::BackendKind::Decisions {
+    let (path, answers) = if info.kind == BackendKind::Decisions {
         ("/v1/decisions", "/result/answers")
     } else {
         ("/v1/systemone", "/answers")

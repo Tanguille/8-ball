@@ -128,6 +128,8 @@ impl Metrics {
         spec: Option<&str>,
         decision: &crate::Decision,
     ) {
+        // Ad-hoc verdicts are caller-chosen option names, so they could be private and would make the label set
+        // unbounded.
         let verdict = if spec.is_some() || decision.verdict == "unsure" {
             decision.verdict.as_str()
         } else {

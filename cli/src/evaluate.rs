@@ -73,6 +73,10 @@ impl Observation {
             error,
         }
     }
+
+    fn decision_is(&self, predicate: impl FnOnce(&Decision) -> bool) -> bool {
+        self.decision.as_ref().is_some_and(predicate)
+    }
 }
 
 fn single_decision(response: TriageResponse) -> Result<(bool, Decision), String> {
@@ -149,37 +153,22 @@ impl Report {
         };
         let total = count(|_| true);
         let errors = count(|item| item.error.is_some());
-        let unsure = count(|item| {
-            item.decision
-                .as_ref()
-                .is_some_and(|decision| decision.verdict == "unsure")
-        });
+        let unsure = count(|item| item.decision_is(|decision| decision.verdict == "unsure"));
         let decided = total - errors - unsure;
         let would_skip = count(|item| !item.would_keep);
         let missed_useful = count(|item| item.expected_keep && !item.would_keep);
         let unnecessary_keeps = count(|item| {
             !item.expected_keep
-                && item
-                    .decision
-                    .as_ref()
-                    .is_some_and(|decision| decision.verdict != "unsure")
+                && item.decision_is(|decision| decision.verdict != "unsure")
                 && item.would_keep
         });
         let useful = count(|item| item.expected_keep);
-        let cached = count(|item| {
-            item.decision
-                .as_ref()
-                .is_some_and(|decision| decision.cached)
-        });
+        let cached = count(|item| item.decision_is(|decision| decision.cached));
         let latency = |cached| {
             Latency::new(
                 observations
                     .iter()
-                    .filter(|item| {
-                        item.decision
-                            .as_ref()
-                            .is_some_and(|decision| decision.cached == cached)
-                    })
+                    .filter(|item| item.decision_is(|decision| decision.cached == cached))
                     .map(|item| item.elapsed_ms)
                     .collect(),
             )

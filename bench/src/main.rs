@@ -1,4 +1,4 @@
-//! Benchmark every model of the local stack on fixed public cases. See docs/benchmark.md.
+//! Benchmark 8-ball endpoints on fixed public cases. See docs/benchmark.md.
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -188,10 +188,15 @@ async fn main() -> Result<()> {
     });
     print!("{text}");
     fs::write(args.out.join("page.md"), page)?;
-    check_reliability(args.require_reliable, &excluded)?;
-    if !ok? {
-        std::process::exit(1);
-    }
+    ensure!(
+        !args.require_reliable || excluded.is_empty(),
+        "the 1% call error limit excludes: {}",
+        excluded.join(", ")
+    );
+    ensure!(
+        ok?,
+        "a task got worse than the baseline by more than 1% of its cases"
+    );
 
     Ok(())
 }
@@ -320,6 +325,7 @@ fn available(args: &Args, doctor: &Value, out: &mut String) -> Result<Vec<String
         match error {
             None => kept.push(name.clone()),
             Some(_) if args.skip_unavailable => skipped += 1,
+            // bench-hosted.yaml greps for this text to retry a provider that is down.
             Some(error) => bail!("endpoint {name} failed its doctor probe: {error}"),
         }
     }
@@ -348,7 +354,9 @@ fn methods(args: &Args, doctor: &Value) -> Result<Methods> {
         ));
     }
     let reference = match &args.reference {
-        Some(name) => position(name).context("--reference is not in --endpoints")?,
+        Some(name) => position(name).with_context(|| {
+            format!("--reference {name} is not run (not in --endpoints, or skipped)")
+        })?,
         None => args.endpoints.len() - 1,
     };
     let models = args
@@ -453,10 +461,13 @@ async fn download(task: &Task, path: &str, cache: &Path) -> Result<PathBuf> {
             "https://huggingface.co/datasets/{}/resolve/{}/{path}",
             task.repo, task.sha
         );
+        // A killed write leaves only the .part file, never a short file that later runs trust.
+        let part = file.with_extension("part");
         fs::write(
-            &file,
+            &part,
             reqwest::get(url).await?.error_for_status()?.bytes().await?,
         )?;
+        fs::rename(&part, &file)?;
     }
 
     Ok(file)
@@ -514,12 +525,13 @@ fn evaluate(url: &str, spec: &str, endpoint: &str, lines: &str) -> Result<Vec<Va
         .context("stdin")?
         .write_all(lines.as_bytes())?;
     let output = child.wait_with_output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
     ensure!(
         matches!(output.status.code(), Some(0 | 4)),
-        "8ball evaluate {spec} {endpoint} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "8ball evaluate {spec} {endpoint} failed: {stderr}"
     );
-    let mut output: Value = serde_json::from_slice(&output.stdout)?;
+    let mut output: Value = serde_json::from_slice(&output.stdout)
+        .with_context(|| format!("8ball evaluate {spec} {endpoint}: {stderr}"))?;
     // The answer cache is keyed by model, not endpoint: a cached answer would fake the time.
     ensure!(
         output["report"]["cached"] == 0,
@@ -576,13 +588,11 @@ impl Score {
         for o in observations {
             s.total += 1;
             s.elapsed_ms += elapsed(o);
+            s.correct += u32::from(correct(o));
             match verdict(o) {
                 "error" => s.errors += 1,
                 "unsure" => {}
-                _ => {
-                    s.decided += 1;
-                    s.correct += u32::from(o["would_keep"] == o["expected_keep"]);
-                }
+                _ => s.decided += 1,
             }
         }
 
@@ -619,29 +629,22 @@ fn correct(o: &Value) -> bool {
 // ponytail: xorshift instead of a rand dependency; 2000 resamples are plenty for a 95% interval.
 fn paired_difference(first: &[bool], second: &[bool]) -> (f64, f64, f64) {
     let n = first.len();
-    let diff = |pick: &mut dyn FnMut() -> usize| {
-        let sum: i32 = (0..n)
-            .map(|_| {
-                let i = pick();
-                i32::from(first[i]) - i32::from(second[i])
-            })
+    let mean = |indices: &mut dyn Iterator<Item = usize>| {
+        let sum: i32 = indices
+            .map(|i| i32::from(first[i]) - i32::from(second[i]))
             .sum();
         f64::from(sum) / f64::from(u32::try_from(n).expect("case count fits u32"))
     };
-    let mut index = 0;
-    let observed = diff(&mut || {
-        index += 1;
-        index - 1
-    });
+    let observed = mean(&mut (0..n));
     let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
     let mut samples: Vec<f64> = (0..2000)
         .map(|_| {
-            diff(&mut || {
+            mean(&mut (0..n).map(|_| {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
                 usize::try_from(state % n as u64).expect("index fits usize")
-            })
+            }))
         })
         .collect();
     samples.sort_by(f64::total_cmp);
@@ -802,16 +805,6 @@ fn publish(methods: &Methods, excluded: &[String]) -> bool {
     !excluded.iter().any(|name| name == "d3") && methods.names.len() - excluded.len() >= 2
 }
 
-fn check_reliability(required: bool, excluded: &[String]) -> Result<()> {
-    ensure!(
-        !required || excluded.is_empty(),
-        "the 1% call error limit excludes: {}",
-        excluded.join(", ")
-    );
-
-    Ok(())
-}
-
 /// Methods with errors on more than 1% of their cases, which page.md leaves out. A cascade
 /// goes when either of its endpoints goes, never for its own errors.
 fn excluded(methods: &Methods, runs: &[Runs]) -> Vec<String> {
@@ -907,35 +900,37 @@ fn hardware() -> String {
     let lspci = Command::new("lspci")
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-    let gpus: Vec<_> = lspci
-        .unwrap_or_default()
-        .lines()
-        .filter(|line| {
-            let line = line.to_lowercase();
-            // A virtual display adapter (CI runners) has no GPU behind it, as in dev/models.sh.
-            ["vga", "display", "3d controller"]
-                .iter()
-                .any(|kind| line.contains(kind))
-                && ![
-                    "hyper-v", "virtual", "virtio", "qxl", "vmware", "bochs", "cirrus",
-                ]
-                .iter()
-                .any(|kind| line.contains(kind))
-        })
-        .filter_map(|line| Some(line.split_once(": ")?.1.to_owned()))
-        .collect();
-    let gpu = if gpus.is_empty() {
-        "no GPU".into()
-    } else {
-        gpus.join("; ")
+    // None when lspci cannot run: like dev/models.sh, that keeps GPU offload.
+    let gpus: Option<Vec<_>> = lspci.ok().map(|out| {
+        out.lines()
+            .filter(|line| {
+                let line = line.to_lowercase();
+                // A virtual display adapter (CI runners) has no GPU behind it, as in dev/models.sh.
+                ["vga", "display", "3d controller"]
+                    .iter()
+                    .any(|kind| line.contains(kind))
+                    && ![
+                        "hyper-v", "virtual", "virtio", "qxl", "vmware", "bochs", "cirrus",
+                    ]
+                    .iter()
+                    .any(|kind| line.contains(kind))
+            })
+            .filter_map(|line| Some(line.split_once(": ")?.1.to_owned()))
+            .collect()
+    });
+    let gpu = match &gpus {
+        None => "unknown GPU".into(),
+        Some(gpus) if gpus.is_empty() => "no GPU".into(),
+        Some(gpus) => gpus.join("; "),
     };
     // dev/models.sh runs on the CPU without a GPU, whatever EIGHTBALL_DEV_NGL says.
-    let offload = if Path::new("/dev/dri").exists() && !gpus.is_empty() {
-        let layers = std::env::var("EIGHTBALL_DEV_NGL").unwrap_or_else(|_| "all".into());
-        format!("GPU offload {layers} layers")
-    } else {
-        "CPU only".into()
-    };
+    let offload =
+        if Path::new("/dev/dri").exists() && gpus.as_ref().is_none_or(|gpus| !gpus.is_empty()) {
+            let layers = std::env::var("EIGHTBALL_DEV_NGL").unwrap_or_else(|_| "all".into());
+            format!("GPU offload {layers} layers")
+        } else {
+            "CPU only".into()
+        };
 
     format!("{cpu}, {gpu}, {offload}")
 }
@@ -1041,11 +1036,7 @@ mod tests {
         // 1% of errors is allowed, and a cascade never goes for its own errors.
         let runs = [run(0), run(2), run(1), run(50)];
         assert_eq!(super::excluded(&methods((0, 2)), &runs), ["bad"]);
-        let excluded = super::excluded(&methods((0, 1)), &runs);
-        assert_eq!(excluded, ["bad", "cascade"]);
-        assert!(super::check_reliability(false, &excluded).is_ok());
-        assert!(super::check_reliability(true, &excluded).is_err());
-        assert!(super::check_reliability(true, &[]).is_ok());
+        assert_eq!(super::excluded(&methods((0, 1)), &runs), ["bad", "cascade"]);
     }
 
     #[test]

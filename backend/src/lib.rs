@@ -30,6 +30,7 @@ pub struct Endpoint {
 // its 5 s GETs and by the deadline of the request.
 const DECISION_TIMEOUT: Duration = Duration::from_secs(20);
 // A new model behind the same URL gets its own fingerprint, and so its own cache and calibration, within this time.
+// Only /props shows a new model: an endpoint without it keeps its first identity, at the cost of one GET a minute.
 const INFO_TTL: Duration = Duration::from_secs(60);
 // A 429 that asks for a longer wait fails at once instead of holding the caller that long.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
@@ -141,12 +142,19 @@ impl Endpoint {
                 .await
                 .map_err(timed_out)?;
             let status = response.status();
-            let retry_after = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|value| value.to_str().ok()?.trim().parse::<u64>().ok())
-                .map_or(MIN_RETRY, Duration::from_secs)
-                .max(MIN_RETRY);
+            // An HTTP-date counts as too long: reading it would need a date crate.
+            let retry_after =
+                response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .map_or(MIN_RETRY, |value| {
+                        value
+                            .to_str()
+                            .ok()
+                            .and_then(|text| text.trim().parse().ok())
+                            .map_or(Duration::MAX, Duration::from_secs)
+                            .max(MIN_RETRY)
+                    });
             let text = response.text().await.map_err(timed_out)?;
             drop(permit);
             // One retry: a short 429 after its wait, and a 502 or 503, which a hosted gateway may answer from another upstream the next time.
@@ -166,14 +174,13 @@ impl Endpoint {
             }
         };
         if !status.is_success() {
-            let text: String = text.chars().take(500).collect();
             let hint = if status == StatusCode::NOT_IMPLEMENTED {
                 "; not a decision model"
             } else {
                 ""
             };
 
-            return Err(BackendError(format!("HTTP {status}: {text}{hint}")));
+            return Err(http_error(status, &text, hint));
         }
 
         serde_json::from_str(&text).map_err(|e| BackendError(e.to_string()))
@@ -299,6 +306,13 @@ impl Endpoint {
             BackendKind::Rerank => rerank::ask(self, &info, state, questions).await,
         }
     }
+}
+
+/// Keeps the first 500 characters of the body.
+pub(crate) fn http_error(status: StatusCode, text: &str, hint: &str) -> BackendError {
+    let text: String = text.chars().take(500).collect();
+
+    BackendError(format!("HTTP {status}: {text}{hint}"))
 }
 
 pub fn authed(request: RequestBuilder, key: Option<&str>) -> RequestBuilder {

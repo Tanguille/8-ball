@@ -1,4 +1,5 @@
 use reqwest::Client;
+use serde_json::Value;
 
 use domain::config::EmbedderConfig;
 
@@ -30,15 +31,19 @@ impl Embedder {
                 .post(format!("{}/v1/embeddings", self.config.url))
                 .timeout(std::time::Duration::from_secs(10))
                 .json(&serde_json::json!({"model":self.config.model,"input":batch}));
-            let mut response: serde_json::Value = crate::authed(request, self.api_key.as_deref())
+            let response = crate::authed(request, self.api_key.as_deref())
                 .send()
-                .await?
-                .error_for_status()?
-                .json()
                 .await?;
+            let status = response.status();
+            let text = response.text().await?;
+            if !status.is_success() {
+                return Err(crate::http_error(status, &text, ""));
+            }
+            let mut response: Value =
+                serde_json::from_str(&text).map_err(|e| BackendError(e.to_string()))?;
             let data = response
                 .get_mut("data")
-                .and_then(serde_json::Value::as_array_mut)
+                .and_then(Value::as_array_mut)
                 .ok_or_else(|| BackendError("embedder returned no data".into()))?;
             let mut ordered = vec![None; batch.len()];
             for entry in data {

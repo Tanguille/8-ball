@@ -1,24 +1,54 @@
 use domain::{
     config::BackendKind,
     question::Kind,
-    verdict::{self, Bands},
+    verdict::{self, Bands, Example},
 };
+
+const fn noul() -> Kind {
+    Kind::Noul { criteria: None }
+}
+fn choice(options: &[&str]) -> Kind {
+    Kind::Choice {
+        criteria: options
+            .iter()
+            .map(|option| ((*option).into(), String::new()))
+            .collect(),
+    }
+}
+fn example(probabilities: f64, label: &str) -> Example {
+    Example {
+        probs: vec![probabilities, 1.0 - probabilities],
+        label: label.into(),
+    }
+}
 
 #[test]
 fn choice_confidence_readme() {
-    assert!((verdict::confidence_choice(&[0.9998, 0.0001, 0.0001]) - 0.9997).abs() < 1e-3);
+    assert!(
+        (verdict::confidence(&choice(&["a", "b", "c"]), &[0.9998, 0.0001, 0.0001]) - 0.9997).abs()
+            < 1e-3
+    );
 }
 #[test]
 fn score_confidence_readme() {
-    assert!((verdict::confidence_score(&[0.0023, 0.116, 0.6753, 0.2064]) - 0.673).abs() < 1e-3);
+    assert!(
+        (verdict::confidence(
+            &Kind::Score {
+                criteria: vec![String::new(); 4]
+            },
+            &[0.0023, 0.116, 0.6753, 0.2064],
+        ) - 0.673)
+            .abs()
+            < 1e-3
+    );
 }
 #[test]
 fn uniform_is_zero() {
-    assert!(verdict::confidence_choice(&[0.5, 0.5]).abs() < f64::EPSILON);
+    assert!(verdict::confidence(&noul(), &[0.5, 0.5]).abs() < f64::EPSILON);
 }
 #[test]
 fn noul_default_bands() {
-    let kind = Kind::Noul { criteria: None };
+    let kind = noul();
     for (probabilities, want) in [
         (0.9, "yes"),
         (0.85, "yes"),
@@ -38,15 +68,8 @@ fn noul_default_bands() {
 }
 #[test]
 fn choice_default_bands() {
-    let kind = Kind::Choice {
-        criteria: [
-            ("a".into(), String::new()),
-            ("b".into(), String::new()),
-            ("c".into(), String::new()),
-        ]
-        .into(),
-    };
-    assert!((verdict::confidence_choice(&[0.9, 0.05, 0.05]) - 0.85).abs() < 1e-9);
+    let kind = choice(&["a", "b", "c"]);
+    assert!((verdict::confidence(&kind, &[0.9, 0.05, 0.05]) - 0.85).abs() < 1e-9);
     assert_eq!(
         verdict::verdict(
             &kind,
@@ -83,7 +106,7 @@ fn score_verdict_is_mode_index() {
 #[test]
 fn uncalibrated_rerank_noul_is_unsure() {
     // A reranker scores topic match, not the answer, so even extreme scores must not decide.
-    let kind = Kind::Noul { criteria: None };
+    let kind = noul();
     for p_yes in [0.0, 0.001, 0.5, 0.999, 1.0] {
         assert_eq!(
             verdict::verdict(
@@ -94,4 +117,230 @@ fn uncalibrated_rerank_noul_is_unsure() {
             "unsure"
         );
     }
+}
+#[test]
+fn separable_noul() {
+    let examples: Vec<_> = (0_u32..24)
+        .map(|i| example(0.80 + 0.19 * f64::from(i) / 23.0, "yes"))
+        .chain((0_u32..24).map(|i| example(0.01 + 0.19 * f64::from(i) / 23.0, "no")))
+        .collect();
+    let (bands, report) =
+        verdict::calibrate(&noul(), BackendKind::Systemone, &examples, 0.95, None).unwrap();
+    let Bands::Noul { yes_at, no_at } = bands else {
+        panic!("noul bands")
+    };
+    assert!((yes_at - 0.80).abs() < 1e-9);
+    assert!((no_at - 0.20).abs() < 1e-9);
+    assert!((report.coverage - 1.0).abs() < 1e-9);
+    assert!((report.precision - 1.0).abs() < 1e-9);
+    assert_eq!(report.decided, 48);
+}
+#[test]
+fn too_few_examples() {
+    let examples: Vec<_> = (0..5)
+        .map(|_| example(0.9, "yes"))
+        .chain((0..5).map(|_| example(0.1, "no")))
+        .collect();
+    let (bands, report) =
+        verdict::calibrate(&noul(), BackendKind::Systemone, &examples, 0.95, None).unwrap();
+    let Bands::Noul { yes_at, no_at } = bands else {
+        panic!("noul bands")
+    };
+    assert!((yes_at - 1.01).abs() < 1e-9);
+    assert!((no_at + 0.01).abs() < 1e-9);
+    assert!(report.warnings.len() >= 2);
+    assert_eq!(report.decided, 0);
+}
+#[test]
+fn bad_target() {
+    for target in [0.4, 1.0] {
+        assert!(verdict::calibrate(&noul(), BackendKind::Systemone, &[], target, None).is_err());
+    }
+}
+#[test]
+fn overlap_gives_unsure() {
+    assert_eq!(
+        verdict::verdict(
+            &noul(),
+            &[0.5, 0.5],
+            Bands::Noul {
+                yes_at: 0.3,
+                no_at: 0.7
+            }
+        ),
+        "unsure"
+    );
+}
+#[test]
+fn choice_threshold() {
+    let kind = choice(&["a", "b"]);
+    let examples: Vec<_> = (0..20)
+        .map(|_| example(0.9, "a"))
+        .chain((0..10).map(|_| example(0.55, "b")))
+        .collect();
+    let (bands, report) =
+        verdict::calibrate(&kind, BackendKind::Systemone, &examples, 0.95, None).unwrap();
+    let Bands::Level { min_confidence } = bands else {
+        panic!("level bands")
+    };
+    assert!(min_confidence > 0.1 && min_confidence < 0.9);
+    assert_eq!(report.decided, 20);
+    assert_eq!(report.correct, 20);
+}
+#[test]
+fn question_hash_changes() {
+    let question = domain::question::Question {
+        id: "first".into(),
+        instructions: "Greeting?".into(),
+        kind: noul(),
+    };
+    let mut other = question.clone();
+    other.id = "second".into();
+    assert_eq!(
+        verdict::question_hash(&question),
+        verdict::question_hash(&other)
+    );
+    other.instructions = "Storage risk?".into();
+    assert_ne!(
+        verdict::question_hash(&question),
+        verdict::question_hash(&other)
+    );
+    assert_eq!(verdict::short_hash("hello"), "2cf24dba5fb0a30e");
+}
+#[test]
+fn calibration_id_changes_with_fingerprint() {
+    assert_ne!(
+        verdict::calibration_id("q", BackendKind::Systemone, "file@b1"),
+        verdict::calibration_id("q", BackendKind::Systemone, "file@b2")
+    );
+}
+#[test]
+fn explore_draw_is_deterministic() {
+    let first = verdict::explore_draw("question", "state one");
+    assert_eq!(
+        first.to_bits(),
+        (f64::from(0x01d0_f38e_u32) / 4_294_967_296.0).to_bits()
+    );
+    assert!((0.0..1.0).contains(&first));
+    let second = verdict::explore_draw("question", "state two");
+    assert!((0.0..1.0).contains(&second));
+    assert!((first - second).abs() > f64::EPSILON);
+}
+#[test]
+fn calibration_key_separates_ad_hoc() {
+    assert_eq!(verdict::calibration_key("abc", Some("s")), "abc");
+    assert_ne!(verdict::calibration_key("abc", None), "abc");
+}
+#[test]
+fn merge_keeps_previous_side_without_evidence() {
+    let examples: Vec<_> = (0..25).map(|_| example(0.97, "yes")).collect();
+    let previous = Bands::Noul {
+        yes_at: 0.85,
+        no_at: 0.15,
+    };
+    let (bands, report) = verdict::calibrate(
+        &noul(),
+        BackendKind::Systemone,
+        &examples,
+        0.95,
+        Some(previous),
+    )
+    .unwrap();
+    let Bands::Noul { yes_at, no_at } = bands else {
+        panic!("noul bands")
+    };
+    assert!((yes_at - 0.97).abs() < 1e-9);
+    assert!((no_at - 0.15).abs() < 1e-9);
+    assert_eq!(report.decided, 25);
+}
+#[test]
+fn merge_falls_back_to_defaults() {
+    let previous = Bands::Noul {
+        yes_at: 1.01,
+        no_at: -0.01,
+    };
+    let (bands, _) =
+        verdict::calibrate(&noul(), BackendKind::Systemone, &[], 0.95, Some(previous)).unwrap();
+    assert_eq!(bands, Bands::default_for(&noul(), BackendKind::Systemone));
+}
+#[test]
+fn merge_crossing_returns_previous() {
+    // The no side decides at 0.9, above the previous yes_at of 0.85.
+    let examples: Vec<_> = (0..25).map(|_| example(0.9, "no")).collect();
+    let previous = Bands::Noul {
+        yes_at: 0.85,
+        no_at: 0.15,
+    };
+    let (bands, _) = verdict::calibrate(
+        &noul(),
+        BackendKind::Systemone,
+        &examples,
+        0.95,
+        Some(previous),
+    )
+    .unwrap();
+    assert_eq!(bands, previous);
+}
+#[test]
+fn merge_level_keeps_previous() {
+    let kind = choice(&["a", "b"]);
+    let previous = Bands::Level {
+        min_confidence: 0.7,
+    };
+    let (bands, _) =
+        verdict::calibrate(&kind, BackendKind::Systemone, &[], 0.95, Some(previous)).unwrap();
+    assert_eq!(bands, previous);
+}
+#[test]
+fn rerank_side_without_evidence_stays_undecided() {
+    let examples: Vec<_> = (0..25).map(|_| example(0.97, "yes")).collect();
+    let previous = Bands::default_for(&noul(), BackendKind::Rerank);
+    let (bands, _) = verdict::calibrate(
+        &noul(),
+        BackendKind::Rerank,
+        &examples,
+        0.95,
+        Some(previous),
+    )
+    .unwrap();
+    let Bands::Noul { yes_at, no_at } = bands else {
+        panic!("noul bands")
+    };
+    assert!((yes_at - 0.97).abs() < 1e-9);
+    // Falling back to the generic 0.15 would let raw topic scores answer `no` again.
+    assert!(no_at < 0.0);
+}
+#[test]
+fn minimum_side_is_exact_at_target_0_9() {
+    // 1 / (1 - 0.9) is 10, so 10 correct examples are enough.
+    let examples: Vec<_> = (0..10).map(|_| example(0.97, "yes")).collect();
+    let (bands, _) =
+        verdict::calibrate(&noul(), BackendKind::Systemone, &examples, 0.9, None).unwrap();
+    let Bands::Noul { yes_at, .. } = bands else {
+        panic!("noul bands")
+    };
+    assert!((yes_at - 0.97).abs() < 1e-9, "yes_at = {yes_at}");
+}
+#[test]
+fn level_cutoff_ignores_wrong_examples() {
+    // A cutoff at the wrong example's confidence adds a wrong answer and no correct one.
+    let examples: Vec<_> = (0..100)
+        .map(|_| example(0.9, "a"))
+        .chain([example(0.75, "b")])
+        .collect();
+    let (bands, _) = verdict::calibrate(
+        &choice(&["a", "b"]),
+        BackendKind::Systemone,
+        &examples,
+        0.95,
+        None,
+    )
+    .unwrap();
+    let Bands::Level { min_confidence } = bands else {
+        panic!("level bands")
+    };
+    assert!(
+        (min_confidence - 0.8).abs() < 1e-9,
+        "min_confidence = {min_confidence}"
+    );
 }

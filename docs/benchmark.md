@@ -7,7 +7,7 @@ We compare every model of the local stack with Qwen3.8 27B, a large local model,
 | vllm-d3-nano (systemone) | 91% | 27 | 97.3% | 88.6% | -5.1 (-6.9 to -3.3) | 97.4% | 84 ms | 15.2x |
 | bge-reranker-v2-m3 (rerank) | 0% | 0 | - | 0.0% | -93.7 (-95.1 to -92.1) | 58.2% | 25 ms | 52.1x |
 | Qwen3.5 0.8B (logprob) | 30% | 58 | 83.0% | 25.3% | -68.4 (-71.0 to -65.6) | 51.7% | 74 ms | 17.2x |
-| Qwen3.8 27B (logprob) | 97% | 32 | 97.0% | 93.7% | baseline | 97.8% | 1280 ms | 1.0x |
+| Qwen3.8 27B (logprob) | 97% | 32 | 97.0% | 93.7% | reference | 97.8% | 1280 ms | 1.0x |
 | d3, then 27B for `unsure` | 99% | 38 | 96.6% | 95.4% | +1.8 (+0.9 to +2.8) | 97.4% | 198 ms | 6.5x |
 
 The columns:
@@ -85,34 +85,11 @@ On 4 CPU threads, Flash took 1.3 to 1.6 times as long per case as nano (2380 and
 
 ## D3 v3.1 on llama.cpp
 
-The D3 model in `dev/compose.yaml` already uses the v3.1.0 weights. The pinned Q8 file comes from conversion `50dea20`, whose source history includes the upstream v3.1.0 release. Its SHA-256 matched the local model file. [Pinned conversion](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/50dea2057df10c4b393559a155ab3bf0bc7532c6), [Source history](https://huggingface.co/vllm-sr/d3-nano/commits/462efc366229ea268cf4eed3738b3fc4415e4817)
-
-We also ran the newer Q8 conversion, `f2256df`, on the same pinned llama.cpp image. llama.cpp loaded both files, and 8-ball scored the same 600 test cases through the native `/v1/systemone` backend with zero errors. Every verdict and reported probability matched. Mean time was 80 ms with the pin and 79 ms with the newer file on the same machine. One run per file is too little to claim a speed gain, so we kept the current pin. [Newer conversion](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/f2256dfaff5b8337e8bf67ca064aeef18ee14a79)
+The pinned D3 file, [conversion `50dea20`](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/50dea2057df10c4b393559a155ab3bf0bc7532c6), already has the [v3.1.0 weights](https://huggingface.co/vllm-sr/d3-nano/commits/462efc366229ea268cf4eed3738b3fc4415e4817), and the newer [conversion `f2256df`](https://huggingface.co/ggml-org/vllm-d3-nano-GGUF/commit/f2256dfaff5b8337e8bf67ca064aeef18ee14a79) gave the same verdicts and probabilities on 600 test cases, so we kept the pin.
 
 ## Service fallback trial
 
-Keep D3 alone for spam, sentiment, and lost-card. D3 got 533 of 600 cases right (88.8%), and sentiment accounted for all ten wrong answers and 38 of the 57 `unsure` answers. The test used 100 cases per answer per task. Both arms ran through `8ball evaluate` with fresh storage and learning off. In the fallback arm, 8-ball sent only the 57 `unsure` cases to Qwen3.8 27B at up to 30 calls per minute.
-
-| Method | Right out of 600 | Wrong | Unsure | Failed fallback calls | End-to-end p95 on its runner |
-| --- | --- | --- | --- | --- | --- |
-| D3 control, local | 533 (88.8%) | 10 | 57 | — | 107 ms |
-| D3, then local 27B | 577 (96.2%) | 14 | 9 | 0/57 | 1.71 s |
-| D3 control, GitHub Actions CPU | 533 (88.8%) | 10 | 57 | — | 3.07 s |
-| D3, then hosted 27B | 574 (95.7%) | 14 | 12 | 6/57 | 3.28 s |
-
-Use each fallback row with its own control for timing comparisons. The local run and the hosted run used different machines.
-
-| Hosted task | Fallback calls | Timeouts | Extra right | Extra wrong | Gain in correct answers, 95% interval |
-| --- | --- | --- | --- | --- | --- |
-| Spam | 4 | 0 | 3 | 1 | +1.5 pp [0.0, 3.5] |
-| Sentiment | 38 | 5 | 26 | 2 | +13.0 pp [8.5, 18.0] |
-| Lost-card | 15 | 1 | 12 | 1 | +6.0 pp [3.0, 9.5] |
-
-Hosted fallback gained 6.8 percentage points in correct answers (95% interval 5.0 to 8.8). Spam's gain interval includes zero. Sentiment and lost-card both exceeded the 1% error limit on actual fallback calls. The service kept D3's `unsure` answer on all six timeouts. The small change in overall p95 hides the cost for cases that reach the hosted model. Their p95 was 22.42 s, and p95 across all sentiment cases rose from 2.75 s to 13.35 s. [Paired hosted run](https://github.com/Tanguille/8-ball/actions/runs/44940853914)
-
-At a 30-second timeout, five of the same 57 cases timed out (8.8%), with the same right and wrong totals. The shorter run used another runner and different request spacing, so its timing cannot isolate the effect of the longer timeout. Its error rate still exceeded 1%. [Timeout follow-up](https://github.com/Tanguille/8-ball/actions/runs/44950702256)
-
-Local Qwen 27B gained 7.3 percentage points (95% interval 5.5 to 9.3) with zero failures or budget skips. Sentiment and lost-card each gained two wrong answers. An agreed limit on extra wrong answers is needed before recommending local fallback for either spec. The uncalibrated reranker abstained on all 600 cases, so it remains a relevance scorer for this use.
+Keep D3 alone for spam, sentiment, and lost-card: sending its `unsure` cases to Qwen3.8 27B gained about 7 points of correct answers, but sentiment and lost-card went over the 1% error limit on hosted calls and got more wrong answers ([paired hosted run](https://github.com/Tanguille/8-ball/actions/runs/44940853914), [timeout follow-up](https://github.com/Tanguille/8-ball/actions/runs/44950702256)).
 
 ## Latest results
 

@@ -18,6 +18,13 @@ async fn opened() -> (tempfile::TempDir, std::path::PathBuf, Store) {
 
     (directory, path, store)
 }
+/// Makes every stored decision a day old, so `prune(0)` sees it.
+async fn age_all(path: &std::path::Path) {
+    sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
+        .execute(&mut fixture(path).await)
+        .await
+        .unwrap();
+}
 async fn insert(store: &Store, decision: NewDecision) -> i64 {
     store.insert_many(vec![decision]).await.unwrap()[0]
 }
@@ -52,7 +59,6 @@ const fn report() -> Report {
         precision: 1.0,
         coverage: 1.0,
         target: 0.95,
-        in_sample: true,
         warnings: vec![],
     }
 }
@@ -124,10 +130,7 @@ async fn pruning_preserves_labelled_rows() {
     insert(&store, decision("first")).await;
     let labelled = insert(&store, decision("second")).await;
     store.set_label(labelled, "yes").await.unwrap();
-    sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
-        .execute(&mut fixture(&path).await)
-        .await
-        .unwrap();
+    age_all(&path).await;
     assert_eq!(store.prune(0).await.unwrap(), 2);
     assert!(cached(&store, "first", Some("greeting")).await.is_none());
     assert!(cached(&store, "second", Some("greeting")).await.is_some());
@@ -151,10 +154,7 @@ async fn pruning_keeps_other_rows_of_a_labelled_state() {
     )
     .await;
     store.set_label(escalated, "yes").await.unwrap();
-    sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
-        .execute(&mut fixture(&path).await)
-        .await
-        .unwrap();
+    age_all(&path).await;
     assert_eq!(store.prune(0).await.unwrap(), 0);
     assert_eq!(
         store
@@ -229,10 +229,7 @@ async fn batch_insert_returns_each_row_id() {
 async fn pruned_ids_never_label_replacement_rows() {
     let (_directory, path, store) = opened().await;
     let old = insert(&store, decision("old")).await;
-    sqlx::query("UPDATE decisions SET ts=datetime('now','-1 day')")
-        .execute(&mut fixture(&path).await)
-        .await
-        .unwrap();
+    age_all(&path).await;
     assert_eq!(store.prune(0).await.unwrap(), 1);
     drop(store);
     let reopened = Store::open(&path).await.unwrap();

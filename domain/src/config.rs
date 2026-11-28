@@ -79,6 +79,7 @@ pub struct EndpointConfig {
     pub timeout_secs: Option<std::num::NonZeroU64>,
 }
 
+/// Do not rename a variant, even by case: `verdict::calibration_id` hashes its Debug name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
@@ -97,7 +98,8 @@ pub struct EmbedderConfig {
     pub api_key_env: Option<String>,
 }
 
-// No deny_unknown_fields here: it doesn't work together with #[serde(flatten)].
+// No deny_unknown_fields here: it doesn't work together with #[serde(flatten)]. `unknown` catches
+// what the other fields do not, and `validate` rejects it.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SpecConfig {
     pub instructions: String,
@@ -106,6 +108,20 @@ pub struct SpecConfig {
     pub endpoint: Option<String>,
     /// False keeps this spec's `unsure` answers; default true when `[escalation]` exists.
     pub escalate: Option<bool>,
+    /// Also holds `type` and `criteria`, which `kind` reads as well.
+    #[serde(flatten)]
+    unknown: IndexMap<String, serde::de::IgnoredAny>,
+}
+
+impl SpecConfig {
+    #[must_use]
+    pub fn question(&self, name: &str) -> crate::question::Question {
+        crate::question::Question {
+            id: name.into(),
+            instructions: self.instructions.clone(),
+            kind: self.kind.clone(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -166,6 +182,12 @@ impl Config {
             if endpoint.kind == Some(BackendKind::Logprob) && endpoint.model.is_none() {
                 return Err(format!("endpoint {name}: logprob needs model"));
             }
+            // Fewer keeps no characters from either end of a long state.
+            if endpoint.max_state_chars.is_some_and(|maximum| maximum < 2) {
+                return Err(format!(
+                    "endpoint {name}: max_state_chars must be at least 2"
+                ));
+            }
         }
         if let Some(escalation) = &self.escalation {
             let endpoint = &escalation.endpoint;
@@ -188,18 +210,21 @@ impl Config {
             {
                 return Err(format!("invalid spec name {name}"));
             }
+            if let Some(key) = spec
+                .unknown
+                .keys()
+                .find(|key| !["type", "criteria"].contains(&key.as_str()))
+            {
+                return Err(format!("spec {name}: unknown field {key}"));
+            }
             if let Some(endpoint) = &spec.endpoint
                 && !self.endpoints.contains_key(endpoint)
             {
                 return Err(format!("spec {name}: unknown endpoint {endpoint}"));
             }
-            crate::question::Question {
-                id: name.clone(),
-                instructions: spec.instructions.clone(),
-                kind: spec.kind.clone(),
-            }
-            .validate()
-            .map_err(|e| format!("spec {name}: {e}"))?;
+            spec.question(name)
+                .validate()
+                .map_err(|e| format!("spec {name}: {e}"))?;
         }
 
         Ok(())
@@ -217,9 +242,13 @@ pub fn default_config_path() -> PathBuf {
     xdg_path("XDG_CONFIG_HOME", ".config", "8ball/config.toml")
 }
 
-/// `$variable/relative`, else `$HOME/fallback/relative` when the XDG variable is unset or empty.
 #[must_use]
-pub fn xdg_path(variable: &str, fallback: &str, relative: &str) -> PathBuf {
+pub fn default_db_path() -> PathBuf {
+    xdg_path("XDG_STATE_HOME", ".local/state", "8ball/8ball.db")
+}
+
+/// `$variable/relative`, else `$HOME/fallback/relative` when the XDG variable is unset or empty.
+fn xdg_path(variable: &str, fallback: &str, relative: &str) -> PathBuf {
     env::var_os(variable)
         .filter(|value| !value.is_empty())
         .map_or_else(

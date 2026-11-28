@@ -446,7 +446,7 @@ async fn rejected_decisions_are_distinct_from_unjudged_prefiltered_items() {
 async fn cli_supports_named_spec_and_context_file() {
     let (url, model, _embedding, directory) = app(None).await;
     let context_path = directory.path().join("context.txt");
-    std::fs::write(&context_path, "uses kopiur").unwrap();
+    std::fs::write(&context_path, "uses kopiur\n").unwrap();
     cli_triage(
         &[
             "--spec",

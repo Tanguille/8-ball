@@ -57,7 +57,7 @@ With the development models on a GPU, `8ball ask` took about 80 ms, or under 10 
 
 ## Quickstart
 
-Install `8ball` and start the development models from the repository root. The first run downloads about 4.5 GB. To use a CPU, run `EIGHTBALL_DEV_NGL=0 dev/models.sh up`.
+Install `8ball` and start the development models from the repository root. The first run downloads about 4.3 GB. To use a CPU, run `EIGHTBALL_DEV_NGL=0 dev/models.sh up`.
 
 ```sh
 cargo install --path cli

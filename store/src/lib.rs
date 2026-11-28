@@ -1,6 +1,6 @@
 use std::{fs, os::unix::fs::OpenOptionsExt};
 
-use sqlx::SqlSafeStr;
+use sqlx::types::Json;
 
 use domain::{
     Probs,
@@ -24,6 +24,7 @@ pub struct NewDecision {
     pub verdict: String,
     pub endpoint: String,
 }
+#[derive(sqlx::FromRow)]
 pub struct Labelled {
     pub id: i64,
     pub state: String,
@@ -31,6 +32,7 @@ pub struct Labelled {
     pub label: String,
 }
 /// Stored decisions grouped by spec and question version.
+#[derive(sqlx::FromRow)]
 pub struct QuestionRow {
     pub spec: Option<String>,
     pub question_hash: String,
@@ -40,10 +42,12 @@ pub struct QuestionRow {
     pub labelled: u64,
     pub last_at: String,
 }
+#[derive(sqlx::FromRow)]
 pub struct DecisionRow {
     pub id: i64,
     pub at: String,
     pub verdict: String,
+    #[sqlx(json)]
     pub answer: Probs,
     pub state: String,
     pub label: Option<String>,
@@ -60,12 +64,6 @@ impl From<sqlx::Error> for StoreError {
 }
 impl From<std::io::Error> for StoreError {
     fn from(e: std::io::Error) -> Self {
-        Self(e.to_string())
-    }
-}
-
-impl From<serde_json::Error> for StoreError {
-    fn from(e: serde_json::Error) -> Self {
         Self(e.to_string())
     }
 }
@@ -92,22 +90,7 @@ impl Store {
             .await?;
         // Lock so concurrent first opens cannot both run the migrator.
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
-        let migration = |version, description: &'static str, sql: &'static str| {
-            sqlx::migrate::Migration::new(
-                version,
-                description.into(),
-                sqlx::migrate::MigrationType::Simple,
-                sql.into_sql_str(),
-                false,
-            )
-        };
-        let migrator = sqlx::migrate::Migrator::with_migrations(vec![
-            migration(1, "storage", SCHEMA),
-            migration(2, "questions", QUESTIONS),
-            migration(3, "question index", QUESTION_INDEX),
-            migration(4, "state index", STATE_INDEX),
-        ]);
-        migrator
+        sqlx::migrate!()
             .run(&mut *transaction)
             .await
             .map_err(|e| StoreError(e.to_string()))?;
@@ -125,7 +108,6 @@ impl Store {
                 .bind(decision.question)
                 .execute(&mut *transaction)
                 .await?;
-            let answer = serde_json::to_string(&decision.answer)?;
             let result = sqlx::query(
                 "INSERT INTO decisions (spec,question_hash,calibration_id,state_hash,state,answer,verdict,endpoint) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
             )
@@ -134,7 +116,7 @@ impl Store {
             .bind(decision.calibration_id)
             .bind(decision.state_hash)
             .bind(decision.state)
-            .bind(answer)
+            .bind(Json(decision.answer))
             .bind(decision.verdict)
             .bind(decision.endpoint)
             .execute(&mut *transaction)
@@ -152,7 +134,7 @@ impl Store {
         state_hash: &str,
         spec: Option<&str>,
     ) -> Result<Option<(i64, Probs)>, StoreError> {
-        let row: Option<(i64, String)> = sqlx::query_as(
+        let row: Option<(i64, Json<Probs>)> = sqlx::query_as(
             "SELECT id,answer FROM decisions WHERE calibration_id=?1 AND state_hash=?2 AND spec IS ?3 ORDER BY id DESC LIMIT 1",
         )
         .bind(calibration_id)
@@ -161,8 +143,7 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(|(id, answer)| Ok((id, serde_json::from_str(&answer)?)))
-            .transpose()
+        Ok(row.map(|(id, Json(answer))| (id, answer)))
     }
 
     /// Returns `(spec, question_hash, state_hash)`.
@@ -211,23 +192,13 @@ impl Store {
         spec: Option<&str>,
         question_hash: &str,
     ) -> Result<Vec<Labelled>, StoreError> {
-        let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
+        Ok(sqlx::query_as(
             "SELECT id,state,state_hash,label FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND label IS NOT NULL ORDER BY id",
         )
         .bind(spec)
         .bind(question_hash)
         .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows
-            .into_iter()
-            .map(|(id, state, state_hash, label)| Labelled {
-                id,
-                state,
-                state_hash,
-                label,
-            })
-            .collect())
+        .await?)
     }
 
     /// The newest labeled decision for this question and state, under any model: a label is the real answer.
@@ -237,7 +208,7 @@ impl Store {
         question_hash: &str,
         state_hash: &str,
     ) -> Result<Option<(i64, Probs, String)>, StoreError> {
-        let row: Option<(i64, String, String)> = sqlx::query_as(
+        let row: Option<(i64, Json<Probs>, String)> = sqlx::query_as(
             "SELECT id,answer,label FROM decisions WHERE spec IS ?1 AND question_hash=?2 AND state_hash=?3 AND label IS NOT NULL ORDER BY id DESC LIMIT 1",
         )
         .bind(spec)
@@ -246,8 +217,7 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(|(id, answer, label)| Ok((id, serde_json::from_str(&answer)?, label)))
-            .transpose()
+        Ok(row.map(|(id, Json(answer), label)| (id, answer, label)))
     }
 
     /// Labelled states of a question that have an answer cached under `calibration_id`: the examples a refit of
@@ -283,10 +253,11 @@ impl Store {
             "INSERT INTO calibrations (calibration_id,spec,bands,report) VALUES (?1,?2,?3,?4) ON CONFLICT(calibration_id) DO UPDATE SET bands=excluded.bands,report=excluded.report",
         )
         .bind(verdict::calibration_key(calibration_id, spec))
-        // The column is NOT NULL: an ad-hoc calibration stores an empty spec.
+        // The column is NOT NULL: an ad-hoc calibration stores an empty spec. Nothing reads it, and specs with the same
+        // question share one row, which names the first. Keep it: an older binary still inserts into it.
         .bind(spec.unwrap_or(""))
-        .bind(serde_json::to_string(bands)?)
-        .bind(serde_json::to_string(report)?)
+        .bind(Json(bands))
+        .bind(Json(report))
         .execute(&self.pool)
         .await?;
 
@@ -298,19 +269,13 @@ impl Store {
         calibration_id: &str,
         spec: Option<&str>,
     ) -> Result<Option<(Bands, Report)>, StoreError> {
-        let row: Option<(String, String)> =
+        let row: Option<(Json<Bands>, Json<Report>)> =
             sqlx::query_as("SELECT bands,report FROM calibrations WHERE calibration_id=?1")
                 .bind(verdict::calibration_key(calibration_id, spec))
                 .fetch_optional(&self.pool)
                 .await?;
 
-        row.map(|(bands, report)| {
-            Ok((
-                serde_json::from_str(&bands)?,
-                serde_json::from_str(&report)?,
-            ))
-        })
-        .transpose()
+        Ok(row.map(|(Json(bands), Json(report))| (bands, report)))
     }
 
     /// Deletes old unlabelled rows, but keeps every row of a labelled state: each endpoint that answered it refits
@@ -335,40 +300,15 @@ impl Store {
     }
 
     pub async fn questions(&self, limit: u32) -> Result<Vec<QuestionRow>, StoreError> {
-        type Row = (
-            Option<String>,
-            String,
-            Option<String>,
-            u64,
-            u64,
-            u64,
-            String,
-        );
-        let rows: Vec<Row> = sqlx::query_as(
-            "SELECT d.spec,d.question_hash,q.question,COUNT(*),SUM(d.verdict='unsure'),COUNT(d.label),MAX(d.ts) \
+        Ok(sqlx::query_as(
+            "SELECT d.spec,d.question_hash,q.question,COUNT(*) AS decisions,SUM(d.verdict='unsure') AS unsure,\
+             COUNT(d.label) AS labelled,MAX(d.ts) AS last_at \
              FROM decisions d LEFT JOIN questions q ON q.question_hash=d.question_hash \
              GROUP BY d.spec,d.question_hash ORDER BY COUNT(*) DESC,MAX(d.ts) DESC LIMIT ?1",
         )
         .bind(limit)
         .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows
-            .into_iter()
-            .map(
-                |(spec, question_hash, question, decisions, unsure, labelled, last_at)| {
-                    QuestionRow {
-                        spec,
-                        question_hash,
-                        question,
-                        decisions,
-                        unsure,
-                        labelled,
-                        last_at,
-                    }
-                },
-            )
-            .collect())
+        .await?)
     }
 
     pub async fn question(&self, question_hash: &str) -> Result<Option<String>, StoreError> {
@@ -389,9 +329,8 @@ impl Store {
         unlabelled: bool,
         limit: u32,
     ) -> Result<Vec<DecisionRow>, StoreError> {
-        type Row = (i64, String, String, String, String, Option<String>, String);
-        let rows: Vec<Row> = sqlx::query_as(
-            "SELECT id,ts,verdict,answer,state,label,endpoint FROM decisions d \
+        Ok(sqlx::query_as(
+            "SELECT id,ts AS at,verdict,answer,state,label,endpoint FROM decisions d \
              WHERE spec IS ?1 AND question_hash=?2 \
                AND (?3=0 OR ( \
                  id = (SELECT MAX(id) FROM decisions m \
@@ -406,25 +345,6 @@ impl Store {
         .bind(unlabelled)
         .bind(limit)
         .fetch_all(&self.pool)
-        .await?;
-
-        rows.into_iter()
-            .map(|(id, at, verdict, answer, state, label, endpoint)| {
-                Ok(DecisionRow {
-                    id,
-                    at,
-                    verdict,
-                    answer: serde_json::from_str(&answer)?,
-                    state,
-                    label,
-                    endpoint,
-                })
-            })
-            .collect()
+        .await?)
     }
 }
-
-const SCHEMA: &str = include_str!("../migrations/0001_storage.sql");
-const QUESTIONS: &str = include_str!("../migrations/0002_questions.sql");
-const QUESTION_INDEX: &str = include_str!("../migrations/0003_question_index.sql");
-const STATE_INDEX: &str = include_str!("../migrations/0004_state_index.sql");

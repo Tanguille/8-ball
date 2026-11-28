@@ -39,12 +39,17 @@ fn api_key(variable: Option<&str>) -> Option<String> {
     variable.and_then(|name| std::env::var(name).ok())
 }
 
-fn endpoint(name: &str, config: &domain::config::EndpointConfig) -> Endpoint {
+fn endpoint(name: &str) -> Endpoint {
+    let config = &dev_config().endpoints[name];
     Endpoint::new(name, config, api_key(config.api_key_env.as_deref()))
 }
 
-fn d3() -> Endpoint {
-    endpoint("d3", &dev_config().endpoints["d3"])
+/// Ten items where only the first three put storage or data at risk.
+fn storage_triage() -> serde_json::Value {
+    json!({"items":[
+        "The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.",
+        "A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."
+    ],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5})
 }
 
 fn questions() -> Vec<Question> {
@@ -59,7 +64,7 @@ fn questions() -> Vec<Question> {
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_noul_clear_cases() {
     require(9931).await;
-    let endpoint = d3();
+    let endpoint = endpoint("d3");
     let test_questions = questions();
     for (state, yes) in [
         ("hi there, how are you?", true),
@@ -84,7 +89,7 @@ async fn live_systemone_noul_clear_cases() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_choice() {
     require(9931).await;
-    let endpoint = d3();
+    let endpoint = endpoint("d3");
     let test_questions = questions();
     for (state, index) in [
         ("I was charged twice for my order", 0),
@@ -106,7 +111,7 @@ async fn live_systemone_choice() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_score() {
     require(9931).await;
-    let endpoint = d3();
+    let endpoint = endpoint("d3");
     let test_questions = questions();
     let high = endpoint
         .ask(
@@ -135,7 +140,7 @@ async fn live_systemone_score() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_systemone_three_questions_one_call() {
     require(9931).await;
-    let probabilities = d3()
+    let probabilities = endpoint("d3")
         .ask(
             "I was charged twice and I'm furious, fix it today",
             &questions(),
@@ -156,7 +161,7 @@ async fn live_systemone_long_state_fits() {
     let mut state = String::from("hi there, how are you?\n");
     state.push_str(&"log line\n".repeat(2500));
     state.truncate(20_000);
-    let endpoint = d3();
+    let endpoint = endpoint("d3");
     let info = endpoint.info().await.unwrap();
     let sent = endpoint.fitted(&info, &state);
     let probabilities = endpoint.ask(&sent, &questions()[..1]).await.unwrap();
@@ -200,7 +205,7 @@ async fn live_cli_ask() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_detect_d3() {
     require(9931).await;
-    let endpoint = d3();
+    let endpoint = endpoint("d3");
     let info = endpoint.info().await.unwrap();
     eprintln!("d3 info: {info:?}");
     assert_eq!(info.kind, domain::config::BackendKind::Systemone);
@@ -217,7 +222,7 @@ async fn live_detect_d3() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_detect_chat() {
     require(9934).await;
-    let endpoint = endpoint("chat", &dev_config().endpoints["chat"]);
+    let endpoint = endpoint("chat");
     let info = endpoint.info().await.unwrap();
     eprintln!("chat info: {info:?}");
     assert_eq!(info.kind, domain::config::BackendKind::Logprob);
@@ -227,7 +232,7 @@ async fn live_detect_chat() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_noul() {
     require(9934).await;
-    let endpoint = endpoint("chat", &dev_config().endpoints["chat"]);
+    let endpoint = endpoint("chat");
     let test_questions = questions();
     let mut greetings = Vec::new();
     let mut non_greetings = Vec::new();
@@ -268,7 +273,7 @@ async fn live_logprob_noul() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_choice() {
     require(9934).await;
-    let endpoint = endpoint("chat", &dev_config().endpoints["chat"]);
+    let endpoint = endpoint("chat");
     let test_questions = questions();
     let mut correct = 0;
     for (state, index) in [
@@ -293,7 +298,7 @@ async fn live_logprob_choice() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_logprob_mass() {
     require(9934).await;
-    let endpoint = endpoint("chat", &dev_config().endpoints["chat"]);
+    let endpoint = endpoint("chat");
     let result = endpoint
         .ask("hi there, how are you?", &questions()[..1])
         .await;
@@ -305,7 +310,7 @@ async fn live_logprob_mass() {
 #[ignore = "needs dev/models.sh up"]
 async fn live_rerank_relevance() {
     require(9933).await;
-    let endpoint = endpoint("rerank", &dev_config().endpoints["rerank"]);
+    let endpoint = endpoint("rerank");
     let question: Question =
         serde_json::from_value(json!({"id":"q","type":"noul","instructions":"disk full"})).unwrap();
     for (state, relevant) in [("the disk is 98% full", true), ("a recipe for soup", false)] {
@@ -359,10 +364,7 @@ async fn live_triage_with_prefilter() {
     require(9931).await;
     require(9932).await;
     let (service, _, _directory) = common::service(dev_config()).await;
-    let request: service::TriageRequest = serde_json::from_value(json!({"items":[
-        "The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.",
-        "A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."
-    ],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5})).unwrap();
+    let request: service::TriageRequest = serde_json::from_value(storage_triage()).unwrap();
     let result = service.triage(request).await.unwrap();
     eprintln!("prefilter triage: {result:?}");
     assert_eq!(common::indices(&result.kept), [0, 1, 2]);
@@ -515,7 +517,7 @@ fn fixture_rows(spec: &str) -> Vec<(String, String)> {
     rows
 }
 
-async fn fit_fixture(service: &Service, spec: &str) -> service::CalibrateResponse {
+async fn fit_fixture(service: &Service, spec: &str) {
     for (index, (state, label)) in fixture_rows(spec).into_iter().enumerate() {
         if index % 3 == 0 {
             continue;
@@ -546,8 +548,6 @@ async fn fit_fixture(service: &Service, spec: &str) -> service::CalibrateRespons
     } else {
         eprintln!("{spec}: fitted precision target achieved");
     }
-
-    result
 }
 
 #[tokio::test]
@@ -659,6 +659,9 @@ async fn live_mcp_stdio_ask() {
         .arg(dev_config_path())
         .arg("--db")
         .arg(directory.path().join("db.sqlite"))
+        // Config variables from the developer's shell would conflict with --config.
+        .env_remove("EIGHTBALL_CONFIG")
+        .env_remove("EIGHTBALL_CONFIG_TOML")
         .kill_on_drop(true);
     let client = ().serve(rmcp::transport::TokioChildProcess::new(command).unwrap()).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
@@ -695,7 +698,7 @@ async fn live_mcp_http_triage() {
         .auth_header("k"),
     );
     let client = ().serve(transport).await.unwrap();
-    let arguments = object!({"items":["The disk on /var is 98% full.","Ceph OSD down, PGs degraded.","Database backups failing; no recent recovery snapshot.","A recipe for tomato soup.","The football match ended in a draw.","Good morning everyone!","The concert starts at eight.","My parcel arrived today.","The library opens tomorrow.","Sunny weather for a picnic."],"question":{"id":"q","type":"noul","instructions":"Is storage or data at risk?"},"top_k":5});
+    let arguments = rmcp::model::object(storage_triage());
     let result = client
         .call_tool(CallToolRequestParams::new("decision_triage").with_arguments(arguments))
         .await

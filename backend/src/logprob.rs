@@ -1,3 +1,5 @@
+use serde_json::Value;
+
 use domain::question::{Kind, Question};
 
 use crate::BackendError;
@@ -14,7 +16,7 @@ pub async fn ask(
         let reasoning = endpoint.config.reasoning_tokens.unwrap_or(0);
         let mut body = serde_json::json!({
             // A few spare tokens after the thinking: the answer can follow whitespace tokens.
-            "max_tokens": if reasoning == 0 { 1 } else { reasoning + 4 },
+            "max_tokens": if reasoning == 0 { 1 } else { reasoning.saturating_add(4) },
             "temperature": 0,
             "logprobs": true,
             "top_logprobs": 20,
@@ -82,11 +84,7 @@ pub async fn ask(
 /// so: start after the last end-of-thinking marker if one is there, else after the reasoning tokens that `usage`
 /// counts, else at the first token. Whitespace-only tokens are skipped.
 /// A reply cut off at `max_tokens` with no marker never left the thinking, so it has no answer.
-fn answer_token<'a>(
-    generated: &'a [serde_json::Value],
-    usage: &serde_json::Value,
-    truncated: bool,
-) -> Option<&'a serde_json::Value> {
+fn answer_token<'a>(generated: &'a [Value], usage: &Value, truncated: bool) -> Option<&'a Value> {
     let marker = generated.iter().rposition(|entry| {
         entry["token"]
             .as_str()

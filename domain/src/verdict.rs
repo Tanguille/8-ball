@@ -34,23 +34,21 @@ impl Bands {
     }
 }
 
-#[must_use]
-pub fn confidence_choice(probabilities: &[f64]) -> f64 {
+fn confidence_choice(probabilities: &[f64]) -> f64 {
     if probabilities.len() < 2 {
         return 1.0;
     }
-    let count = f64::from(u32::try_from(probabilities.len()).expect("option count fits u32"));
+    let count = float(probabilities.len());
 
     ((probabilities[argmax(probabilities)] - 1.0 / count) / (1.0 - 1.0 / count)).max(0.0)
 }
 
-#[must_use]
-pub fn confidence_score(probabilities: &[f64]) -> f64 {
+fn confidence_score(probabilities: &[f64]) -> f64 {
     if probabilities.len() < 2 {
         return 1.0;
     }
-    let count = f64::from(u32::try_from(probabilities.len()).expect("level count fits u32"));
-    let mode = f64::from(u32::try_from(argmax(probabilities)).expect("level index fits u32"));
+    let count = float(probabilities.len());
+    let mode = float(argmax(probabilities));
     let distance: f64 = (0_u32..)
         .zip(probabilities)
         .map(|(index, probability)| probability * (f64::from(index) - mode).abs())
@@ -138,6 +136,8 @@ pub fn question_hash(question: &crate::question::Question) -> String {
 }
 
 /// Identity of question + exact model. The url is excluded so a hostname change keeps calibrations.
+///
+/// Do not rename a `BackendKind` variant: its Debug name is hashed here, so stored calibrations and cached answers would be lost.
 #[must_use]
 pub fn calibration_id(question_hash: &str, kind: BackendKind, fingerprint: &str) -> String {
     short_hash(&format!("{question_hash}\n{kind:?}\n{fingerprint}"))
@@ -174,8 +174,16 @@ pub struct Report {
     pub precision: f64,
     pub coverage: f64,
     pub target: f64,
-    pub in_sample: bool,
     pub warnings: Vec<String>,
+}
+
+/// A NaN fails too.
+pub fn check_target(target: f64) -> Result<(), String> {
+    if (0.5..=0.99).contains(&target) {
+        Ok(())
+    } else {
+        Err("precision must be between 0.5 and 0.99".into())
+    }
 }
 
 pub fn calibrate(
@@ -185,9 +193,7 @@ pub fn calibrate(
     target: f64,
     previous: Option<Bands>,
 ) -> Result<(Bands, Report), String> {
-    if !(0.5..=0.99).contains(&target) {
-        return Err("precision must be between 0.5 and 0.99".into());
-    }
+    check_target(target)?;
     let mut warnings = Vec::new();
     let labels = kind.labels();
     let bands = if matches!(kind, Kind::Noul { .. }) {
@@ -197,11 +203,11 @@ pub fn calibrate(
                 .map(|example| (example.probs[0], example.label == label))
                 .collect()
         };
-        let yes_at = threshold(&side("yes"), true, true, target).unwrap_or_else(|| {
+        let yes_at = threshold(&side("yes"), true, target).unwrap_or_else(|| {
             warnings.push("yes side: not enough evidence for the target".into());
             1.01
         });
-        let no_at = threshold(&side("no"), false, true, target).unwrap_or_else(|| {
+        let no_at = threshold(&side("no"), false, target).unwrap_or_else(|| {
             warnings.push("no side: not enough evidence for the target".into());
             -0.01
         });
@@ -217,7 +223,7 @@ pub fn calibrate(
                 )
             })
             .collect();
-        let min_confidence = threshold(&data, true, false, target).unwrap_or_else(|| {
+        let min_confidence = threshold(&data, true, target).unwrap_or_else(|| {
             warnings.push("not enough evidence for the target".into());
             1.01
         });
@@ -248,7 +254,6 @@ pub fn calibrate(
         precision: ratio(correct, decided),
         coverage: ratio(decided, examples.len()),
         target,
-        in_sample: true,
         warnings,
     };
 
@@ -309,15 +314,11 @@ fn merge(fitted: Bands, previous: Bands, default: Bands) -> Bands {
     }
 }
 
-fn threshold(
-    data: &[(f64, bool)],
-    above: bool,
-    correct_candidates_only: bool,
-    target: f64,
-) -> Option<f64> {
+/// Only correct values are candidates: a cutoff at a wrong value adds a wrong answer and no correct one.
+fn threshold(data: &[(f64, bool)], above: bool, target: f64) -> Option<f64> {
     let mut candidates: Vec<_> = data
         .iter()
-        .filter(|(_, correct)| !correct_candidates_only || *correct)
+        .filter(|(_, correct)| *correct)
         .map(|(value, _)| *value)
         .collect();
     candidates.sort_by(f64::total_cmp);
@@ -325,7 +326,8 @@ fn threshold(
         candidates.reverse();
     }
     candidates.dedup();
-    let min_side = (1.0 / (1.0 - target)).ceil();
+    // 1 - 0.9 is not exact in f64, so 1 / (1 - 0.9) is just above 10 and would round up to 11.
+    let min_side = (1.0 / (1.0 - target) - 1e-9).ceil();
 
     candidates.into_iter().find(|threshold| {
         let (selected, correct) = data
@@ -340,9 +342,7 @@ fn threshold(
             .fold((0, 0), |(selected, correct), (_, is_correct)| {
                 (selected + 1, correct + usize::from(*is_correct))
             });
-        let count = f64::from(u32::try_from(selected).expect("example count fits u32"));
-
-        count >= min_side && ratio(correct, selected) >= target
+        float(selected) >= min_side && ratio(correct, selected) >= target
     })
 }
 
@@ -351,6 +351,9 @@ fn ratio(numerator: usize, denominator: usize) -> f64 {
         return 0.0;
     }
 
-    f64::from(u32::try_from(numerator).expect("example count fits u32"))
-        / f64::from(u32::try_from(denominator).expect("example count fits u32"))
+    float(numerator) / float(denominator)
+}
+
+fn float(count: usize) -> f64 {
+    f64::from(u32::try_from(count).expect("count fits u32"))
 }
