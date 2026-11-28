@@ -84,8 +84,10 @@ jobs:
       - name: Hosted endpoints
         id: endpoints
         run: |
+          # A green skip is easy to miss, so the job summary says why too.
           skip() {
             echo "::warning::$1; skipping the hosted benchmark."
+            echo "**Hosted benchmark skipped:** $1." >> "$GITHUB_STEP_SUMMARY"
             echo "SKIP=true" >> "$GITHUB_ENV"
             echo "skipped=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -95,12 +97,20 @@ jobs:
             echo "PER_SIDE=50" >> "$GITHUB_ENV"
             echo "BASELINE_PREFIX=hosted-matrix" >> "$GITHUB_ENV"
           else
-            dev/hosted.sh 30 qwen-3.8-27b > hosted.toml || skip "The provider's model list failed"
+            model=qwen-3.8-27b
+            dev/hosted.sh 30 "$model" > hosted.toml || skip "The provider's model list failed"
             echo "PER_SIDE=100" >> "$GITHUB_ENV"
             # Start with a fresh baseline because older runs could save one despite excessive errors.
             echo "BASELINE_PREFIX=hosted-27b-reliable" >> "$GITHUB_ENV"
           fi
           endpoints=$(sed -n 's/^\[endpoints\.\(.*\)\]$/\1/p' hosted.toml | paste -sd,)
+          if [ -z "$endpoints" ] && [ -n "${model:-}" ]; then
+            # Show the fields that dev/hosted.sh filters on: [] means the provider no longer lists the model.
+            entry=$(curl -fsS --retry 3 -H "Authorization: Bearer $HOSTED_API_KEY" "$HOSTED_URL/v1/models" |
+              jq -c --arg id "$model" '[.data[] | select(.id == $id)
+                | {premium_unlocked, endpoints, reasoning: .chat_capabilities.reasoning}]') || entry=unknown
+            skip "The provider lists no usable $model (listing: $entry)"
+          fi
           [ -n "$endpoints" ] || skip "The provider lists no usable model"
           echo "ENDPOINTS=d3,$endpoints" >> "$GITHUB_ENV"
           echo "Hosted endpoints: $endpoints"
@@ -130,13 +140,14 @@ jobs:
           # then skip. Any other failure (error limit, regression) is real and keeps failing the run.
           for attempt in 1 2 3; do
             status=0
-            cargo run --release -p bench -- "${args[@]}" 2> bench.err | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+            target/release/bench "${args[@]}" 2> bench.err | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
             cat bench.err >&2
             if [ "$status" = 0 ] || [ "$MODE" = matrix ] || ! grep -q 'failed its doctor probe' bench.err; then break; fi
             [ "$attempt" = 3 ] || sleep 120
           done
           if [ "$status" != 0 ] && [ "$MODE" != matrix ] && grep -q 'failed its doctor probe' bench.err; then
             echo "::warning::The provider failed its doctor probe three times; skipping the hosted benchmark."
+            echo "**Hosted benchmark skipped:** the provider failed its doctor probe three times." >> "$GITHUB_STEP_SUMMARY"
             echo "SKIP=true" >> "$GITHUB_ENV"
             echo "skipped=true" >> "$GITHUB_OUTPUT"
             exit 0
