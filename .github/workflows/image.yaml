@@ -42,8 +42,8 @@ jobs:
         with:
           fetch-tags: true
           persist-credentials: false
-      # Every release bumps the patch version. A v* tag on HEAD without a release (a hand-made minor or major bump,
-      # or a release that failed halfway) is released as is. Overlapping main runs queue in the concurrency group.
+      # Every release bumps the patch version. A v* tag on HEAD that is not fully published (a hand-made minor or major
+      # bump, or a run that failed after the tag) is published as is. Overlapping main runs queue in the concurrency group.
       - name: Version
         id: version
         if: github.ref == 'refs/heads/main'
@@ -68,7 +68,8 @@ jobs:
             do :; done
             [ "$code" = 404 ] || { echo "registry check for $major.$minor.$patch returned $code" >&2; exit 1; }
             next="v$major.$minor.$patch"
-          elif gh release view "$next" > /dev/null 2>&1; then
+          elif gh release view "$next" > /dev/null 2>&1 && docker manifest inspect "ghcr.io/tanguille/8-ball:$next" > /dev/null 2>&1; then
+            # The image tag is pushed last, so it proves the whole release finished.
             echo "$next is already released"
             exit 0
           fi
@@ -100,6 +101,20 @@ jobs:
         run: |
           docker push "$IMAGE"
           docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
+      # The tag comes first: if GitHub refuses it (the 403 seen on 2026-11-18, -21, -25 and -26), nothing is published
+      # under a version that has no tag. The untagged sha image above is already pushed by then. A re-run on a tagged
+      # HEAD reuses the release.
+      - name: Release
+        if: steps.version.outputs.version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$VERSION" > /dev/null 2>&1 || gh release create "$VERSION" --target "$GITHUB_SHA" --generate-notes
+      - name: Publish chart
+        if: steps.version.outputs.version
+        # helm push reuses the docker/login-action credentials.
+        run: helm push "$RUNNER_TEMP"/chart/eightball-*.tgz oci://ghcr.io/tanguille/charts
+      # Last, because the Version step treats the version image tag as proof that the release is complete.
       - name: Publish latest and version
         if: github.ref == 'refs/heads/main'
         env:
@@ -109,12 +124,3 @@ jobs:
             docker tag "$IMAGE" "ghcr.io/tanguille/8-ball:$tag"
             docker push "ghcr.io/tanguille/8-ball:$tag"
           done
-      - name: Release
-        if: steps.version.outputs.version
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # helm push reuses the docker/login-action credentials.
-          helm push "$RUNNER_TEMP"/chart/eightball-*.tgz oci://ghcr.io/tanguille/charts
-          gh release create "$VERSION" --target "$GITHUB_SHA" --generate-notes
