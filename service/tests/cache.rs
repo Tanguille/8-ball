@@ -58,6 +58,13 @@ async fn rejects_unknown_spec_and_mixed_question_sources() {
     let neither: TriageRequest = serde_json::from_value(json!({"items":["hi"]})).unwrap();
     let neither = service.triage(neither).await.unwrap_err().to_string();
     assert!(neither.contains("use spec (a configured name) or ad-hoc questions"));
+    let both: TriageRequest = serde_json::from_value(json!({"items":["hi"],"spec":"greeting","question":{"id":"q","type":"noul","instructions":"Greeting?"}})).unwrap();
+    let both = service.triage(both).await.unwrap_err().to_string();
+    assert!(both.contains("use spec or ad-hoc questions, not both"));
+    let unknown: TriageRequest =
+        serde_json::from_value(json!({"items":["hi"],"spec":"unknown"})).unwrap();
+    let unknown = service.triage(unknown).await.unwrap_err().to_string();
+    assert!(unknown.contains("unknown spec unknown; configured specs: greeting, greeting-copy"));
 }
 #[tokio::test]
 async fn spec_uses_bands_but_ad_hoc_uses_defaults() {

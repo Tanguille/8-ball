@@ -91,7 +91,8 @@ jobs:
           docker push "$IMAGE"
           docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
       # The tag comes first: if GitHub refuses it (the 403 seen on 2026-11-18, -21, -25 and -26), nothing is published
-      # under a version that has no tag. A re-run on a tagged HEAD reuses the release.
+      # under a version that has no tag. The untagged sha image above is already pushed by then. A re-run on a tagged
+      # HEAD reuses the release.
       - name: Release
         if: steps.version.outputs.version
         env:
