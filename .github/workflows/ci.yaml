@@ -55,8 +55,9 @@ jobs:
             echo "docs_or_lint_only=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # The pinned dev models on the runner's CPU (dev/models.sh falls back to CPU without a real GPU).
-  models:
+  # The live tests and the benchmark use the pinned dev models on the runner's CPU (dev/models.sh falls back to CPU
+  # without a real GPU). They run as two jobs on two runners, so CI waits for the slower one instead of both.
+  live:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_or_lint_only != 'true' }}
     runs-on: ubuntu-26.04
@@ -85,14 +86,39 @@ jobs:
       - run: cargo nextest run --test live --run-ignored only -j 1 --no-fail-fast
         env:
           EIGHTBALL_TEST_TRIAGE_DEADLINE_SECS: "240"
+
+  bench:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_or_lint_only != 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The same models cache as the live job.
+      - id: models
+        run: echo "key=$(grep -o 'https://huggingface[^"]*' dev/compose.yaml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/8ball-models
+          key: models-${{ steps.models.outputs.key }}
+          restore-keys: models-
+      - run: dev/models.sh up
       - run: cargo build --release -p cli -p bench
       # Fails when a task gets worse than bench/baseline.json by more than 1% of its cases. A PR that changes
       # verdicts on purpose updates the baseline from this job's summary.json artifact. Qwen3.5 0.8B only reports:
       # it flipped 20 of 600 verdicts between CPU and GPU, so its counts move between runner CPUs.
+      # Pull requests run only d3: the reranker never decides before calibration and Qwen3.5 0.8B only reports, and
+      # the two took about a third of the step. Main pushes and manual runs add them. target/release/bench skips
+      # the rebuild that `cargo run -p bench` makes with its own feature set.
       - name: Benchmark
+        env:
+          ENDPOINTS: ${{ github.event_name == 'pull_request' && 'd3' || 'd3,rerank,chat' }}
         run: |
           set -o pipefail
-          cargo run --release -p bench -- --endpoints d3,rerank,chat --reference d3 --per-side 100 --report-only chat \
+          target/release/bench --endpoints "$ENDPOINTS" --reference d3 --per-side 100 --report-only chat \
             --baseline bench/baseline.json | tee -a "$GITHUB_STEP_SUMMARY"
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -105,8 +131,10 @@ jobs:
   # Saves the tables of a main push on the bench-results branch (see docs/benchmark.md). The job has no secret and
   # never runs for a pull request.
   publish:
-    needs: models
-    if: ${{ !cancelled() && needs.models.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: bench
+    # changes is skipped on pushes, and without a status function a skipped job skips every job that needs it, even
+    # through bench. !cancelled() turns that off, so the result of bench decides.
+    if: ${{ !cancelled() && needs.bench.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-26.04
     permissions:
       actions: read

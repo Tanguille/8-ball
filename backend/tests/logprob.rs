@@ -150,10 +150,17 @@ fn entry(token: &str, probability: f64) -> Value {
     json!({"token":token,"logprob":0.0,"top_logprobs":[{"token":token,"logprob":probability.ln()},{"token":"no","logprob":(1.0 - probability).ln()}]})
 }
 async fn reasoning_endpoint(content: Vec<Value>, finish_reason: &str) -> (Endpoint, MockServer) {
+    reasoning_endpoint_with_usage(content, finish_reason, Value::Null).await
+}
+async fn reasoning_endpoint_with_usage(
+    content: Vec<Value>,
+    finish_reason: &str,
+    usage: Value,
+) -> (Endpoint, MockServer) {
     let mock = MockServer::start().await;
     Mock::given(matchers::method("POST"))
         .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"choices":[{"finish_reason":finish_reason,"logprobs":{"content":content}}]}),
+            json!({"choices":[{"finish_reason":finish_reason,"logprobs":{"content":content}}],"usage":usage}),
         ))
         .mount(&mock)
         .await;
@@ -189,6 +196,27 @@ async fn answer_after_the_end_of_thinking_marker_is_scored() {
     assert!((probabilities[0][0] - 0.8).abs() < 1e-9);
 }
 #[tokio::test]
+async fn reasoning_count_marks_the_end_of_thinking_without_a_marker() {
+    // Radiance: empty marker tokens, the thinking in content, and usage counting it.
+    let usage = |completion: usize| json!({"completion_tokens":completion,"completion_tokens_details":{"reasoning_tokens":3}});
+    let content = || {
+        vec![
+            entry("", 1.0),
+            entry("yes", 0.1),
+            entry("", 1.0),
+            entry("yes", 0.8),
+        ]
+    };
+    let (endpoint, _mock) = reasoning_endpoint_with_usage(content(), "stop", usage(4)).await;
+    let probabilities = endpoint.ask("hi", &[question("noul")]).await.unwrap();
+    assert!((probabilities[0][0] - 0.8).abs() < 1e-9);
+    // A count that does not match the content (the server leaves the thinking out of it) is ignored.
+    let (endpoint, _mock) =
+        reasoning_endpoint_with_usage(vec![entry("yes", 0.8)], "stop", usage(4)).await;
+    let probabilities = endpoint.ask("hi", &[question("noul")]).await.unwrap();
+    assert!((probabilities[0][0] - 0.8).abs() < 1e-9);
+}
+#[tokio::test]
 async fn content_only_logprobs_skip_whitespace_without_a_marker() {
     let (endpoint, _mock) =
         reasoning_endpoint(vec![entry("\n", 1.0), entry("yes", 0.8)], "stop").await;
@@ -207,7 +235,9 @@ async fn exhausted_reasoning_budget_errors() {
         // A thought cut off at the budget with a label-shaped token: no marker, so it must not be scored.
         vec![entry(" No", 0.9), entry(",", 0.5)],
     ] {
-        let (endpoint, _mock) = reasoning_endpoint(content, "length").await;
+        // Radiance counts all but the last token of a cut-off thought as reasoning; that must not count as an end.
+        let usage = json!({"completion_tokens":content.len(),"completion_tokens_details":{"reasoning_tokens":content.len().saturating_sub(1)}});
+        let (endpoint, _mock) = reasoning_endpoint_with_usage(content, "length", usage).await;
         let error = endpoint
             .ask("hi", &[question("noul")])
             .await
