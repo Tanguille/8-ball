@@ -56,7 +56,18 @@ jobs:
             next=v0.1.0
           elif [ -z "$next" ]; then
             IFS=. read -r major minor patch <<< "${last#v}"
-            next="v$major.$minor.$((patch + 1))"
+            # A release that failed after its pushes left the chart without a tag; reusing that version overwrote it
+            # in place, so Renovate never saw the fix (0.1.29). Skip every version the registry already holds.
+            token=$(curl -fsS "https://ghcr.io/token?scope=repository:tanguille/charts/eightball:pull" | jq -r .token)
+            while
+              patch=$((patch + 1))
+              code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
+                -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+                "https://ghcr.io/v2/tanguille/charts/eightball/manifests/$major.$minor.$patch")
+              [ "$code" = 200 ]
+            do :; done
+            [ "$code" = 404 ] || { echo "registry check for $major.$minor.$patch returned $code" >&2; exit 1; }
+            next="v$major.$minor.$patch"
           elif gh release view "$next" > /dev/null 2>&1 && docker manifest inspect "ghcr.io/tanguille/8-ball:$next" > /dev/null 2>&1; then
             # The image tag is pushed last, so it proves the whole release finished.
             echo "$next is already released"
